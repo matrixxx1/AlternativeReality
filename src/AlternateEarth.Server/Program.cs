@@ -46,6 +46,7 @@ builder.Services.AddSingleton<IWeatherProvider>(services =>
 builder.Services.AddSingleton<RealityWorld>();
 builder.Services.AddSingleton<RealitySocketHub>();
 builder.Services.AddHostedService<WeatherRefreshService>();
+builder.Services.AddHostedService<ActorSimulationService>();
 
 var app = builder.Build();
 var sourceClientDirectory = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "../AlternateEarth.Client2D"));

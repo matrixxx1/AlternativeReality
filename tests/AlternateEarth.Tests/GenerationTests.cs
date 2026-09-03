@@ -47,5 +47,26 @@ public sealed class GenerationTests
         Assert.Equal("building", door.Properties["buildingId"]);
         Assert.Equal("sidewalk", door.Properties["approach"]);
         Assert.Equal(EntityKind.Door, door.Kind);
+        Assert.Equal(5, door.Position.X);
+        Assert.Equal(0, door.Position.Y);
+    }
+
+
+    [Fact]
+    public void GeneratesRequestedWildlifeAndNpcPopulationDeterministically()
+    {
+        var first = DeterministicWorldGenerator.GenerateActors(Reality, Array.Empty<CanonicalEntity>());
+        var second = DeterministicWorldGenerator.GenerateActors(Reality, Array.Empty<CanonicalEntity>());
+
+        Assert.Equal(40, first.Count);
+        Assert.Equal(8, first.Count(actor => actor.Properties["subtype"] == "rabbit"));
+        Assert.Equal(3, first.Count(actor => actor.Properties["subtype"] == "dog"));
+        Assert.Equal(4, first.Count(actor => actor.Properties["subtype"] == "cat"));
+        Assert.Equal(10, first.Count(actor => actor.Properties["subtype"] == "bird"));
+        Assert.Equal(5, first.Count(actor => actor.Properties["subtype"] == "deer"));
+        Assert.Equal(1, first.Count(actor => actor.Properties["subtype"] == "cougar"));
+        Assert.Equal(1, first.Count(actor => actor.Properties["subtype"] == "bear"));
+        Assert.Equal(8, first.Count(actor => actor.Kind == EntityKind.Npc));
+        Assert.Equal(first.Select(actor => actor.Position), second.Select(actor => actor.Position));
     }
 }

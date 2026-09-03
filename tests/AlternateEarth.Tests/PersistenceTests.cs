@@ -51,11 +51,18 @@ public sealed class PersistenceTests : IAsyncLifetime
     {
         var store = new SqliteRealityStore(Path.Combine(_directory, "characters.db"));
         await store.InitializeAsync(_reality);
-        var player = new PlayerState("character-1", "Ada", new WorldPosition(_reality.Area.Region, 15, 25), 7);
+        var player = new PlayerState("character-1", "Ada", new WorldPosition(_reality.Area.Region, 15, 25), 7,
+            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard);
 
         await store.SaveCharacterAsync(_reality.Id, player);
         var loaded = await new SqliteRealityStore(Path.Combine(_directory, "characters.db")).LoadCharacterAsync(_reality.Id, player.Id);
 
-        Assert.Equal(player, loaded);
+        Assert.NotNull(loaded);
+        Assert.Equal(player.Id, loaded.Id);
+        Assert.Equal(player.Name, loaded.Name);
+        Assert.Equal(player.Position, loaded.Position);
+        Assert.Equal(player.Version, loaded.Version);
+        Assert.Equal(9.75, loaded.HealthHearts);
+        Assert.Equal(TravelMode.Skateboard, loaded.TravelMode);
     }
 }

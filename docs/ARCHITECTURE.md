@@ -82,7 +82,7 @@ The server bounds movement by real meter-per-second rates for each canonical ter
 
 Character records are scoped by `RealityId`; cross-reality transfer is intentionally absent. Single-player is the same server executable bound locally with a private configuration. Changing visibility later does not require world conversion.
 
-The browser client uses a 3/4 oblique camera, visual ground tiles, and depth-sorted raised sprites/polygons. This is presentation only: tile boundaries do not constrain movement, collision, entities, or protocol coordinates.
+The browser client uses a 3/4 oblique camera, visual ground tiles, animated sprites, and depth-sorted raised geometry. It changes from full to medium to light rendering as the camera zooms out, and suppresses distant animation. This is presentation only: tile boundaries do not constrain movement, collision, entities, or protocol coordinates.
 
 ## Geographic abstraction
 
@@ -92,7 +92,7 @@ Provider data remains descriptive—road way, building polygon, water feature, e
 
 Road metadata produces separate canonical road and sidewalk traversal bands. Land use and natural polygons become grass, forest, sand, mud, or pavement. Every building receives a deterministic logical door facing the nearest available sidewalk, falling back to a road. Closed water polygons use a three-meter shallow shoreline band and a deep interior.
 
-`IWeatherProvider` keeps weather acquisition separate from simulation. The current Open-Meteo adapter samples the reality location, stores one canonical `WeatherState`, refreshes it every ten minutes, and broadcasts changes. Clients render rain, snow, cloud, or night effects without becoming authoritative for weather.
+`IWeatherProvider` keeps weather acquisition separate from simulation. The current Open-Meteo adapter samples the reality location, stores one canonical `WeatherState`, refreshes it hourly, and broadcasts changes. Sunrise, sunset, moon phase, and moon illumination drive client-side ambient presentation; clients render rain, snow, or darkness without becoming authoritative for weather.
 
 ## Deterministic generation and delta persistence
 
@@ -111,4 +111,4 @@ Generated resource IDs and positions are stable for the same inputs. Untouched b
 
 ## Near-term implementation order
 
-The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, authoritative collision/pathfinding, live weather, persistent characters, browser exploration, and two-client movement synchronization. Next: chunk-specific snapshots, animation polish, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.
+The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, authoritative collision/pathfinding, hourly weather, health and travel modes, wandering server actors, persistent characters, browser exploration, and two-client synchronization. Next: chunk-specific snapshots, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.

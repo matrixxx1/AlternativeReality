@@ -3,46 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Alternate Earth — 2D Client</title>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <title>AlternativeReality</title>
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
-  <canvas id="world" aria-label="Alternate Earth game world"></canvas>
+  <canvas id="world" aria-label="AlternativeReality game world"></canvas>
   <header class="panel title-panel">
-    <div class="eyebrow">ALTERNATE EARTH // REALITY LINK</div>
-    <h1 id="realityName">Connecting…</h1>
+    <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
+    <h1>AlternativeReality</h1>
+    <div id="realityName" class="reality-name">Connecting reality…</div>
     <div class="status-row"><span id="connectionDot" class="dot"></span><span id="status">Opening reality link</span></div>
   </header>
-  <aside class="panel legend-panel">
-    <div><i class="swatch grass"></i>Grass</div>
-    <div><i class="swatch forest"></i>Forest</div>
-    <div><i class="swatch sand"></i>Sand</div>
-    <div><i class="swatch mud"></i>Mud</div>
-    <div><i class="swatch pavement"></i>Pavement</div>
-    <div><i class="swatch sidewalk"></i>Sidewalk</div>
-    <div><i class="swatch road"></i>Road</div>
-    <div><i class="swatch water"></i>Water</div>
-  </aside>
   <section class="panel telemetry-panel">
+    <div class="gps-row"><span>Your GPS</span><strong id="playerGpsValue">—</strong></div>
+    <div class="gps-row"><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
     <div><span>Terrain</span><strong id="terrainValue">—</strong></div>
     <div><span>Elevation</span><strong id="elevationValue">—</strong></div>
     <div><span>Speed</span><strong id="speedValue">0.0 mph</strong></div>
-    <div><span>Destination</span><strong id="distanceValue">—</strong></div>
+    <div><span>Distance</span><strong id="distanceValue">—</strong></div>
+    <div><span>Camera</span><strong id="cameraValue">0 m</strong></div>
     <div><span>Weather</span><strong id="weatherValue">Loading…</strong></div>
-    <button id="centerButton" type="button">Center</button>
+    <div><span>Sunrise / sunset</span><strong id="sunValue">—</strong></div>
+    <div><span>Moon</span><strong id="moonValue">—</strong></div>
+    <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
+    <button id="centerButton" type="button">Center on player</button>
+  </section>
+  <section class="panel travel-panel" aria-label="Travel mode">
+    <strong>Travel mode</strong>
+    <div class="mode-buttons">
+      <button type="button" data-mode="walk">Walk</button>
+      <button type="button" data-mode="run">Run</button>
+      <button type="button" data-mode="skateboard">Skateboard</button>
+      <button type="button" data-mode="bike">Bike</button>
+    </div>
   </section>
   <section class="panel help-panel">
     <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
-    <div><kbd>Left click</kbd> walk to a location</div>
-    <div><kbd>Right drag</kbd> pan camera</div>
+    <div><kbd>Left click</kbd> travel there</div>
+    <div><kbd>Right drag</kbd> pan</div>
     <div><kbd>Right click</kbd> actions</div>
     <div><kbd>Wheel</kbd> zoom</div>
   </section>
+  <section class="panel god-panel">
+    <label><input id="godMode" type="checkbox"> God Mode</label>
+    <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
+  </section>
   <section id="actionMenu" class="panel action-menu" hidden>
-    <strong>Actions</strong>
-    <div>No actions available.</div>
+    <strong>Actions</strong><div>No actions available.</div>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

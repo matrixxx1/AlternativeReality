@@ -59,6 +59,26 @@ public sealed class WorldNavigation
         _ => MilesPerHour(2.75)
     };
 
+    public double SpeedFor(TerrainType terrain, TravelMode mode) => mode switch
+    {
+        TravelMode.Run => SpeedFor(terrain) * 2,
+        TravelMode.Skateboard when terrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(terrain) * 4,
+        TravelMode.Skateboard when terrain == TerrainType.Sidewalk => SpeedFor(terrain) * 3,
+        TravelMode.Skateboard => SpeedFor(terrain),
+        TravelMode.Bike when terrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(terrain) * 4,
+        TravelMode.Bike when terrain == TerrainType.Sidewalk => SpeedFor(terrain) * 3,
+        TravelMode.Bike when terrain is TerrainType.Grass or TerrainType.Forest => SpeedFor(terrain) * 1.5,
+        TravelMode.Bike => SpeedFor(terrain),
+        _ => SpeedFor(terrain)
+    };
+
+    public static bool SupportsTravelMode(TerrainType terrain, TravelMode mode) => mode switch
+    {
+        TravelMode.Skateboard => terrain is TerrainType.Road or TerrainType.Pavement or TerrainType.Sidewalk,
+        TravelMode.Bike => terrain is not (TerrainType.Mud or TerrainType.Sand or TerrainType.ShallowWater or TerrainType.DeepWater),
+        _ => true
+    };
+
     public double ElevationAt(double x, double y)
     {
         if (_elevation.Count == 0) return 0;
@@ -82,7 +102,7 @@ public sealed class WorldNavigation
                 case EntityKind.Building when entity.Geometry.Count >= 3:
                     if (PointInPolygon(x, y, entity.Geometry) || DistanceToGeometry(x, y, entity.Geometry) <= radius) return true;
                     break;
-                case EntityKind.Tree:
+                case EntityKind.Tree or EntityKind.Bush:
                     if (Distance(x, y, entity.Position.X, entity.Position.Y) <= radius + Width(entity, .85)) return true;
                     break;
                 case EntityKind.Fence:

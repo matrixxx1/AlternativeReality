@@ -19,8 +19,10 @@ public sealed class DeterministicWorldGenerator
         var withSidewalks = geographic.Features.Concat(sidewalks).ToArray();
         var doors = GenerateDoors(withSidewalks);
         var trees = GenerateResourceNodes(reality, 96, withSidewalks);
+        var bushes = GenerateBushes(reality, 180, withSidewalks);
         var vehicles = GenerateVehicles(reality, withSidewalks, 12);
-        return geographic with { Features = withSidewalks.Concat(doors).Concat(trees).Concat(vehicles).ToArray() };
+        var actors = GenerateActors(reality, withSidewalks.Concat(trees).Concat(bushes).Concat(vehicles).ToArray());
+        return geographic with { Features = withSidewalks.Concat(doors).Concat(trees).Concat(bushes).Concat(vehicles).Concat(actors).ToArray() };
     }
 
     public static IReadOnlyList<CanonicalEntity> GenerateResourceNodes(
@@ -41,7 +43,8 @@ public sealed class DeterministicWorldGenerator
                 x = bounds.MinimumX + (random.NextDouble() * (bounds.MaximumX - bounds.MinimumX));
                 y = bounds.MinimumY + (random.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
                 attempts++;
-            } while (attempts < 40 && obstacles is not null && obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, 1.2)));
+            } while (attempts < 80 && obstacles is not null &&
+                     (!IsOpenGrass(obstacles.Concat(result).ToArray(), x, y) || obstacles.Concat(result).Any(entity => BlocksGeneratedPoint(entity, x, y, 1.2))));
             var subtype = random.Next(0, 3) switch { 0 => "pine", 1 => "fir", _ => "oak" };
             result.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:tree:{i}",
@@ -93,7 +96,7 @@ public sealed class DeterministicWorldGenerator
             {
                 var start = building.Geometry[index];
                 var end = building.Geometry[index + 1];
-                var candidates = new[] { start, end, Midpoint(start, end) };
+                var candidates = new[] { Midpoint(start, end) };
                 foreach (var candidate in candidates)
                 {
                     foreach (var approach in nearbyApproaches)
@@ -163,9 +166,92 @@ public sealed class DeterministicWorldGenerator
         return vehicles;
     }
 
+    public static IReadOnlyList<CanonicalEntity> GenerateBushes(RealityConfiguration reality, int count, IReadOnlyList<CanonicalEntity> features)
+    {
+        var bounds = reality.Area.Bounds;
+        var random = new Random(StableSeed(reality.Seed + 3571, reality.Area.Region));
+        var bushes = new List<CanonicalEntity>(count);
+        for (var index = 0; index < count; index++)
+        {
+            var found = false;
+            double x = 0;
+            double y = 0;
+            for (var attempt = 0; attempt < 80 && !found; attempt++)
+            {
+                x = bounds.MinimumX + (random.NextDouble() * (bounds.MaximumX - bounds.MinimumX));
+                y = bounds.MinimumY + (random.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
+                found = IsOpenGrass(features.Concat(bushes).ToArray(), x, y);
+            }
+            if (!found) continue;
+            bushes.Add(new CanonicalEntity(
+                $"generated:{reality.Id}:bush:{index}",
+                EntityKind.Bush,
+                new WorldPosition(reality.Area.Region, x, y),
+                Array.Empty<GeometryPoint>(),
+                new Dictionary<string, string> { ["variant"] = random.Next(0, 3).ToString(), ["collisionRadius"] = "0.35" }));
+        }
+        return bushes;
+    }
+
+    public static IReadOnlyList<CanonicalEntity> GenerateActors(RealityConfiguration reality, IReadOnlyList<CanonicalEntity> obstacles)
+    {
+        var definitions = new (EntityKind Kind, string Subtype, int Count)[]
+        {
+            (EntityKind.Animal, "rabbit", 8), (EntityKind.Animal, "dog", 3), (EntityKind.Animal, "cat", 4),
+            (EntityKind.Animal, "bird", 10), (EntityKind.Animal, "deer", 5), (EntityKind.Animal, "cougar", 1),
+            (EntityKind.Animal, "bear", 1), (EntityKind.Npc, "resident", 8)
+        };
+        var names = new[] { "Alex", "Bailey", "Casey", "Drew", "Emery", "Finley", "Gray", "Harper" };
+        var bounds = reality.Area.Bounds;
+        var random = new Random(StableSeed(reality.Seed + 104729, reality.Area.Region));
+        var result = new List<CanonicalEntity>();
+        var actorIndex = 0;
+        foreach (var definition in definitions)
+        {
+            for (var index = 0; index < definition.Count; index++)
+            {
+                double x;
+                double y;
+                var attempts = 0;
+                do
+                {
+                    x = bounds.MinimumX + (random.NextDouble() * (bounds.MaximumX - bounds.MinimumX));
+                    y = bounds.MinimumY + (random.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
+                    attempts++;
+                } while (attempts < 80 && obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, .5)));
+                var name = definition.Kind == EntityKind.Npc ? names[index % names.Length] : definition.Subtype;
+                result.Add(new CanonicalEntity(
+                    $"generated:{reality.Id}:actor:{actorIndex++}",
+                    definition.Kind,
+                    new WorldPosition(reality.Area.Region, x, y),
+                    Array.Empty<GeometryPoint>(),
+                    new Dictionary<string, string>
+                    {
+                        ["subtype"] = definition.Subtype,
+                        ["name"] = name
+                    }));
+            }
+        }
+        return result;
+    }
+
+    private static bool IsOpenGrass(IReadOnlyList<CanonicalEntity> features, double x, double y)
+    {
+        var terrain = "grass";
+        foreach (var entity in features)
+        {
+            if (entity.Kind == EntityKind.Terrain && entity.Geometry.Count >= 3 && PointInPolygon(x, y, entity.Geometry))
+                terrain = entity.Properties.GetValueOrDefault("terrain") ?? terrain;
+            if (BlocksGeneratedPoint(entity, x, y, .5)) return false;
+        }
+        return terrain == "grass";
+    }
+
     private static bool BlocksGeneratedPoint(CanonicalEntity entity, double x, double y, double padding)
     {
         if (entity.Kind == EntityKind.Building && entity.Geometry.Count >= 3) return PointInPolygon(x, y, entity.Geometry);
+        if (entity.Kind is EntityKind.Tree or EntityKind.Bush or EntityKind.Vehicle)
+            return Distance(new GeometryPoint(x, y), new GeometryPoint(entity.Position.X, entity.Position.Y)) <= padding + ParseDouble(entity.Properties.GetValueOrDefault("collisionRadius"), 1);
         if (entity.Kind is EntityKind.Road or EntityKind.Sidewalk or EntityKind.Water)
         {
             var width = entity.Kind == EntityKind.Water ? 3 : ParseDouble(entity.Properties.GetValueOrDefault("widthMeters"), 4);

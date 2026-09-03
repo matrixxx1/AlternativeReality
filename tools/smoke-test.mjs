@@ -38,6 +38,13 @@ try {
     second.waitFor(message => message.type === 'welcome')
   ]);
   const playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
+  if (welcomeA.protocolVersion !== 3) throw new Error(`Expected protocol 3, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
+
+  first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
+  const modeChanged = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId);
+  if (modeChanged.player.travelMode !== 'run') throw new Error('Server did not apply the travel mode.');
+
   first.socket.send(JSON.stringify({ type: 'moveRequest', x: 1, y: 0, sequence: 1 }));
   const [seenByA, seenByB] = await Promise.all([
     first.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId),
@@ -63,6 +70,8 @@ try {
   console.log(JSON.stringify({
     ok: true,
     protocol: welcomeA.protocolVersion,
+    actors: welcomeA.snapshot.actors.length,
+    travelMode: modeChanged.player.travelMode,
     movementSynchronized: true,
     serverPathfinding: true,
     authoritativePosition: seenByA.player.position,

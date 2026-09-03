@@ -15,7 +15,7 @@ public sealed class WeatherRefreshService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(10));
+        using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             if (!await _world.RefreshWeatherAsync(stoppingToken))

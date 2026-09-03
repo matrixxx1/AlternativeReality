@@ -12,10 +12,22 @@ public enum EntityKind
     Door,
     Water,
     Tree,
+    Bush,
     Fence,
     Vehicle,
+    Animal,
+    Npc,
     ResourceNode,
     PlayerStructure
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TravelMode
+{
+    Walk,
+    Run,
+    Skateboard,
+    Bike
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -49,7 +61,20 @@ public sealed record PlayerState(
     WorldPosition Position,
     long Version = 1,
     TerrainType Terrain = TerrainType.Grass,
-    double SpeedMetersPerSecond = 0);
+    double SpeedMetersPerSecond = 0,
+    double HealthHearts = 10,
+    double MaximumHealthHearts = 10,
+    TravelMode TravelMode = TravelMode.Walk);
+
+public sealed record ActorState(
+    string Id,
+    EntityKind Kind,
+    string Subtype,
+    string Name,
+    WorldPosition Position,
+    string Facing = "south",
+    bool IsMoving = false,
+    long Version = 1);
 
 public sealed record WeatherState(
     string Condition,
@@ -60,10 +85,14 @@ public sealed record WeatherState(
     bool IsDay,
     DateTimeOffset ObservedAtUtc,
     string Source,
+    DateTimeOffset? SunriseUtc = null,
+    DateTimeOffset? SunsetUtc = null,
+    string MoonPhase = "Unknown",
+    double MoonIllumination = 0,
     bool IsAvailable = true)
 {
     public static WeatherState Unavailable { get; } = new(
-        "Weather unavailable", -1, 0, 0, 0, true, DateTimeOffset.MinValue, "none", false);
+        "Weather unavailable", -1, 0, 0, 0, true, DateTimeOffset.MinValue, "none", IsAvailable: false);
 }
 
 public sealed record ElevationSample(double X, double Y, double ElevationMeters);
@@ -121,4 +150,5 @@ public sealed record WorldSnapshot(
     IReadOnlyList<CanonicalEntity> RealityEntities,
     IReadOnlyList<PlayerState> Players,
     IReadOnlyList<ElevationSample> Elevation,
-    WeatherState? Weather = null);
+    WeatherState? Weather = null,
+    IReadOnlyList<ActorState>? Actors = null);

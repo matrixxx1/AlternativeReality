@@ -1,567 +1,215 @@
 (() => {
-  const canvas = document.querySelector('#world');
+  'use strict';
+  const $ = selector => document.querySelector(selector);
+  const canvas = $('#world');
   const ctx = canvas.getContext('2d');
-  const status = document.querySelector('#status');
-  const dot = document.querySelector('#connectionDot');
-  const realityName = document.querySelector('#realityName');
-  const toast = document.querySelector('#toast');
-  const terrainValue = document.querySelector('#terrainValue');
-  const elevationValue = document.querySelector('#elevationValue');
-  const speedValue = document.querySelector('#speedValue');
-  const distanceValue = document.querySelector('#distanceValue');
-  const weatherValue = document.querySelector('#weatherValue');
-  const actionMenu = document.querySelector('#actionMenu');
-  const centerButton = document.querySelector('#centerButton');
+  const ui = {
+    status: $('#status'), dot: $('#connectionDot'), realityName: $('#realityName'), toast: $('#toast'),
+    terrain: $('#terrainValue'), elevation: $('#elevationValue'), speed: $('#speedValue'), distance: $('#distanceValue'),
+    camera: $('#cameraValue'), weather: $('#weatherValue'), sun: $('#sunValue'), moon: $('#moonValue'), hearts: $('#heartsValue'),
+    playerGps: $('#playerGpsValue'), destinationGps: $('#destinationGpsValue'), actionMenu: $('#actionMenu'),
+    center: $('#centerButton'), god: $('#godMode'), rebuild: $('#rebuildButton')
+  };
   const state = {
-    socket: null, playerId: null, snapshot: null,
-    base: [], reality: new Map(), doorsByBuilding: new Map(), players: new Map(), facings: new Map(), keys: new Set(),
-    camera: { x: 0, y: 0 }, scale: 18, pitch: .7, shear: .12,
-    sequence: 0, pathSequence: 0, facing: 'south', moveTarget: null, path: [],
-    followCamera: true, weather: null, lastMovementAt: 0, lastBlockedToastAt: 0,
-    pointer: { down: false, dragged: false, startX: 0, startY: 0, lastX: 0, lastY: 0 }
+    socket: null, playerId: null, snapshot: null, weather: null, base: [], lists: {},
+    players: new Map(), actors: new Map(), reality: new Map(), doors: new Map(), facings: new Map(), movingUntil: new Map(),
+    camera: { x: 0, y: 0 }, scale: 18, pitch: .69, shear: .14, follow: true,
+    keys: new Set(), path: [], target: null, pathSequence: 0, lastInput: 0, lastBlocked: 0,
+    pointer: { down: false, dragged: false, x: 0, y: 0 }, frame: 0
   };
 
-  function createClientId() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-    const bytes = new Uint8Array(16);
-    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-      crypto.getRandomValues(bytes);
-    } else {
-      for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256);
-    }
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  function clientId() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3) | 8).toString(16);
+    });
   }
-
-  const storedId = sessionStorage.getItem('alternate-earth-character') || createClientId();
-  sessionStorage.setItem('alternate-earth-character', storedId);
-  const defaultName = `Explorer-${storedId.slice(0, 4)}`;
-  const name = new URLSearchParams(location.search).get('name') || defaultName;
+  const storedId = sessionStorage.getItem('alternative-reality-character') || clientId();
+  sessionStorage.setItem('alternative-reality-character', storedId);
+  const playerName = new URLSearchParams(location.search).get('name') || `Explorer-${storedId.slice(0, 4)}`;
 
   function connect() {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    state.socket = new WebSocket(`${protocol}//${location.host}/ws?characterId=${encodeURIComponent(storedId)}&name=${encodeURIComponent(name)}`);
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    state.socket = new WebSocket(`${scheme}//${location.host}/ws?characterId=${encodeURIComponent(storedId)}&name=${encodeURIComponent(playerName)}`);
     state.socket.addEventListener('open', () => setStatus('Connected — synchronizing world', true));
     state.socket.addEventListener('close', () => { setStatus('Disconnected — retrying', false); setTimeout(connect, 1500); });
-    state.socket.addEventListener('message', event => handleMessage(JSON.parse(event.data)));
+    state.socket.addEventListener('message', event => handle(JSON.parse(event.data)));
+  }
+  function send(message) { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send(JSON.stringify(message)); }
+
+  function applySnapshot(snapshot) {
+    state.snapshot = snapshot;
+    state.base = snapshot.baseEntities || [];
+    state.lists = Object.groupBy ? Object.groupBy(state.base, entity => entity.kind) : state.base.reduce((all, entity) => {
+      (all[entity.kind] ||= []).push(entity); return all;
+    }, {});
+    for (const entity of state.base) entity._bounds = boundsOf(entity);
+    state.doors = new Map((state.lists.door || []).filter(x => x.properties?.buildingId).map(x => [x.properties.buildingId, x]));
+    state.reality = new Map((snapshot.realityEntities || []).map(x => [x.id, x]));
+    state.players = new Map((snapshot.players || []).map(x => [x.id, x]));
+    state.actors = new Map((snapshot.actors || []).map(x => [x.id, x]));
+    state.weather = snapshot.weather;
+    ui.realityName.textContent = snapshot.reality.name;
+    const me = state.players.get(state.playerId);
+    if (me && !Number.isFinite(state.camera.x)) state.camera = { x: me.position.x, y: me.position.y };
+    if (me && state.frame === 0) state.camera = { x: me.position.x, y: me.position.y };
+    updateMode(me?.travelMode);
   }
 
-  function handleMessage(message) {
+  function handle(message) {
     switch (message.type) {
-      case 'welcome': {
-        state.playerId = message.playerId;
-        state.snapshot = message.snapshot;
-        state.base = message.snapshot.baseEntities;
-        state.doorsByBuilding = new Map(state.base
-          .filter(entity => entity.kind === 'door' && entity.properties?.buildingId)
-          .map(entity => [entity.properties.buildingId, entity]));
-        state.reality = new Map(message.snapshot.realityEntities.map(entity => [entity.id, entity]));
-        state.players = new Map(message.snapshot.players.map(player => [player.id, player]));
-        state.weather = message.snapshot.weather;
-        const me = state.players.get(state.playerId);
-        if (me) state.camera = { x: me.position.x, y: me.position.y };
-        realityName.textContent = message.snapshot.reality.name;
-        setStatus(`${message.snapshot.players.length} linked · ${message.snapshot.baseEntities.length} base objects · protocol v${message.protocolVersion}`, true);
+      case 'welcome':
+        state.playerId = message.playerId; applySnapshot(message.snapshot);
+        setStatus(`${message.snapshot.players.length} linked · ${(message.snapshot.actors || []).length} living actors · protocol v${message.protocolVersion}`, true);
         break;
-      }
-      case 'playerJoined': state.players.set(message.player.id, message.player); break;
-      case 'playerMoved': {
-        const previous = state.players.get(message.player.id);
-        if (previous) {
-          const dx = message.player.position.x - previous.position.x;
-          const dy = message.player.position.y - previous.position.y;
-          if (Math.abs(dx) > Math.abs(dy)) state.facings.set(message.player.id, dx > 0 ? 'east' : 'west');
-          else if (Math.abs(dy) > 0) state.facings.set(message.player.id, dy > 0 ? 'north' : 'south');
-        }
-        state.players.set(message.player.id, message.player);
-        if (message.player.id === state.playerId) state.lastMovementAt = Date.now();
-        break;
-      }
+      case 'playerJoined': case 'playerUpdated': updatePlayer(message.player); break;
+      case 'playerMoved': updatePlayer(message.player, true); break;
       case 'playerLeft': state.players.delete(message.playerId); break;
+      case 'actorsMoved': for (const actor of message.actors) { state.actors.set(actor.id, actor); if (actor.isMoving) state.movingUntil.set(actor.id, performance.now() + 700); } break;
+      case 'pathResult': if (message.sequence === state.pathSequence) state.path = message.waypoints || []; break;
+      case 'pathUnavailable': if (message.sequence === state.pathSequence) stopTravel(message.message); break;
+      case 'movementBlocked': if (Date.now() - state.lastBlocked > 1200) { state.lastBlocked = Date.now(); stopTravel(message.message); } break;
+      case 'playerFell': updatePlayer(message.player); stopTravel(message.message); break;
+      case 'playerDied': updatePlayer(message.player); state.follow = true; stopTravel(message.reason); break;
+      case 'weatherChanged': state.weather = message.weather; break;
+      case 'worldRebuilt': applySnapshot(message.snapshot); state.path = []; state.target = null; showToast('Area rebuilt from its geographic source.'); break;
       case 'objectCreated': state.reality.set(message.entity.id, message.entity); break;
       case 'objectRemoved': state.reality.delete(message.entityId); break;
-      case 'pathResult':
-        if (message.sequence === state.pathSequence) state.path = message.waypoints;
-        break;
-      case 'pathUnavailable':
-        if (message.sequence === state.pathSequence) { state.path = []; state.moveTarget = null; showToast(message.message); }
-        break;
-      case 'movementBlocked':
-        state.path = []; state.moveTarget = null;
-        if (Date.now() - state.lastBlockedToastAt > 1200) { showToast(message.message); state.lastBlockedToastAt = Date.now(); }
-        break;
-      case 'playerDied':
-        state.path = []; state.moveTarget = null; state.followCamera = true; showToast(message.reason); break;
-      case 'weatherChanged': state.weather = message.weather; break;
       case 'error': showToast(message.message); break;
     }
   }
-
-  function setStatus(text, online) {
-    status.textContent = text;
-    dot.classList.toggle('online', online);
+  function updatePlayer(player, moving = false) {
+    const old = state.players.get(player.id);
+    if (old) {
+      const dx = player.position.x - old.position.x, dy = player.position.y - old.position.y;
+      if (Math.abs(dx) > Math.abs(dy)) state.facings.set(player.id, dx > 0 ? 'east' : 'west');
+      else if (Math.abs(dy) > .001) state.facings.set(player.id, dy > 0 ? 'north' : 'south');
+    }
+    state.players.set(player.id, player);
+    if (moving && player.speedMetersPerSecond > .01) state.movingUntil.set(player.id, performance.now() + 250);
+    if (player.id === state.playerId) updateMode(player.travelMode);
   }
-
-  function showToast(text) {
-    toast.textContent = text;
-    toast.classList.add('show');
-    clearTimeout(showToast.timer);
-    showToast.timer = setTimeout(() => toast.classList.remove('show'), 2600);
-  }
-
-  function send(message) {
-    if (state.socket?.readyState === WebSocket.OPEN) state.socket.send(JSON.stringify(message));
-  }
+  function stopTravel(message) { state.path = []; state.target = null; if (message) showToast(message); }
+  function setStatus(text, online) { ui.status.textContent = text; ui.dot.classList.toggle('online', online); }
+  function showToast(text) { ui.toast.textContent = text || ''; ui.toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => ui.toast.classList.remove('show'), 3200); }
 
   function resize() {
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(innerWidth * ratio);
-    canvas.height = Math.round(innerHeight * ratio);
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const ratio = devicePixelRatio || 1; canvas.width = Math.round(innerWidth * ratio); canvas.height = Math.round(innerHeight * ratio);
+    canvas.style.width = `${innerWidth}px`; canvas.style.height = `${innerHeight}px`; ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
-
-  const toScreen = point => {
-    const dx = point.x - state.camera.x;
-    const dy = point.y - state.camera.y;
-    return {
-      x: innerWidth / 2 + ((dx + dy * state.shear) * state.scale),
-      y: innerHeight / 2 - (dy * state.scale * state.pitch)
-    };
-  };
-  const toWorld = point => {
+  function toScreen(point) {
+    const dx = point.x - state.camera.x, dy = point.y - state.camera.y;
+    return { x: innerWidth / 2 + (dx + dy * state.shear) * state.scale, y: innerHeight / 2 - dy * state.scale * state.pitch };
+  }
+  function toWorld(point) {
     const dy = -(point.y - innerHeight / 2) / (state.scale * state.pitch);
-    const dx = (point.x - innerWidth / 2) / state.scale - (dy * state.shear);
-    return { x: state.camera.x + dx, y: state.camera.y + dy };
-  };
-
+    return { x: state.camera.x + (point.x - innerWidth / 2) / state.scale - dy * state.shear, y: state.camera.y + dy };
+  }
+  const lod = () => state.scale >= 9 ? 2 : state.scale >= 3.5 ? 1 : 0;
+  function viewBounds(margin = 10) {
+    const points = [toWorld({x:0,y:0}), toWorld({x:innerWidth,y:0}), toWorld({x:0,y:innerHeight}), toWorld({x:innerWidth,y:innerHeight})];
+    return { minX: Math.min(...points.map(p=>p.x))-margin, maxX: Math.max(...points.map(p=>p.x))+margin, minY: Math.min(...points.map(p=>p.y))-margin, maxY: Math.max(...points.map(p=>p.y))+margin };
+  }
+  function boundsOf(entity) {
+    const points = entity.geometry?.length ? entity.geometry : [entity.position];
+    return { minX: Math.min(...points.map(p=>p.x)), maxX: Math.max(...points.map(p=>p.x)), minY: Math.min(...points.map(p=>p.y)), maxY: Math.max(...points.map(p=>p.y)) };
+  }
+  function visible(entity, view) { const b = entity._bounds || boundsOf(entity); return b.maxX >= view.minX && b.minX <= view.maxX && b.maxY >= view.minY && b.minY <= view.maxY; }
+  function path(entity, close = false) {
+    if (!entity.geometry?.length) return false; ctx.beginPath();
+    entity.geometry.forEach((point, index) => { const p = toScreen(point); index ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y); });
+    if (close) ctx.closePath(); return true;
+  }
   function drawGeometry(entity, fill, stroke, width = 1, close = false) {
-    if (!entity.geometry?.length) return;
-    ctx.beginPath();
-    entity.geometry.forEach((point, index) => {
-      const screen = toScreen(point);
-      if (index === 0) ctx.moveTo(screen.x, screen.y); else ctx.lineTo(screen.x, screen.y);
-    });
-    if (close) ctx.closePath();
-    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke(); }
+    if (!path(entity, close)) return; if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke(); }
   }
+  function prop(entity, name, fallback) { const value = Number(entity.properties?.[name]); return Number.isFinite(value) ? value : fallback; }
+  function hash(value) { let h=2166136261; for (let i=0;i<String(value).length;i++) h=Math.imul(h^String(value).charCodeAt(i),16777619); return (h>>>0)/4294967295; }
 
-  function render() {
-    requestAnimationFrame(render);
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
-    const gradient = ctx.createLinearGradient(0, 0, 0, innerHeight);
-    gradient.addColorStop(0, '#233a31'); gradient.addColorStop(1, '#182a25');
-    ctx.fillStyle = gradient; ctx.fillRect(0, 0, innerWidth, innerHeight);
-    if (!state.snapshot) return drawConnecting();
-
+  function render(now) {
+    requestAnimationFrame(render); state.frame++;
+    ctx.clearRect(0,0,innerWidth,innerHeight); ctx.fillStyle='#315a38'; ctx.fillRect(0,0,innerWidth,innerHeight);
+    if (!state.snapshot) return connecting();
     const me = state.players.get(state.playerId);
-    if (me && state.followCamera) {
-      state.camera.x += (me.position.x - state.camera.x) * .12;
-      state.camera.y += (me.position.y - state.camera.y) * .12;
-    }
-    drawGroundTiles();
-    drawChunkGrid();
-    for (const entity of state.base) if (entity.kind === 'terrain') drawTerrain(entity);
-    for (const entity of state.base) if (entity.kind === 'sidewalk') drawSidewalk(entity);
-    for (const entity of state.base) if (entity.kind === 'road') drawRoad(entity);
-    for (const entity of state.base) if (entity.kind === 'water') drawWater(entity);
-    drawMoveTarget();
-    drawRaisedObjects();
-    drawWeatherEffects();
+    if (me && state.follow) { state.camera.x += (me.position.x-state.camera.x)*.14; state.camera.y += (me.position.y-state.camera.y)*.14; }
+    const view = viewBounds(16), detail = lod();
+    drawGrass(view, detail);
+    for (const e of state.lists.terrain||[]) if (visible(e,view)) drawTerrain(e,detail);
+    for (const e of state.lists.sidewalk||[]) if (visible(e,view)) drawSidewalk(e,detail);
+    for (const e of state.lists.road||[]) if (visible(e,view)) drawRoad(e,detail);
+    for (const e of state.lists.water||[]) if (visible(e,view)) drawWater(e,detail,now);
+    drawTarget(now);
+    drawRaised(view,detail,now);
+    drawAtmosphere(me,detail,now);
     updateTelemetry(me);
-    drawCoordinates();
   }
+  function connecting() { ctx.fillStyle='#e7eadf'; ctx.textAlign='center'; ctx.font='700 15px monospace'; ctx.fillText('Resolving geographic reality…',innerWidth/2,innerHeight/2); }
 
-  function drawConnecting() {
-    ctx.fillStyle = 'rgba(231,234,223,.38)'; ctx.font = '14px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText('Resolving geographic reality…', innerWidth / 2, innerHeight / 2);
-  }
-
-  function drawGroundTiles() {
-    const corners = [
-      toWorld({ x: 0, y: 0 }), toWorld({ x: innerWidth, y: 0 }),
-      toWorld({ x: 0, y: innerHeight }), toWorld({ x: innerWidth, y: innerHeight })
-    ];
-    const tileMeters = 4;
-    const minimumX = Math.floor(Math.min(...corners.map(point => point.x)) / tileMeters) * tileMeters;
-    const maximumX = Math.ceil(Math.max(...corners.map(point => point.x)) / tileMeters) * tileMeters;
-    const minimumY = Math.floor(Math.min(...corners.map(point => point.y)) / tileMeters) * tileMeters;
-    const maximumY = Math.ceil(Math.max(...corners.map(point => point.y)) / tileMeters) * tileMeters;
-    for (let y = minimumY; y < maximumY; y += tileMeters) {
-      for (let x = minimumX; x < maximumX; x += tileMeters) {
-        const points = [
-          toScreen({ x, y }), toScreen({ x: x + tileMeters, y }),
-          toScreen({ x: x + tileMeters, y: y + tileMeters }), toScreen({ x, y: y + tileMeters })
-        ];
-        const checker = (Math.floor(x / tileMeters) + Math.floor(y / tileMeters)) & 1;
-        ctx.fillStyle = checker ? '#3e6337' : '#42693a';
-        ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
-        for (let index = 1; index < points.length; index++) ctx.lineTo(points[index].x, points[index].y);
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = 'rgba(179,202,176,.035)'; ctx.lineWidth = 1; ctx.stroke();
-      }
+  function drawGrass(view,detail) {
+    const tile = detail===2?2:detail===1?6:18;
+    for(let y=Math.floor(view.minY/tile)*tile;y<view.maxY;y+=tile) for(let x=Math.floor(view.minX/tile)*tile;x<view.maxX;x+=tile){
+      const p=[toScreen({x,y}),toScreen({x:x+tile,y}),toScreen({x:x+tile,y:y+tile}),toScreen({x,y:y+tile})];
+      const n=hash(`${Math.floor(x/tile)}:${Math.floor(y/tile)}`); ctx.fillStyle=n>.52?'#4f7c3e':'#477339';
+      ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);p.slice(1).forEach(q=>ctx.lineTo(q.x,q.y));ctx.closePath();ctx.fill();
+      if(detail===2&&n>.68){const c=toScreen({x:x+tile*n,y:y+tile*(1-n)});ctx.strokeStyle='#8eae5d';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(c.x,c.y+3);ctx.lineTo(c.x-2,c.y);ctx.moveTo(c.x,c.y+3);ctx.lineTo(c.x+2,c.y);ctx.stroke();}
     }
   }
+  function drawTerrain(e,detail){const t=e.properties?.terrain||'grass';const colors={grass:['#588442','#729a52'],forest:['#244a31','#376641'],sand:['#cbb06a','#ead08b'],mud:['#624632','#866249'],pavement:['#6d736e','#989c96']};const c=colors[t]||colors.grass;drawGeometry(e,c[0],detail?c[1]:null,detail?1:0,true);}
+  function drawSidewalk(e,detail){const width=prop(e,'widthMeters',8)*state.scale;drawGeometry(e,null,'#827f73',Math.max(3,width+2));drawGeometry(e,null,'#c3bdae',Math.max(2,width));if(detail===2){ctx.save();ctx.setLineDash([state.scale*1.8,state.scale*.12]);drawGeometry(e,null,'rgba(92,88,79,.45)',1);ctx.restore();}}
+  function drawRoad(e,detail){const width=prop(e,'widthMeters',6)*state.scale;const unpaved=e.properties?.surface==='unpaved';drawGeometry(e,null,unpaved?'#654b36':'#242a29',Math.max(4,width+3));drawGeometry(e,null,unpaved?'#806043':'#4b514f',Math.max(3,width));if(detail){ctx.save();ctx.setLineDash([state.scale*2.2,state.scale*1.4]);drawGeometry(e,null,unpaved?'#c9a96a':'#e8c854',Math.max(1,state.scale*.08));ctx.restore();}}
+  function drawWater(e,detail,now){const closed=e.geometry?.length>3;const wave=detail===2?Math.sin(now/400)*2:0;if(closed){drawGeometry(e,'#15516b','#65b3bf',Math.max(3,state.scale*5+wave),true);drawGeometry(e,null,'#2e839b',Math.max(2,state.scale*1.4),true);}else{drawGeometry(e,null,'#65b3bf',Math.max(4,state.scale*3));drawGeometry(e,null,'#1e6e8a',Math.max(2,state.scale*1.2));}}
 
-  function drawChunkGrid() {
-    const size = 256;
-    const corners = [
-      toWorld({ x: 0, y: 0 }), toWorld({ x: innerWidth, y: 0 }),
-      toWorld({ x: 0, y: innerHeight }), toWorld({ x: innerWidth, y: innerHeight })
-    ];
-    const minimumX = Math.min(...corners.map(point => point.x));
-    const maximumX = Math.max(...corners.map(point => point.x));
-    const minimumY = Math.min(...corners.map(point => point.y));
-    const maximumY = Math.max(...corners.map(point => point.y));
-    ctx.strokeStyle = 'rgba(214,225,205,.055)'; ctx.lineWidth = 1;
-    for (let x = Math.floor(minimumX / size) * size; x <= maximumX; x += size) {
-      const a = toScreen({ x, y: minimumY }), b = toScreen({ x, y: maximumY });
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
-    for (let y = Math.floor(minimumY / size) * size; y <= maximumY; y += size) {
-      const a = toScreen({ x: minimumX, y }), b = toScreen({ x: maximumX, y });
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
+  function drawRaised(view,detail,now){const items=[];
+    for(const e of state.lists.building||[])if(visible(e,view))items.push({d:Math.max(...e.geometry.map(p=>toScreen(p).y)),f:()=>drawBuilding(e,detail)});
+    if(detail>0) for(const kind of ['tree','bush','fence','vehicle'])for(const e of state.lists[kind]||[])if(visible(e,view))items.push({d:toScreen(e.position).y,f:()=>drawObject(e,detail)});
+    for(const actor of state.actors.values())if(pointVisible(actor.position,view)&&detail>0)items.push({d:toScreen(actor.position).y,f:()=>drawActor(actor,detail,now)});
+    for(const player of state.players.values())if(pointVisible(player.position,view))items.push({d:toScreen(player.position).y,f:()=>drawPlayer(player,player.id===state.playerId,detail,now)});
+    items.sort((a,b)=>a.d-b.d);for(const item of items)item.f();
   }
-
-  function drawRoad(entity) {
-    const width = propertyNumber(entity, 'widthMeters', 5) * state.scale;
-    drawGeometry(entity, null, '#343a38', Math.max(5, width + 2));
-    drawGeometry(entity, null, entity.properties?.surface === 'unpaved' ? '#72543c' : '#606663', Math.max(3, width));
+  function pointVisible(p,v){return p.x>=v.minX&&p.x<=v.maxX&&p.y>=v.minY&&p.y<=v.maxY;}
+  function drawBuilding(e,detail){const ground=e.geometry.map(toScreen);if(ground.length<3)return;const last=ground[ground.length-1];const count=ground[0].x===last.x&&ground[0].y===last.y?ground.length-1:ground.length;const levels=Math.max(1,Number(e.properties?.['building:levels']||e.properties?.levels||2));const height=Math.min(150,levels*3*state.scale*.52);const roof=ground.map(p=>({x:p.x,y:p.y-height}));
+    if(detail===0){drawGeometry(e,'#665b50','#302b27',1,true);return;}
+    for(let i=0;i<count;i++){const j=(i+1)%count;ctx.fillStyle=i%2?'#665044':'#755a49';ctx.beginPath();ctx.moveTo(roof[i].x,roof[i].y);ctx.lineTo(roof[j].x,roof[j].y);ctx.lineTo(ground[j].x,ground[j].y);ctx.lineTo(ground[i].x,ground[i].y);ctx.closePath();ctx.fill();ctx.strokeStyle='#382c26';ctx.stroke();if(detail===2)drawWindows(roof[i],roof[j],ground[i],ground[j],levels);}
+    ctx.fillStyle='#8f755e';ctx.strokeStyle='#c09b75';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(roof[0].x,roof[0].y);for(let i=1;i<count;i++)ctx.lineTo(roof[i].x,roof[i].y);ctx.closePath();ctx.fill();ctx.stroke();
+    if(detail===2){const a=roof[0],b=roof[Math.floor(count/2)];ctx.strokeStyle='#594434';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();const n=hash(e.id);const c=roof[Math.floor(n*count)%count];ctx.fillStyle='#3c3029';ctx.fillRect(c.x-3,c.y-9,6,10);}
+    const door=state.doors.get(e.id);if(door)drawDoor(door);
   }
+  function drawWindows(a,b,ga,gb,levels){const length=Math.hypot(b.x-a.x,b.y-a.y);const columns=Math.max(1,Math.floor(length/28));for(let level=0;level<levels;level++)for(let c=1;c<=columns;c++){const t=c/(columns+1),baseY=(ga.y+(gb.y-ga.y)*t),roofY=(a.y+(b.y-a.y)*t),y=baseY-(baseY-roofY)*(level+.55)/levels,x=ga.x+(gb.x-ga.x)*t;ctx.fillStyle=state.weather?.isDay?'#9ec2bd':'#d9bd69';ctx.fillRect(x-3,y-4,6,7);ctx.strokeStyle='#302c29';ctx.strokeRect(x-3,y-4,6,7);}}
+  function drawDoor(e){const angle=prop(e,'facingDegrees',0)*Math.PI/180,tx=-Math.sin(angle)*.48,ty=Math.cos(angle)*.48;const l=toScreen({x:e.position.x-tx,y:e.position.y-ty}),r=toScreen({x:e.position.x+tx,y:e.position.y+ty}),h=2.05*state.scale*.52;ctx.fillStyle='#302119';ctx.strokeStyle='#c69745';ctx.beginPath();ctx.moveTo(l.x,l.y);ctx.lineTo(r.x,r.y);ctx.lineTo(r.x,r.y-h);ctx.lineTo(l.x,l.y-h);ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle='#efc965';ctx.fillRect(r.x-2,r.y-h*.48,2,2);}
+  function drawObject(e,detail){if(e.kind==='tree')drawTree(e,detail);else if(e.kind==='bush')drawBush(e);else if(e.kind==='fence'){drawGeometry(e,null,'#6d472b',Math.max(2,state.scale*.15));}else if(e.kind==='vehicle')drawVehicle(e);}
+  function drawTree(e,detail){const p=toScreen(e.position),r=Math.max(3,state.scale*(detail===2?1.05:.65));ctx.fillStyle='#493322';ctx.fillRect(p.x-2,p.y-r*.35,4,r*.7);ctx.fillStyle='#173f29';ctx.beginPath();ctx.arc(p.x,p.y-r*.65,r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#347044';ctx.beginPath();ctx.arc(p.x-r*.3,p.y-r*.85,r*.65,0,Math.PI*2);ctx.fill();}
+  function drawBush(e){const p=toScreen(e.position),r=Math.max(2,state.scale*.42);ctx.fillStyle='#245d35';ctx.beginPath();ctx.arc(p.x-r*.4,p.y,r*.65,0,Math.PI*2);ctx.arc(p.x+r*.35,p.y,r*.72,0,Math.PI*2);ctx.fill();ctx.fillStyle='#5e9b45';ctx.fillRect(p.x-1,p.y-r*.45,2,2);}
+  function drawVehicle(e){const p=toScreen(e.position),l=prop(e,'lengthMeters',4.5)*state.scale,w=prop(e,'widthMeters',1.9)*state.scale*state.pitch,a=prop(e,'rotationDegrees',0)*Math.PI/180,pa=Math.atan2(-Math.sin(a)*state.pitch,Math.cos(a)+Math.sin(a)*state.shear);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(pa);ctx.fillStyle='#8d4e3e';ctx.fillRect(-l/2,-w/2,l,w);ctx.fillStyle='#a8c8c8';ctx.fillRect(-l*.14,-w*.38,l*.35,w*.76);ctx.strokeStyle='#242827';ctx.lineWidth=2;ctx.strokeRect(-l/2,-w/2,l,w);ctx.restore();}
+  function drawActor(a,detail,now){const p=toScreen(a.position),moving=(a.isMoving||state.movingUntil.get(a.id)>now)&&detail===2,bob=moving?Math.sin(now/90+hash(a.id)*6)*2:0;const animal=a.kind==='animal';const colors={rabbit:'#dad4c5',dog:'#9b6b3e',cat:'#77736a',bird:'#6ba1a5',deer:'#9c7148',cougar:'#c29154',bear:'#4b3427'};ctx.save();ctx.translate(p.x,p.y+bob);if(animal){const size=Math.max(3,state.scale*(a.subtype==='bear'?.55:a.subtype==='deer'?.43:.3));ctx.fillStyle=colors[a.subtype]||'#c7a36a';ctx.beginPath();ctx.ellipse(0,-size*.5,size,size*.62,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(size*.7,-size*.75,size*.45,0,Math.PI*2);ctx.fill();}else{drawPersonShape(0,0,'#c9864f','#324e7a',moving,now,hash(a.id));ctx.fillStyle='#fff0ba';ctx.font='9px monospace';ctx.textAlign='center';ctx.fillText(a.name,0,-state.scale*1.35);}ctx.restore();}
+  function drawPlayer(player,isMe,detail,now){const p=toScreen(player.position),moving=state.movingUntil.get(player.id)>now&&detail===2;ctx.save();ctx.translate(p.x,p.y);drawPersonShape(0,0,isMe?'#e6c86c':'#d68855',isMe?'#37689a':'#784f91',moving,now,hash(player.id));if(detail>0){ctx.fillStyle=isMe?'#fff3a5':'#f0e8d1';ctx.font='700 9px monospace';ctx.textAlign='center';ctx.fillText(isMe?'YOU':player.name,0,-state.scale*1.35);}ctx.restore();}
+  function drawPersonShape(x,y,skin,shirt,moving,now,phase){const s=Math.max(5,state.scale*.46),step=moving?Math.sin(now/75+phase*6)*s*.32:0,bob=moving?Math.abs(Math.sin(now/75+phase*6))*1.5:0;ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(x,y+2,s*.65,s*.25,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#292421';ctx.lineWidth=Math.max(2,s*.18);ctx.beginPath();ctx.moveTo(x-s*.18,y-s*.2-bob);ctx.lineTo(x-s*.22-step,y+s*.48);ctx.moveTo(x+s*.18,y-s*.2-bob);ctx.lineTo(x+s*.22+step,y+s*.48);ctx.stroke();ctx.fillStyle=shirt;ctx.fillRect(x-s*.38,y-s*.82-bob,s*.76,s*.75);ctx.fillStyle=skin;ctx.beginPath();ctx.arc(x,y-s*1.03-bob,s*.34,0,Math.PI*2);ctx.fill();}
 
-  function drawSidewalk(entity) {
-    const width = propertyNumber(entity, 'widthMeters', 8) * state.scale;
-    drawGeometry(entity, null, '#827e72', Math.max(5, width + 2));
-    drawGeometry(entity, null, '#b7b09e', Math.max(3, width));
+  function drawTarget(now){if(!state.target)return;const p=toScreen(state.target),r=8+Math.sin(now/180)*2;ctx.strokeStyle='#fff09a';ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();}
+  function drawAtmosphere(me,detail,now){const light=daylight();const moonBoost=!state.weather?.isDay?Math.max(0,state.weather?.moonIllumination||0)*.18:0;const darkness=Math.max(0,.7-light*.7-moonBoost);if(darkness>.02){if(me){const p=toScreen(me.position),radius=detail===0?70:150,gradient=ctx.createRadialGradient(p.x,p.y,10,p.x,p.y,radius);gradient.addColorStop(0,`rgba(8,18,29,${darkness*.06})`);gradient.addColorStop(.35,`rgba(8,18,29,${darkness*.16})`);gradient.addColorStop(1,`rgba(8,18,29,${darkness})`);ctx.fillStyle=gradient;}else ctx.fillStyle=`rgba(8,18,29,${darkness})`;ctx.fillRect(0,0,innerWidth,innerHeight);}
+    const code=state.weather?.weatherCode??0,rain=(code>=51&&code<=99)&&code<71||code>=80,snow=code>=71&&code<=77;if((rain||snow)&&detail>0){const count=detail===2?90:35;ctx.strokeStyle=rain?'rgba(169,211,232,.55)':'rgba(245,250,255,.8)';ctx.lineWidth=rain?1:2;for(let i=0;i<count;i++){const seed=hash(`${i}:${Math.floor(now/120)}`),x=(seed*innerWidth+(now*.28*(i%3+1)))%innerWidth,y=(hash(`${i}:y`)*innerHeight+now*.45)%innerHeight;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-(rain?4:1),y+(rain?11:2));ctx.stroke();}}
   }
+  function daylight(){if(!state.weather?.sunriseUtc||!state.weather?.sunsetUtc)return state.weather?.isDay?1:.12;const now=Date.now(),rise=Date.parse(state.weather.sunriseUtc),set=Date.parse(state.weather.sunsetUtc),twilight=45*60000;if(now<rise-twilight||now>set+twilight)return .08;if(now<rise)return .08+.92*(now-(rise-twilight))/twilight;if(now>set)return 1-.92*(now-set)/twilight;return 1;}
 
-  function drawTerrain(entity) {
-    const terrain = entity.properties?.terrain || 'grass';
-    const colors = {
-      grass: ['#537643', '#72935a'], forest: ['#244b32', '#3b6944'], sand: ['#c3a765', '#e0c781'],
-      mud: ['#664833', '#886247'], pavement: ['#737875', '#929590']
-    };
-    const color = colors[terrain] || colors.grass;
-    drawGeometry(entity, color[0], color[1], 1.5, true);
-  }
+  function worldToGps(position){const region=position.region,lat0=(region.latitudeBand+.5)*Math.PI/180,lon0=(region.longitudeBand+.5)*Math.PI/180,R=6378137,e2=6.69437999014e-3,sin=Math.sin(lat0),den=Math.sqrt(1-e2*sin*sin),mLon=R*Math.cos(lat0)/den,mLat=R*(1-e2)/Math.pow(1-e2*sin*sin,1.5);return{latitude:(lat0+position.y/mLat)*180/Math.PI,longitude:(lon0+position.x/mLon)*180/Math.PI};}
+  function gpsText(position){if(!position)return'—';const g=worldToGps(position);return`${g.latitude.toFixed(6)}, ${g.longitude.toFixed(6)}`;}
+  function updateTelemetry(me){if(!me)return;ui.playerGps.textContent=gpsText(me.position);ui.destinationGps.textContent=state.target?gpsText({...state.target,region:me.position.region}):'—';ui.terrain.textContent=title(me.terrain);ui.elevation.textContent=`${me.position.z.toFixed(1)} m / ${(me.position.z*3.28084).toFixed(0)} ft`;ui.speed.textContent=`${(me.speedMetersPerSecond*2.23694).toFixed(1)} mph`;const distance=state.target?Math.hypot(state.target.x-me.position.x,state.target.y-me.position.y):null;ui.distance.textContent=distance===null?'—':distance>=1000?`${(distance/1000).toFixed(2)} km`:`${distance.toFixed(1)} m`;ui.camera.textContent=`${Math.hypot(state.camera.x-me.position.x,state.camera.y-me.position.y).toFixed(1)} m · ${lod()===2?'full':lod()===1?'medium':'light'} detail`;const w=state.weather;ui.weather.textContent=w?.isAvailable?`${w.condition} · ${w.temperatureCelsius.toFixed(1)} °C / ${(w.temperatureCelsius*9/5+32).toFixed(0)} °F`:'Unavailable';ui.sun.textContent=w?.sunriseUtc?`${clock(w.sunriseUtc)} / ${clock(w.sunsetUtc)}`:'—';ui.moon.textContent=w?.moonPhase?`${w.moonPhase} · ${Math.round(w.moonIllumination*100)}%`:'—';const hearts=Math.max(0,me.healthHearts??10),full=Math.floor(hearts),empty=Math.max(0,10-Math.ceil(hearts));ui.hearts.textContent=`${'♥'.repeat(full)}${hearts%1?'◒':''}${'♡'.repeat(empty)}  ${hearts.toFixed(2)}/10`;}
+  const title=value=>String(value||'').replace(/([A-Z])/g,' $1').trim().replace(/^./,c=>c.toUpperCase());
+  const clock=value=>new Date(value).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+  function updateMode(mode){document.querySelectorAll('[data-mode]').forEach(button=>button.classList.toggle('active',button.dataset.mode===String(mode||'walk').toLowerCase()));}
 
-  function drawWater(entity) {
-    const closed = entity.geometry?.length > 3;
-    if (closed) {
-      drawGeometry(entity, '#174b66', '#65a9b6', Math.max(4, state.scale * 6), true);
-      drawGeometry(entity, null, '#327c91', Math.max(2, state.scale * 1.5), true);
-    } else {
-      drawGeometry(entity, null, '#65a9b6', Math.max(4, state.scale * 3));
-      drawGeometry(entity, null, '#327c91', Math.max(2, state.scale * 1.2));
-    }
-  }
+  function movementLoop(time){const me=state.players.get(state.playerId);if(me&&time-state.lastInput>28){let dx=0,dy=0;if(state.keys.has('w')||state.keys.has('arrowup'))dy+=1;if(state.keys.has('s')||state.keys.has('arrowdown'))dy-=1;if(state.keys.has('a')||state.keys.has('arrowleft'))dx-=1;if(state.keys.has('d')||state.keys.has('arrowright'))dx+=1;if(dx||dy){state.target=null;state.path=[];send({type:'moveRequest',x:dx,y:dy,sequence:++state.pathSequence});state.lastInput=time;}else if(state.target){while(state.path.length&&Math.hypot(state.path[0].x-me.position.x,state.path[0].y-me.position.y)<.45)state.path.shift();const waypoint=state.path[0]||state.target,tx=waypoint.x-me.position.x,ty=waypoint.y-me.position.y,d=Math.hypot(tx,ty);if(d<.4&&!state.path.length){state.target=null;}else if(d>.01){send({type:'moveRequest',x:tx/d,y:ty/d,sequence:state.pathSequence});state.lastInput=time;}}}requestAnimationFrame(movementLoop);}
 
-  function drawBuilding(entity) {
-    if (!entity.geometry?.length) return;
-    const ground = entity.geometry.map(toScreen);
-    const levels = Math.max(2, Number(entity.properties?.['building:levels'] || entity.properties?.levels || 2));
-    const height = Math.min(160, levels * 3.2 * state.scale * .55);
-    const roof = ground.map(point => ({ x: point.x, y: point.y - height }));
-
-    const lastGround = ground[ground.length - 1];
-    const edgeCount = ground[0].x === lastGround.x && ground[0].y === lastGround.y ? ground.length - 1 : ground.length;
-    for (let index = 0; index < edgeCount; index++) {
-      const next = (index + 1) % ground.length;
-      ctx.fillStyle = index % 2 ? '#59483e' : '#625044';
-      ctx.beginPath(); ctx.moveTo(roof[index].x, roof[index].y); ctx.lineTo(roof[next].x, roof[next].y);
-      ctx.lineTo(ground[next].x, ground[next].y); ctx.lineTo(ground[index].x, ground[index].y); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = '#332c27'; ctx.lineWidth = 1; ctx.stroke();
-    }
-
-    ctx.fillStyle = '#8a7462'; ctx.strokeStyle = '#b39a7e'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(roof[0].x, roof[0].y);
-    for (let index = 1; index < roof.length; index++) ctx.lineTo(roof[index].x, roof[index].y);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-
-    const door = state.doorsByBuilding.get(entity.id);
-    if (door) drawDoorOnBuilding(door);
-  }
-
-  function drawDoorOnBuilding(entity) {
-    const facing = propertyNumber(entity, 'facingDegrees', 0) * Math.PI / 180;
-    const tangentX = -Math.sin(facing) * .45;
-    const tangentY = Math.cos(facing) * .45;
-    const left = toScreen({ x: entity.position.x - tangentX, y: entity.position.y - tangentY });
-    const right = toScreen({ x: entity.position.x + tangentX, y: entity.position.y + tangentY });
-    const height = 2.1 * state.scale * .55;
-    ctx.fillStyle = '#35251b'; ctx.strokeStyle = '#c49a52'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(left.x, left.y); ctx.lineTo(right.x, right.y);
-    ctx.lineTo(right.x, right.y - height); ctx.lineTo(left.x, left.y - height); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#e0ba63';
-    ctx.beginPath(); ctx.arc(right.x - ((right.x - left.x) * .22), right.y - height * .48, 1.4, 0, Math.PI * 2); ctx.fill();
-  }
-
-  function drawRaisedObjects() {
-    const renderables = [];
-    for (const entity of state.base) {
-      if (entity.kind === 'building') {
-        const depth = Math.max(...entity.geometry.map(point => toScreen(point).y));
-        renderables.push({ depth, draw: () => drawBuilding(entity) });
-      } else if (entity.kind === 'tree') {
-        renderables.push({ depth: toScreen(entity.position).y, draw: () => drawTree(entity) });
-      } else if (entity.kind === 'fence') {
-        const depth = Math.max(...entity.geometry.map(point => toScreen(point).y));
-        renderables.push({ depth, draw: () => drawFence(entity) });
-      } else if (entity.kind === 'vehicle') {
-        renderables.push({ depth: toScreen(entity.position).y, draw: () => drawVehicle(entity) });
-      }
-    }
-    for (const player of state.players.values()) {
-      renderables.push({ depth: toScreen(player.position).y, draw: () => drawPlayer(player, player.id === state.playerId) });
-    }
-    renderables.sort((left, right) => left.depth - right.depth);
-    for (const renderable of renderables) renderable.draw();
-  }
-
-  function drawFence(entity) {
-    if (!entity.geometry?.length) return;
-    drawGeometry(entity, null, '#4b3424', Math.max(2, state.scale * .16));
-    for (const point of entity.geometry) {
-      const p = toScreen(point);
-      ctx.fillStyle = '#86603a';
-      ctx.fillRect(p.x - 2, p.y - state.scale * .55, 4, state.scale * .65);
-    }
-  }
-
-  function drawVehicle(entity) {
-    const p = toScreen(entity.position);
-    const length = propertyNumber(entity, 'lengthMeters', 4.5) * state.scale;
-    const width = propertyNumber(entity, 'widthMeters', 1.9) * state.scale * state.pitch;
-    const angle = propertyNumber(entity, 'rotationDegrees', 0) * Math.PI / 180;
-    const projectedAngle = Math.atan2(-Math.sin(angle) * state.pitch, Math.cos(angle) + (Math.sin(angle) * state.shear));
-    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(projectedAngle);
-    ctx.fillStyle = 'rgba(3,8,7,.4)'; ctx.fillRect(-length / 2 + 3, -width / 2 + 5, length, width);
-    ctx.fillStyle = '#8d4e3e'; ctx.fillRect(-length / 2, -width / 2, length, width);
-    ctx.fillStyle = '#b7d0cf'; ctx.fillRect(-length * .15, -width * .42, length * .38, width * .84);
-    ctx.strokeStyle = '#302b29'; ctx.lineWidth = 2; ctx.strokeRect(-length / 2, -width / 2, length, width);
-    ctx.restore();
-  }
-
-  function drawTree(entity) {
-    const p = toScreen(entity.position);
-    const r = Math.max(3, state.scale * 1.1);
-    ctx.fillStyle = 'rgba(3,10,8,.35)'; ctx.beginPath(); ctx.ellipse(p.x + r * .45, p.y + 2, r, r * .38, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#5a3e27'; ctx.fillRect(p.x - 2, p.y - r * .5, 4, r * .8);
-    ctx.fillStyle = '#183b2b'; ctx.beginPath(); ctx.arc(p.x + 2, p.y - r * .9, r + 2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = entity.properties?.species === 'oak' ? '#507b4e' : '#3e7354'; ctx.beginPath(); ctx.arc(p.x, p.y - r, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(169,202,137,.32)'; ctx.beginPath(); ctx.arc(p.x - r * .3, p.y - r * 1.3, r * .38, 0, Math.PI * 2); ctx.fill();
-  }
-
-  function drawMoveTarget() {
-    if (!state.moveTarget) return;
-    const p = toScreen(state.moveTarget);
-    const pulse = 5 + ((Math.sin(Date.now() / 150) + 1) * 2);
-    ctx.strokeStyle = 'rgba(243,214,128,.8)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(p.x, p.y, pulse, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#f3d680';
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y - 4); ctx.lineTo(p.x + 4, p.y); ctx.lineTo(p.x, p.y + 4); ctx.lineTo(p.x - 4, p.y); ctx.closePath(); ctx.fill();
-  }
-
-  function drawPlayer(player, self) {
-    const p = toScreen(player.position);
-    const unit = Math.max(1, state.scale / 14);
-    const facing = state.facings.get(player.id) || (self ? state.facing : 'south');
-    const tunic = self ? '#d6a84a' : characterColor(player.id);
-    const tunicDark = self ? '#8f652b' : '#31576b';
-
-    ctx.fillStyle = 'rgba(3,10,8,.42)';
-    ctx.beginPath(); ctx.ellipse(p.x, p.y + unit * 5, unit * 4.2, unit * 1.8, 0, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = '#302a25';
-    ctx.fillRect(p.x - unit * 3, p.y + unit * 2, unit * 2, unit * 3);
-    ctx.fillRect(p.x + unit, p.y + unit * 2, unit * 2, unit * 3);
-    ctx.fillStyle = '#171918';
-    ctx.fillRect(p.x - unit * 3, p.y + unit * 4, unit * 2, unit);
-    ctx.fillRect(p.x + unit, p.y + unit * 4, unit * 2, unit);
-
-    ctx.fillStyle = tunicDark;
-    ctx.fillRect(p.x - unit * 5, p.y - unit, unit, unit * 4);
-    ctx.fillRect(p.x + unit * 4, p.y - unit, unit, unit * 4);
-    ctx.fillStyle = tunic;
-    ctx.fillRect(p.x - unit * 4, p.y - unit * 2, unit * 8, unit * 5);
-    ctx.fillStyle = '#493921';
-    ctx.fillRect(p.x - unit * 4, p.y + unit, unit * 8, unit);
-    ctx.fillStyle = '#ead0aa';
-    ctx.fillRect(p.x - unit * 3, p.y - unit * 6, unit * 6, unit * 4);
-    ctx.fillStyle = self ? '#6a3f24' : '#44352d';
-    ctx.fillRect(p.x - unit * 3, p.y - unit * 7, unit * 6, unit * 2);
-    ctx.fillRect(p.x - unit * 4, p.y - unit * 6, unit, unit * 3);
-    ctx.fillRect(p.x + unit * 3, p.y - unit * 6, unit, unit * 3);
-
-    ctx.fillStyle = '#26251f';
-    if (facing === 'south') {
-      ctx.fillRect(p.x - unit * 2, p.y - unit * 4, unit, unit);
-      ctx.fillRect(p.x + unit, p.y - unit * 4, unit, unit);
-    } else if (facing === 'east') {
-      ctx.fillRect(p.x + unit, p.y - unit * 4, unit, unit);
-    } else if (facing === 'west') {
-      ctx.fillRect(p.x - unit * 2, p.y - unit * 4, unit, unit);
-    } else {
-      ctx.fillStyle = self ? '#6a3f24' : '#44352d';
-      ctx.fillRect(p.x - unit * 2, p.y - unit * 5, unit * 4, unit * 2);
-    }
-
-    ctx.fillStyle = '#edf0e7'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(player.name, p.x, p.y - unit * 9);
-    if (self) { ctx.strokeStyle = 'rgba(228,185,95,.18)'; ctx.beginPath(); ctx.arc(p.x, p.y, 5 * state.scale, 0, Math.PI * 2); ctx.stroke(); }
-  }
-
-  function characterColor(id) {
-    const palette = ['#5489a3', '#668f57', '#9b6158', '#785f9e', '#b17743'];
-    let hash = 0;
-    for (const character of id) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
-    return palette[hash % palette.length];
-  }
-
-  function drawWeatherEffects() {
-    const weather = state.weather;
-    if (!weather?.isAvailable) return;
-    const rainy = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(weather.weatherCode);
-    const snowy = [71, 73, 75, 77, 85, 86].includes(weather.weatherCode);
-    if (!weather.isDay || weather.weatherCode >= 3) {
-      ctx.fillStyle = weather.isDay ? 'rgba(20,30,35,.11)' : 'rgba(5,12,24,.30)';
-      ctx.fillRect(0, 0, innerWidth, innerHeight);
-    }
-    if (!rainy && !snowy) return;
-    const count = Math.min(180, 45 + Math.round(weather.precipitationMillimeters * 55));
-    const time = Date.now() / 12;
-    ctx.strokeStyle = snowy ? 'rgba(241,246,241,.8)' : 'rgba(151,205,230,.52)';
-    ctx.fillStyle = 'rgba(241,246,241,.8)';
-    ctx.lineWidth = 1;
-    for (let index = 0; index < count; index++) {
-      const x = ((index * 83.17) + time * (snowy ? .15 : .8)) % (innerWidth + 40) - 20;
-      const y = ((index * 47.73) + time * (snowy ? .35 : 1.7)) % (innerHeight + 50) - 25;
-      if (snowy) { ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill(); }
-      else { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 13); ctx.stroke(); }
-    }
-  }
-
-  function updateTelemetry(player) {
-    if (player) {
-      terrainValue.textContent = formatTerrain(player.terrain);
-      elevationValue.textContent = `${player.position.z.toFixed(1)} m`;
-      const speed = Date.now() - state.lastMovementAt < 220 ? player.speedMetersPerSecond : 0;
-      speedValue.textContent = `${(speed * 2.23694).toFixed(1)} mph`;
-      distanceValue.textContent = state.moveTarget
-        ? `${Math.hypot(state.moveTarget.x - player.position.x, state.moveTarget.y - player.position.y).toFixed(1)} m away`
-        : '—';
-    }
-    const weather = state.weather;
-    weatherValue.textContent = weather?.isAvailable
-      ? `${weather.condition} · ${Math.round(weather.temperatureCelsius)}°C`
-      : 'Unavailable';
-  }
-
-  function formatTerrain(value) {
-    return String(value || 'grass').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, character => character.toUpperCase());
-  }
-
-  function propertyNumber(entity, key, fallback) {
-    const value = Number(entity.properties?.[key]);
-    return Number.isFinite(value) ? value : fallback;
-  }
-
-  function drawCoordinates() {
-    const me = state.players.get(state.playerId); if (!me) return;
-    ctx.fillStyle = 'rgba(229,234,222,.55)'; ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'right';
-    ctx.fillText(`${me.position.region.latitudeBand},${me.position.region.longitudeBand}  X ${me.position.x.toFixed(1)}m  Y ${me.position.y.toFixed(1)}m  Z ${me.position.z.toFixed(1)}m  ·  ${state.scale.toFixed(1)}px/m`, innerWidth - 18, innerHeight - 18);
-  }
-
-  addEventListener('keydown', event => {
-    if (!event.repeat) state.keys.add(event.key.toLowerCase());
-    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(event.key.toLowerCase())) {
-      state.followCamera = true;
-      actionMenu.hidden = true;
-    }
-  });
-  addEventListener('keyup', event => state.keys.delete(event.key.toLowerCase()));
-  addEventListener('blur', () => state.keys.clear());
-  canvas.addEventListener('wheel', event => { event.preventDefault(); state.scale = Math.max(.5, Math.min(32, state.scale * (event.deltaY > 0 ? .88 : 1.14))); }, { passive: false });
-  canvas.addEventListener('click', event => {
-    if (event.button !== 0) return;
-    actionMenu.hidden = true;
-    state.followCamera = true;
-    state.moveTarget = toWorld({ x: event.clientX, y: event.clientY });
-    state.path = [];
-    send({ type: 'pathRequest', x: state.moveTarget.x, y: state.moveTarget.y, sequence: ++state.pathSequence });
-  });
-  canvas.addEventListener('pointerdown', event => {
-    if (event.button !== 2) return;
-    state.pointer = { down: true, dragged: false, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY };
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener('pointermove', event => {
-    if (!state.pointer.down) return;
-    const totalDistance = Math.hypot(event.clientX - state.pointer.startX, event.clientY - state.pointer.startY);
-    if (totalDistance > 4) state.pointer.dragged = true;
-    if (state.pointer.dragged) {
-      const screenX = event.clientX - state.pointer.lastX;
-      const screenY = event.clientY - state.pointer.lastY;
-      const worldY = -screenY / (state.scale * state.pitch);
-      const worldX = (screenX / state.scale) - (worldY * state.shear);
-      state.camera.x -= worldX;
-      state.camera.y -= worldY;
-      state.followCamera = false;
-      actionMenu.hidden = true;
-    }
-    state.pointer.lastX = event.clientX;
-    state.pointer.lastY = event.clientY;
-  });
-  canvas.addEventListener('pointerup', event => {
-    if (event.button !== 2 || !state.pointer.down) return;
-    if (!state.pointer.dragged) {
-      actionMenu.style.left = `${Math.min(event.clientX, innerWidth - 210)}px`;
-      actionMenu.style.top = `${Math.min(event.clientY, innerHeight - 90)}px`;
-      actionMenu.hidden = false;
-    }
-    state.pointer.down = false;
-  });
-  canvas.addEventListener('pointercancel', () => { state.pointer.down = false; });
-  canvas.addEventListener('contextmenu', event => event.preventDefault());
-  centerButton.addEventListener('click', () => {
-    state.followCamera = true;
-    const me = state.players.get(state.playerId);
-    if (me) state.camera = { x: me.position.x, y: me.position.y };
-    actionMenu.hidden = true;
-  });
-
-  setInterval(() => {
-    let x = (state.keys.has('d') || state.keys.has('arrowright') ? 1 : 0) - (state.keys.has('a') || state.keys.has('arrowleft') ? 1 : 0);
-    let y = (state.keys.has('w') || state.keys.has('arrowup') ? 1 : 0) - (state.keys.has('s') || state.keys.has('arrowdown') ? 1 : 0);
-    if (x || y) {
-      state.path = [];
-      state.moveTarget = null;
-    } else if (state.path.length) {
-      const me = state.players.get(state.playerId);
-      if (me) {
-        const waypoint = state.path[0];
-        const dx = waypoint.x - me.position.x;
-        const dy = waypoint.y - me.position.y;
-        const distance = Math.hypot(dx, dy);
-        if (distance <= .35) {
-          state.path.shift();
-          if (!state.path.length) state.moveTarget = null;
-        } else {
-          x = dx / distance;
-          y = dy / distance;
-        }
-      }
-    }
-    if (x || y) {
-      if (Math.abs(x) > Math.abs(y)) state.facing = x > 0 ? 'east' : 'west';
-      else state.facing = y > 0 ? 'north' : 'south';
-      state.facings.set(state.playerId, state.facing);
-      send({ type: 'moveRequest', x, y, sequence: ++state.sequence });
-    }
-  }, 50);
-
-  addEventListener('resize', resize); resize(); connect(); render();
+  canvas.addEventListener('mousedown',event=>{if(event.button===2){state.pointer={down:true,dragged:false,x:event.clientX,y:event.clientY};ui.actionMenu.hidden=true;}});
+  addEventListener('mousemove',event=>{if(!state.pointer.down)return;const dx=event.clientX-state.pointer.x,dy=event.clientY-state.pointer.y;if(Math.hypot(dx,dy)>2)state.pointer.dragged=true;const before=toWorld({x:innerWidth/2,y:innerHeight/2});state.camera.x-=dx/state.scale;state.camera.y+=dy/(state.scale*state.pitch);state.camera.x+=dy/state.scale*state.shear/state.pitch;state.pointer.x=event.clientX;state.pointer.y=event.clientY;state.follow=false;});
+  addEventListener('mouseup',event=>{if(event.button!==2||!state.pointer.down)return;if(!state.pointer.dragged){ui.actionMenu.style.left=`${Math.min(event.clientX,innerWidth-195)}px`;ui.actionMenu.style.top=`${Math.min(event.clientY,innerHeight-85)}px`;ui.actionMenu.hidden=false;}state.pointer.down=false;});
+  canvas.addEventListener('contextmenu',event=>event.preventDefault());
+  canvas.addEventListener('click',event=>{if(event.button!==0)return;ui.actionMenu.hidden=true;const target=toWorld({x:event.clientX,y:event.clientY});state.target=target;state.path=[];state.pathSequence++;send({type:'pathRequest',x:target.x,y:target.y,sequence:state.pathSequence});});
+  canvas.addEventListener('wheel',event=>{event.preventDefault();const anchor=toWorld({x:event.clientX,y:event.clientY});state.scale=Math.max(1.2,Math.min(28,state.scale*Math.exp(-event.deltaY*.001)));const after=toWorld({x:event.clientX,y:event.clientY});state.camera.x+=anchor.x-after.x;state.camera.y+=anchor.y-after.y;state.follow=false;},{passive:false});
+  addEventListener('keydown',event=>{const key=event.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){event.preventDefault();state.keys.add(key);state.follow=true;}});
+  addEventListener('keyup',event=>state.keys.delete(event.key.toLowerCase()));
+  ui.center.addEventListener('click',()=>state.follow=true);
+  document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>send({type:'setTravelMode',mode:button.dataset.mode})));
+  ui.god.addEventListener('change',()=>ui.rebuild.disabled=!ui.god.checked);
+  ui.rebuild.addEventListener('click',()=>{if(!ui.god.checked)return;if(confirm('Rebuild this area from its geographic source? All player-created area changes will be removed.'))send({type:'rebuildArea',godMode:true});});
+  addEventListener('resize',resize);resize();connect();requestAnimationFrame(render);requestAnimationFrame(movementLoop);
 })();

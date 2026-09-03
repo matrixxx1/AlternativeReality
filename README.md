@@ -1,8 +1,8 @@
-# Alternate Earth
+# AlternativeReality
 
 A renderer-neutral, self-hosted multiplayer world derived from real geography. One authoritative reality server drives every client: the current browser-based top-down client and, later, a browser-based WebGL 3D client.
 
-The playable vertical slice imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington; samples elevation; and renders terrain, roads, sidewalks, buildings, doors, water, trees, fences, vehicles, and players in an angled tile-styled 2D view. The authoritative server applies terrain-dependent real-world walking speeds, collision, route finding, elevation, deep-water drowning, live geographic weather, multiplayer synchronization, and SQLite character persistence. Object modification remains disabled during this exploration milestone.
+The playable vertical slice imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington as layout reference data; it never displays a real map. It builds a stylized angled tile world with roads, sidewalks, textured terrain, complete buildings, vegetation, wildlife, NPCs, vehicles, weather, and players. The authoritative server owns terrain-dependent real-world movement speeds, travel modes, collision, route finding, elevation, health/death, hourly local weather, multiplayer synchronization, and SQLite character persistence. Normal object modification remains disabled during this exploration milestone.
 
 ## Chosen stack
 
@@ -32,6 +32,8 @@ For access from other devices on the same network, run `tools/open-lan-port.ps1`
 - Use WASD or an arrow key to take direct control and cancel click-to-walk.
 - Right-drag to pan the camera; a stationary right-click opens the action window.
 - Use the mouse wheel to zoom.
+- Choose Walk, Run, Skateboard, or Bike from the travel panel. Running is twice walking speed. Skateboards move at 4× walking speed on roads/parking lots and 3× on sidewalks, but leaving a supported surface causes a fall and removes one quarter-heart.
+- God Mode exposes an administrator rebuild button which clears reality deltas, regenerates the area, and moves any trapped player to a safe position.
 
 Paved surfaces use a representative 3.5 mph walking speed, forest uses 2 mph, sand uses 1 mph, and mud, grass, and shallow water have their own canonical rates. Click-to-walk asks the server for a route around solid geometry. Deep water is deliberately excluded from routes; manually entering it drowns and resets the character to a safe starting point.
 
@@ -50,4 +52,4 @@ The smoke test opens two real WebSocket clients, moves client A, confirms both r
 
 Map features are © OpenStreetMap contributors and used under the [Open Database License](https://www.openstreetmap.org/copyright). Elevation is requested from an OpenTopoData SRTM90m endpoint and cached locally.
 
-Current weather is supplied by [Open-Meteo](https://open-meteo.com/) and refreshed by the reality server every ten minutes.
+Current temperature, precipitation, and conditions are supplied by [Open-Meteo](https://open-meteo.com/) and refreshed by the reality server hourly. The client derives sunlight from sunrise/sunset, shows the current moon phase, brightens full-moon nights, and gives the player a small local light in darkness.

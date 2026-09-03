@@ -14,7 +14,7 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
     {
         var latitude = coordinate.Latitude.ToString("F6", CultureInfo.InvariantCulture);
         var longitude = coordinate.Longitude.ToString("F6", CultureInfo.InvariantCulture);
-        var uri = $"v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,is_day&timezone=UTC";
+        var uri = $"v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,is_day&daily=sunrise,sunset&forecast_days=1&timezone=UTC";
         using var response = await _httpClient.GetAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
@@ -23,8 +23,12 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
         var observedAt = DateTimeOffset.TryParse(
             current.GetProperty("time").GetString(),
             CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
             out var parsed) ? parsed : DateTimeOffset.UtcNow;
+        var daily = document.RootElement.GetProperty("daily");
+        var sunrise = ParseUtc(daily.GetProperty("sunrise")[0].GetString());
+        var sunset = ParseUtc(daily.GetProperty("sunset")[0].GetString());
+        var (moonPhase, moonIllumination) = CalculateMoon(observedAt);
 
         return new WeatherState(
             Describe(code),
@@ -34,7 +38,34 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
             current.GetProperty("wind_speed_10m").GetDouble(),
             current.GetProperty("is_day").GetInt32() == 1,
             observedAt,
-            "Open-Meteo");
+            "Open-Meteo",
+            sunrise,
+            sunset,
+            moonPhase,
+            moonIllumination);
+    }
+
+    private static DateTimeOffset? ParseUtc(string? value) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
+
+    private static (string Name, double Illumination) CalculateMoon(DateTimeOffset time)
+    {
+        var knownNewMoon = new DateTimeOffset(2000, 1, 6, 18, 14, 0, TimeSpan.Zero);
+        const double synodicMonthDays = 29.530588853;
+        var phase = ((time - knownNewMoon).TotalDays % synodicMonthDays + synodicMonthDays) % synodicMonthDays / synodicMonthDays;
+        var illumination = (1 - Math.Cos(phase * Math.PI * 2)) / 2;
+        var name = phase switch
+        {
+            < .0625 or >= .9375 => "New moon",
+            < .1875 => "Waxing crescent",
+            < .3125 => "First quarter",
+            < .4375 => "Waxing gibbous",
+            < .5625 => "Full moon",
+            < .6875 => "Waning gibbous",
+            < .8125 => "Last quarter",
+            _ => "Waning crescent"
+        };
+        return (name, illumination);
     }
 
     private static string Describe(int code) => code switch

@@ -72,10 +72,21 @@ public sealed class RealitySocketHub
                         var movement = await _world.MoveAsync(characterId, root.Deserialize<MoveRequest>(SharedJson.Options)!, cancellationToken);
                         if (movement is not null)
                         {
-                            if (movement.Moved || movement.Drowned) await BroadcastAsync(new { type = "playerMoved", player = movement.Player }, null, cancellationToken);
+                            if (movement.Moved || movement.Drowned || movement.Fell || movement.Died) await BroadcastAsync(new { type = "playerMoved", player = movement.Player }, null, cancellationToken);
                             if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", message = "Something is blocking the way." }, cancellationToken);
-                            if (movement.Drowned) await connection.SendAsync(new { type = "playerDied", reason = "You entered deep water and drowned. You have returned to the starting point." }, cancellationToken);
+                            if (movement.Fell) await connection.SendAsync(new { type = "playerFell", message = movement.Message, player = movement.Player }, cancellationToken);
+                            if (movement.Died) await connection.SendAsync(new { type = "playerDied", reason = movement.Message, player = movement.Player }, cancellationToken);
                         }
+                        break;
+                    case "setTravelMode":
+                        var travelRequest = root.Deserialize<SetTravelModeRequest>(SharedJson.Options)!;
+                        var travelPlayer = await _world.SetTravelModeAsync(characterId, travelRequest.Mode, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = travelPlayer }, null, cancellationToken);
+                        break;
+                    case "rebuildArea":
+                        var rebuildRequest = root.Deserialize<RebuildAreaRequest>(SharedJson.Options)!;
+                        var rebuilt = await _world.RebuildAsync(characterId, rebuildRequest.GodMode, cancellationToken);
+                        await BroadcastAsync(new { type = "worldRebuilt", snapshot = rebuilt }, null, cancellationToken);
                         break;
                     case "pathRequest":
                         var pathRequest = root.Deserialize<PathRequest>(SharedJson.Options)!;
@@ -126,6 +137,9 @@ public sealed class RealitySocketHub
 
     public Task BroadcastWeatherAsync(CancellationToken cancellationToken = default) =>
         BroadcastAsync(new { type = "weatherChanged", weather = _world.Weather }, null, cancellationToken);
+
+    public Task BroadcastActorsAsync(IReadOnlyList<ActorState> actors, CancellationToken cancellationToken = default) =>
+        actors.Count == 0 ? Task.CompletedTask : BroadcastAsync(new { type = "actorsMoved", actors }, null, cancellationToken);
 
     private static string NormalizeCharacterId(string? value) =>
         Guid.TryParse(value, out var parsed) ? parsed.ToString("N") : Guid.NewGuid().ToString("N");

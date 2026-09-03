@@ -20,6 +20,18 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void TravelModesApplyAuthoritativeMultipliers()
+    {
+        var navigation = CreateNavigation();
+
+        Assert.Equal(navigation.SpeedFor(TerrainType.Road) * 2, navigation.SpeedFor(TerrainType.Road, TravelMode.Run));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Road) * 4, navigation.SpeedFor(TerrainType.Road, TravelMode.Skateboard));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Sidewalk) * 3, navigation.SpeedFor(TerrainType.Sidewalk, TravelMode.Skateboard));
+        Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.Grass, TravelMode.Skateboard));
+        Assert.True(WorldNavigation.SupportsTravelMode(TerrainType.Pavement, TravelMode.Skateboard));
+    }
+
+    [Fact]
     public void BuildingAndTreeAreSolid()
     {
         var building = Polygon("building", EntityKind.Building, 5, 5, 15, 15);
