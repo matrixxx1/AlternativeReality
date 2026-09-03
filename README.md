@@ -25,6 +25,8 @@ dotnet run --project src/AlternateEarth.Server
 
 Open [http://localhost:5080](http://localhost:5080) in two browser tabs. Give each a readable name with URLs such as `http://localhost:5080/?name=Matt` and `http://localhost:5080/?name=Friend`.
 
+For access from other devices on the same network, run `tools/open-lan-port.ps1` once from an Administrator PowerShell. It creates an inbound TCP 5080 rule restricted to `LocalSubnet`. Other devices can then open `http://<server-lan-ip>:5080`.
+
 - Move with WASD or the arrow keys.
 - Left-click within the gold five-meter ring to place a crate.
 - Right-click a nearby player-created object to remove it.
