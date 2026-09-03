@@ -52,6 +52,7 @@ public sealed partial class RealityWorld
             FlashlightOn = enabled ? player.FlashlightOn : player.FlashlightOn && InventoryQuantity(playerId,"flashlight")>0,
             LanternOn = enabled ? player.LanternOn : player.LanternOn && InventoryQuantity(playerId,"lantern")>0,
             LaserOn = enabled ? player.LaserOn : player.LaserOn && InventoryQuantity(playerId,"laser")>0,
+            MagicHikingShoesOn = enabled ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(playerId,"magicHikingShoes")>0,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken); return updated;
@@ -59,6 +60,15 @@ public sealed partial class RealityWorld
 
     public async Task<PlayerState> SetLightsAsync(string playerId,bool flashlight,bool lantern,bool laser,CancellationToken cancellationToken=default)
     { if(!_players.TryGetValue(playerId,out var player))throw new InvalidOperationException("Unknown player.");if(!player.GodMode&&flashlight&&InventoryQuantity(playerId,"flashlight")<=0)throw new InvalidOperationException("You need a flashlight in your inventory.");if(!player.GodMode&&lantern&&InventoryQuantity(playerId,"lantern")<=0)throw new InvalidOperationException("You need a lantern in your inventory.");if(!player.GodMode&&laser&&InventoryQuantity(playerId,"laser")<=0)throw new InvalidOperationException("You need a laser in your inventory.");var updated=player with{FlashlightOn=flashlight,LanternOn=lantern,LaserOn=laser,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated; }
+
+    public async Task<PlayerState> SetMagicHikingShoesAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (enabled && !player.GodMode && InventoryQuantity(playerId, "magicHikingShoes") <= 0) throw new InvalidOperationException("You need magic hiking shoes in your inventory.");
+        var updated = player with { MagicHikingShoesOn = enabled, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        await SavePlayerAsync(updated, cancellationToken);
+        return updated;
+    }
 
     private bool playerIsGod(string playerId) => _players.TryGetValue(playerId, out var player) && player.GodMode;
 
@@ -143,11 +153,12 @@ public sealed partial class RealityWorld
         if (!_dungeons.TryGetValue(player.LocationId, out var dungeon)) return new(player, false, true, false, false, false, "Dungeon unavailable.");
         var length = Math.Sqrt(request.X * request.X + request.Y * request.Y); var dx = length > 1 ? request.X / length : request.X; var dy = length > 1 ? request.Y / length : request.Y;
         var now = DateTimeOffset.UtcNow; var previous = _lastMovement.AddOrUpdate(player.Id, now, (_, old) => now); var elapsed = Math.Clamp((now - previous).TotalSeconds, .01, .15);
-        var speed = Navigation.SpeedFor(TerrainType.Pavement, player.TravelMode, player.Stamina / player.MaximumStamina) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicHikingShoes") > 0);
+        var speed = Navigation.SpeedFor(TerrainType.Pavement, player.TravelMode, player.Stamina / player.MaximumStamina, wearingMagicHikingShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
         var next = player.Position with { X = Math.Clamp(player.Position.X + dx * speed * elapsed, .5, dungeon.Width - .5), Y = Math.Clamp(player.Position.Y + dy * speed * elapsed, .5, dungeon.Height - .5), Z = 0 };
         var blocked = dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, next, wall)); if (blocked) next = player.Position;
         var updated = player with { Position = next, SpeedMetersPerSecond = blocked ? 0 : player.Position.Distance2D(next) / elapsed, Terrain = TerrainType.Pavement,
-            Stamina = player.TravelMode == TravelMode.Run && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - .45 * elapsed) : player.Stamina, Version = player.Version + 1 };
+            Stamina = player.TravelMode == TravelMode.Run && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, wearingMagicHikingShoes)) : player.Stamina, Version = player.Version + 1 };
         await RevealAsync(updated, dungeon, cancellationToken); await SavePlayerAsync(updated, cancellationToken); return new(updated, !blocked, blocked, false, false, false, null);
     }
 
@@ -229,9 +240,9 @@ public sealed partial class RealityWorld
 
     private TradeQuote GenerateTradeQuote(string playerId, ActorState merchant)
     {
-        var ranges = new (string Item, int Min, int Max)[] { ("rock",1,100),("ballBearing",5,200),("skateboard",20000,30000),("bike",40000,50000),("inflatableRaft",45000,65000),("flashlight",1000,5000),("lantern",5000,10000),("laser",20000,40000),("water",50,200),("food",200,500) };
+        var ranges = new (string Item, int Min, int Max)[] { ("rock",1,100),("ballBearing",5,200),("skateboard",20000,30000),("bike",40000,50000),("inflatableRaft",45000,65000),("flashlight",1000,5000),("lantern",5000,10000),("laser",20000,40000),("magicHikingShoes",10000,40000),("water",50,200),("food",200,500) };
         var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}")); var selected = ranges.OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray(); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
-        var offers = selected.Select(range => new MerchantOffer(range.Item, range.Item is "bike" or "skateboard" or "inflatableRaft" ? 1 : random.Next(3, 31), (long)Math.Clamp(Math.Round(random.Next(range.Min, range.Max + 1) * factor), range.Min, range.Max))).ToArray();
+        var offers = selected.Select(range => new MerchantOffer(range.Item, range.Item is "bike" or "skateboard" or "inflatableRaft" or "flashlight" or "lantern" or "laser" or "magicHikingShoes" ? 1 : random.Next(3, 31), (long)Math.Clamp(Math.Round(random.Next(range.Min, range.Max + 1) * factor), range.Min, range.Max))).ToArray();
         return new TradeQuote(merchant.Id, merchant.Name, friendship, offers);
     }
 

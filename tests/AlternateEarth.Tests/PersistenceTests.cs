@@ -52,7 +52,7 @@ public sealed class PersistenceTests : IAsyncLifetime
         var store = new SqliteRealityStore(Path.Combine(_directory, "characters.db"));
         await store.InitializeAsync(_reality);
         var player = new PlayerState("character-1", "Ada", new WorldPosition(_reality.Area.Region, 15, 25), 7,
-            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard, 6.5, 10, FlashlightOn:true,LanternOn:true,LaserOn:true);
+            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard, 6.5, 10, FlashlightOn:true,LanternOn:true,LaserOn:true,MagicHikingShoesOn:true);
 
         await store.SaveCharacterAsync(_reality.Id, player);
         var loaded = await new SqliteRealityStore(Path.Combine(_directory, "characters.db")).LoadCharacterAsync(_reality.Id, player.Id);
@@ -65,7 +65,7 @@ public sealed class PersistenceTests : IAsyncLifetime
         Assert.Equal(9.75, loaded.HealthHearts);
         Assert.Equal(TravelMode.Skateboard, loaded.TravelMode);
         Assert.Equal(6.5, loaded.Stamina);
-        Assert.True(loaded.FlashlightOn);Assert.True(loaded.LanternOn);Assert.True(loaded.LaserOn);
+        Assert.True(loaded.FlashlightOn);Assert.True(loaded.LanternOn);Assert.True(loaded.LaserOn);Assert.True(loaded.MagicHikingShoesOn);
     }
 
     [Fact]

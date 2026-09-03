@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v6
+# Renderer-neutral protocol v7
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state.
 
@@ -9,7 +9,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `moveRequest` | direction `x`, `y`; client `sequence` | normalizes direction, bounds elapsed time/speed, clamps world bounds |
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
 | `setTravelMode` | walk, run, skateboard, bike, or raft | validates terrain and equipment ownership |
-| `setGodMode`, `setLights` | requested administrative and light state | persists state; equipment checks are bypassed only while God Mode is active |
+| `setGodMode`, `setLights`, `setMagicHikingShoes` | requested administrative, light, and equipped-shoes state | persists state; equipment checks are bypassed only while God Mode is active |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, and current location |
 | `attack` | target ID and rock/slingshot weapon | validates ammo, range, accuracy, damage, death, and relationship change |
 | `requestTrade`, `confirmTrade`, `consumeItem` | merchant/item intent | validates proximity, inventory, stock, wallet, and effects |

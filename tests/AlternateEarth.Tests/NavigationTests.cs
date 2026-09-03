@@ -37,6 +37,20 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void MagicHikingShoesBoostWalkingAndRunningWhileIgnoringSelectedTerrainPenalties()
+    {
+        var navigation = CreateNavigation();
+        var pavedWalkingSpeed = navigation.SpeedFor(TerrainType.Pavement);
+
+        Assert.Equal(pavedWalkingSpeed * 2, navigation.SpeedFor(TerrainType.Grass, TravelMode.Walk, magicHikingShoes: true));
+        Assert.Equal(pavedWalkingSpeed * 2, navigation.SpeedFor(TerrainType.Mud, TravelMode.Walk, magicHikingShoes: true));
+        Assert.Equal(pavedWalkingSpeed * 2, navigation.SpeedFor(TerrainType.ShallowWater, TravelMode.Walk, magicHikingShoes: true));
+        Assert.Equal(pavedWalkingSpeed * 4, navigation.SpeedFor(TerrainType.Grass, TravelMode.Run, 1, magicHikingShoes: true));
+        Assert.Equal(WorldNavigation.RunningStaminaDrain(1, false) / 2, WorldNavigation.RunningStaminaDrain(1, true));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Grass, TravelMode.Bike), navigation.SpeedFor(TerrainType.Grass, TravelMode.Bike, magicHikingShoes: true));
+    }
+
+    [Fact]
     public void BuildingAndTreeAreSolid()
     {
         var building = Polygon("building", EntityKind.Building, 5, 5, 15, 15);

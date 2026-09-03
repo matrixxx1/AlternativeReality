@@ -80,7 +80,8 @@ public sealed record PlayerState(
     string LocationId = "outdoor",
     bool FlashlightOn = false,
     bool LanternOn = false,
-    bool LaserOn = false);
+    bool LaserOn = false,
+    bool MagicHikingShoesOn = false);
 
 public sealed record ActorState(
     string Id,

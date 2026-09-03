@@ -95,6 +95,11 @@ public sealed class RealitySocketHub
                         break;
                     case "setLights":
                         var lightRequest=root.Deserialize<SetLightsRequest>(SharedJson.Options)!;var litPlayer=await _world.SetLightsAsync(characterId,lightRequest.FlashlightOn,lightRequest.LanternOn,lightRequest.LaserOn,cancellationToken);await BroadcastAsync(new{type="playerUpdated",player=litPlayer},null,cancellationToken);break;
+                    case "setMagicHikingShoes":
+                        var shoesRequest = root.Deserialize<SetMagicHikingShoesRequest>(SharedJson.Options)!;
+                        var shoesPlayer = await _world.SetMagicHikingShoesAsync(characterId, shoesRequest.Enabled, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = shoesPlayer }, null, cancellationToken);
+                        break;
                     case "enterDungeon":
                         var enter = root.Deserialize<EnterDungeonRequest>(SharedJson.Options)!;
                         var entered = await _world.EnterDungeonAsync(characterId, enter.DoorId, cancellationToken);

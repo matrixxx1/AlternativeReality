@@ -59,19 +59,30 @@ public sealed class WorldNavigation
         _ => MilesPerHour(2.75)
     };
 
-    public double SpeedFor(TerrainType terrain, TravelMode mode, double staminaFraction = 1) => mode switch
+    public double SpeedFor(TerrainType terrain, TravelMode mode, double staminaFraction = 1, bool magicHikingShoes = false)
     {
-        TravelMode.Run => SpeedFor(terrain) * (1 + Math.Clamp(staminaFraction, 0, 1)),
-        TravelMode.Skateboard when terrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(terrain) * 4,
-        TravelMode.Skateboard when terrain == TerrainType.Sidewalk => SpeedFor(terrain) * 3,
-        TravelMode.Skateboard => SpeedFor(terrain),
-        TravelMode.Bike when terrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(terrain) * 4,
-        TravelMode.Bike when terrain == TerrainType.Sidewalk => SpeedFor(terrain) * 3,
-        TravelMode.Bike => SpeedFor(terrain) * 2.6,
-        TravelMode.Raft when terrain is TerrainType.ShallowWater or TerrainType.DeepWater => MilesPerHour(3),
-        TravelMode.Raft => MilesPerHour(.5),
-        _ => SpeedFor(terrain)
-    };
+        var hiking = magicHikingShoes && mode is TravelMode.Walk or TravelMode.Run;
+        var effectiveTerrain = hiking && terrain is TerrainType.Mud or TerrainType.Grass or TerrainType.ShallowWater
+            ? TerrainType.Pavement
+            : terrain;
+        var speed = mode switch
+        {
+            TravelMode.Run => SpeedFor(effectiveTerrain) * (1 + Math.Clamp(staminaFraction, 0, 1)),
+            TravelMode.Skateboard when effectiveTerrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(effectiveTerrain) * 4,
+            TravelMode.Skateboard when effectiveTerrain == TerrainType.Sidewalk => SpeedFor(effectiveTerrain) * 3,
+            TravelMode.Skateboard => SpeedFor(effectiveTerrain),
+            TravelMode.Bike when effectiveTerrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(effectiveTerrain) * 4,
+            TravelMode.Bike when effectiveTerrain == TerrainType.Sidewalk => SpeedFor(effectiveTerrain) * 3,
+            TravelMode.Bike => SpeedFor(effectiveTerrain) * 2.6,
+            TravelMode.Raft when effectiveTerrain is TerrainType.ShallowWater or TerrainType.DeepWater => MilesPerHour(3),
+            TravelMode.Raft => MilesPerHour(.5),
+            _ => SpeedFor(effectiveTerrain)
+        };
+        return hiking ? speed * 2 : speed;
+    }
+
+    public static double RunningStaminaDrain(double elapsedSeconds, bool magicHikingShoes) =>
+        .45 * Math.Max(0, elapsedSeconds) * (magicHikingShoes ? .5 : 1);
 
     public static bool SupportsTravelMode(TerrainType terrain, TravelMode mode) => mode switch
     {

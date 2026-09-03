@@ -79,7 +79,8 @@ public sealed partial class RealityWorld
             Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10,
             Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
             existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
-            existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false);
+            existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false,
+            existing?.MagicHikingShoesOn ?? false);
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
@@ -140,7 +141,8 @@ public sealed partial class RealityWorld
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
         var currentTerrain = Navigation.TerrainAt(player.Position.X, player.Position.Y);
         var staminaFraction = player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina;
-        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(characterId, "magicHikingShoes") > 0);
+        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction, wearingMagicHikingShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
             X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
@@ -184,7 +186,7 @@ public sealed partial class RealityWorld
         {
             Position = next with { Z = Navigation.ElevationAt(next.X, next.Y) }, Terrain = nextTerrain,
             SpeedMetersPerSecond = distance > .001 ? distance / elapsed : 0,
-            Stamina = player.TravelMode == TravelMode.Run && distance > .001 && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - (.45 * elapsed)) : player.Stamina,
+            Stamina = player.TravelMode == TravelMode.Run && distance > .001 && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, wearingMagicHikingShoes)) : player.Stamina,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken);
@@ -441,7 +443,7 @@ public sealed partial class RealityWorld
         {
             if (actor.IsMerchant)
             {
-                var goods = new[] { ("rocks", "$0.01-$1.00"), ("ball bearings", "$0.05-$2.00"), ("food", "$2-$5"), ("water", "$0.50-$2"), ("a flashlight", "$10-$50"), ("a lantern", "$50-$100"), ("a laser", "$200-$400"), ("a skateboard", "$200-$300"), ("a bike", "$400-$500"), ("an inflatable raft", "$450-$650") };
+                var goods = new[] { ("rocks", "$0.01-$1.00"), ("ball bearings", "$0.05-$2.00"), ("food", "$2-$5"), ("water", "$0.50-$2"), ("a flashlight", "$10-$50"), ("a lantern", "$50-$100"), ("a laser", "$200-$400"), ("magic hiking shoes", "$100-$400"), ("a skateboard", "$200-$300"), ("a bike", "$400-$500"), ("an inflatable raft", "$450-$650") };
                 var good = goods[_actorRandom.Next(goods.Length)];
                 return $"For sale! {good.Item1} for {good.Item2}.";
             }

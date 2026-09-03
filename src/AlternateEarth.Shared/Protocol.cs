@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 6;
+    public const int Version = 7;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -26,6 +26,7 @@ public sealed record OpenChestRequest(string ChestId);
 public sealed record ChestSeenRequest(string ChestId);
 public sealed record RestAtBedRequest(string BedId);
 public sealed record SetLightsRequest(bool FlashlightOn, bool LanternOn, bool LaserOn);
+public sealed record SetMagicHikingShoesRequest(bool Enabled);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);

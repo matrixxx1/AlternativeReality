@@ -18,7 +18,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   const playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 6) throw new Error(`Expected protocol 6, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 7) throw new Error(`Expected protocol 7, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
@@ -33,11 +33,15 @@ try {
   await first.waitFor(message => message.type === 'error' && message.message.includes('flashlight'));
   first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: false, lanternOn: false, laserOn:true }));
   await first.waitFor(message => message.type === 'error' && message.message.includes('laser'));
+  first.socket.send(JSON.stringify({ type: 'setMagicHikingShoes', enabled: true }));
+  await first.waitFor(message => message.type === 'error' && message.message.includes('hiking shoes'));
   first.socket.send(JSON.stringify({ type: 'setGodMode', enabled: true }));
   const god = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.godMode);
   if (god.player.walletCents < 50000 || god.player.water < 10 || god.player.stamina < 10) throw new Error('God Mode resources were not enforced.');
   first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: true,laserOn:true }));
   await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.flashlightOn && message.player.lanternOn&&message.player.laserOn);
+  first.socket.send(JSON.stringify({ type: 'setMagicHikingShoes', enabled: true }));
+  await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.magicHikingShoesOn);
   first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true }));
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
   const homeBase=welcomeA.privateState.base;
