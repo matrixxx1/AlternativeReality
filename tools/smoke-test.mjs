@@ -38,7 +38,7 @@ try {
     second.waitFor(message => message.type === 'welcome')
   ]);
   const playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 3) throw new Error(`Expected protocol 3, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 4) throw new Error(`Expected protocol 4, received ${welcomeA.protocolVersion}.`);
   if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
 
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
@@ -52,6 +52,7 @@ try {
   ]);
   if (seenByA.player.position.x !== seenByB.player.position.x) throw new Error('Clients received different authoritative positions.');
   if (seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative player did not move east.');
+  if (seenByA.player.stamina >= playerA.stamina) throw new Error('Running did not drain authoritative stamina.');
 
   first.socket.send(JSON.stringify({
     type: 'pathRequest', x: seenByA.player.position.x + 2, y: seenByA.player.position.y, sequence: 2
@@ -60,21 +61,28 @@ try {
   if (!path.waypoints?.length) throw new Error('Server did not return a walkable path.');
 
   first.socket.send(JSON.stringify({
+    type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true
+  }));
+  const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
+  if (teleported.player.position.x <= seenByA.player.position.x) throw new Error('God Mode teleport did not relocate the player.');
+
+  first.socket.send(JSON.stringify({
     type: 'placeObject', objectType: 'must-be-rejected',
     x: seenByA.player.position.x + 1, y: seenByA.player.position.y, rotationDegrees: 0
   }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
   const world = await fetch(`${baseUrl}/api/world`).then(response => response.json());
   const authoritativePlayer = world.players.find(player => player.id === welcomeA.playerId);
-  if (!authoritativePlayer || authoritativePlayer.position.x !== seenByA.player.position.x) throw new Error('Live world snapshot did not match the movement event.');
+  if (!authoritativePlayer || authoritativePlayer.position.x !== teleported.player.position.x) throw new Error('Live world snapshot did not match the teleport event.');
   console.log(JSON.stringify({
     ok: true,
     protocol: welcomeA.protocolVersion,
     actors: welcomeA.snapshot.actors.length,
     travelMode: modeChanged.player.travelMode,
+    godModeTeleport: true,
     movementSynchronized: true,
     serverPathfinding: true,
-    authoritativePosition: seenByA.player.position,
+    authoritativePosition: teleported.player.position,
     objectPlacementRejected: rejection.message
   }, null, 2));
 } finally {

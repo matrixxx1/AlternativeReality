@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -26,6 +26,7 @@
     <div><span>Sunrise / sunset</span><strong id="sunValue">—</strong></div>
     <div><span>Moon</span><strong id="moonValue">—</strong></div>
     <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
+    <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
     <button id="centerButton" type="button">Center on player</button>
   </section>
   <section class="panel travel-panel" aria-label="Travel mode">
@@ -49,9 +50,11 @@
     <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
   </section>
   <section id="actionMenu" class="panel action-menu" hidden>
-    <strong>Actions</strong><div>No actions available.</div>
+    <strong>Actions</strong>
+    <div id="noActions">No actions available.</div>
+    <button id="teleportButton" type="button" hidden>Teleport here</button>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

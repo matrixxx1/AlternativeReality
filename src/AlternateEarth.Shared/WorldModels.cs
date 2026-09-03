@@ -64,7 +64,9 @@ public sealed record PlayerState(
     double SpeedMetersPerSecond = 0,
     double HealthHearts = 10,
     double MaximumHealthHearts = 10,
-    TravelMode TravelMode = TravelMode.Walk);
+    TravelMode TravelMode = TravelMode.Walk,
+    double Stamina = 10,
+    double MaximumStamina = 10);
 
 public sealed record ActorState(
     string Id,

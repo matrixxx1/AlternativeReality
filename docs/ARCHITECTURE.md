@@ -111,4 +111,4 @@ Generated resource IDs and positions are stable for the same inputs. Untouched b
 
 ## Near-term implementation order
 
-The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, authoritative collision/pathfinding, hourly weather, health and travel modes, wandering server actors, persistent characters, browser exploration, and two-client synchronization. Next: chunk-specific snapshots, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.
+The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, authoritative collision/pathfinding, hourly weather, health, regenerating stamina and travel modes, wandering server actors, persistent characters, browser exploration, and two-client synchronization. Next: chunk-specific snapshots, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.

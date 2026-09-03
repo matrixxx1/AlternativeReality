@@ -34,7 +34,8 @@ public sealed class SqliteRealityStore
                 Id TEXT PRIMARY KEY, RealityId TEXT NOT NULL, Name TEXT NOT NULL,
                 RegionLatitude INTEGER NOT NULL, RegionLongitude INTEGER NOT NULL,
                 X REAL NOT NULL, Y REAL NOT NULL, Z REAL NOT NULL,
-                Health REAL NOT NULL DEFAULT 10, TravelMode TEXT NOT NULL DEFAULT 'Walk', Version INTEGER NOT NULL, UpdatedUtc TEXT NOT NULL,
+                Health REAL NOT NULL DEFAULT 10, TravelMode TEXT NOT NULL DEFAULT 'Walk', Stamina REAL NOT NULL DEFAULT 10,
+                Version INTEGER NOT NULL, UpdatedUtc TEXT NOT NULL,
                 FOREIGN KEY (RealityId) REFERENCES Reality(Id)
             );
             CREATE TABLE IF NOT EXISTS RealityDeltas (
@@ -60,6 +61,7 @@ public sealed class SqliteRealityStore
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "Stamina", "REAL NOT NULL DEFAULT 10", cancellationToken);
 
         command = connection.CreateCommand();
         command.CommandText = """
@@ -147,7 +149,7 @@ public sealed class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -155,7 +157,8 @@ public sealed class SqliteRealityStore
         return new PlayerState(characterId, reader.GetString(0),
             new WorldPosition(new RegionId(reader.GetInt32(1), reader.GetInt32(2)), reader.GetDouble(3), reader.GetDouble(4), reader.GetDouble(5)),
             reader.GetInt64(6), HealthHearts: Math.Clamp(reader.GetDouble(7), 0, 10),
-            TravelMode: Enum.TryParse<TravelMode>(reader.GetString(8), true, out var mode) ? mode : TravelMode.Walk);
+            TravelMode: Enum.TryParse<TravelMode>(reader.GetString(8), true, out var mode) ? mode : TravelMode.Walk,
+            Stamina: Math.Clamp(reader.GetDouble(9), 0, 10));
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default)
@@ -163,10 +166,11 @@ public sealed class SqliteRealityStore
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
-                Health = excluded.Health, TravelMode = excluded.TravelMode, Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
+                Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina,
+                Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
         command.Parameters.AddWithValue("$reality", realityId);
@@ -178,6 +182,7 @@ public sealed class SqliteRealityStore
         command.Parameters.AddWithValue("$z", player.Position.Z);
         command.Parameters.AddWithValue("$health", player.HealthHearts);
         command.Parameters.AddWithValue("$travelMode", player.TravelMode.ToString());
+        command.Parameters.AddWithValue("$stamina", player.Stamina);
         command.Parameters.AddWithValue("$version", player.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);

@@ -17,6 +17,7 @@ h1 { margin: 3px 0 4px; font-size: 20px; }
 .telemetry-panel .gps-row { display: block; padding: 5px 0; }
 .gps-row strong { display: block; color: #fff4a8; font: 700 14px/1.35 monospace; text-align: left; }
 .hearts strong { color: #ff5b58; letter-spacing: 1px; }
+.stamina strong { color: #69d9e8; letter-spacing: 1px; }
 button { color: #fff7cd; background: #35573d; border: 2px solid #b99345; border-radius: 3px; padding: 7px 10px; font: 700 12px inherit; cursor: pointer; }
 button:hover { background: #47774f; }
 button:disabled { opacity: .45; cursor: default; }
@@ -31,6 +32,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .god-panel input { accent-color: #d9b55c; }
 .action-menu { min-width: 180px; padding: 10px; font-size: 12px; }
 .action-menu div { color: #aeb9ab; margin-top: 7px; }
+.action-menu button { width: 100%; margin-top: 8px; }
 #toast { position: fixed; left: 50%; bottom: 145px; z-index: 5; transform: translate(-50%, 20px); color: #fff6d1; background: rgba(49,31,22,.96); border: 2px solid #d8a44a; border-radius: 4px; padding: 10px 16px; opacity: 0; pointer-events: none; transition: .18s; box-shadow: 3px 4px 0 rgba(0,0,0,.35); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 @media (max-width: 760px) {

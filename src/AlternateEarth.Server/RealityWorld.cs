@@ -65,7 +65,8 @@ public sealed class RealityWorld
         position = position with { Z = Navigation.ElevationAt(position.X, position.Y) };
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
-            Navigation.TerrainAt(position.X, position.Y), 0, health, 10, existing?.TravelMode ?? TravelMode.Walk);
+            Navigation.TerrainAt(position.X, position.Y), 0, health, 10, existing?.TravelMode ?? TravelMode.Walk,
+            Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10);
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
@@ -88,7 +89,8 @@ public sealed class RealityWorld
         var previous = _lastMovement.AddOrUpdate(characterId, now, (_, old) => now);
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
         var currentTerrain = Navigation.TerrainAt(player.Position.X, player.Position.Y);
-        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode);
+        var staminaFraction = player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina;
+        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction);
         var requested = Configuration.Area.Bounds.Clamp(player.Position with
         {
             X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
@@ -131,7 +133,9 @@ public sealed class RealityWorld
         var updated = player with
         {
             Position = next with { Z = Navigation.ElevationAt(next.X, next.Y) }, Terrain = nextTerrain,
-            SpeedMetersPerSecond = distance > .001 ? distance / elapsed : 0, Version = player.Version + 1
+            SpeedMetersPerSecond = distance > .001 ? distance / elapsed : 0,
+            Stamina = player.TravelMode == TravelMode.Run && distance > .001 ? Math.Max(0, player.Stamina - (.45 * elapsed)) : player.Stamina,
+            Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken);
         return new(updated, distance > .001, blocked && distance <= .001, false, false, false, null);
@@ -141,6 +145,46 @@ public sealed class RealityWorld
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         var updated = player with { TravelMode = mode, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        await SavePlayerAsync(updated, cancellationToken);
+        return updated;
+    }
+
+    public async Task<IReadOnlyList<PlayerState>> AdvanceStaminaAsync(TimeSpan elapsed, CancellationToken cancellationToken = default)
+    {
+        var changed = new List<PlayerState>();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var pair in _players.ToArray())
+        {
+            if (pair.Value.Stamina >= pair.Value.MaximumStamina ||
+                !_lastMovement.TryGetValue(pair.Key, out var lastMove) || now - lastMove < TimeSpan.FromSeconds(1)) continue;
+            var updated = pair.Value with
+            {
+                Stamina = Math.Min(pair.Value.MaximumStamina, pair.Value.Stamina + (.25 * elapsed.TotalSeconds)),
+                SpeedMetersPerSecond = 0,
+                Version = pair.Value.Version + 1
+            };
+            await SavePlayerAsync(updated, cancellationToken);
+            changed.Add(updated);
+        }
+        return changed;
+    }
+
+    public async Task<PlayerState> TeleportAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!request.GodMode) throw new InvalidOperationException("God Mode must be enabled to teleport.");
+        if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        var requested = Configuration.Area.Bounds.Clamp(player.Position with { X = request.X, Y = request.Y });
+        var destination = Navigation.IsBlocked(requested.X, requested.Y) || Navigation.TerrainAt(requested.X, requested.Y) == TerrainType.DeepWater
+            ? Navigation.FindNearestWalkable(requested)
+            : requested with { Z = Navigation.ElevationAt(requested.X, requested.Y) };
+        var updated = player with
+        {
+            Position = destination,
+            Terrain = Navigation.TerrainAt(destination.X, destination.Y),
+            SpeedMetersPerSecond = 0,
+            Version = player.Version + 1
+        };
+        _lastMovement[characterId] = DateTimeOffset.UtcNow;
         await SavePlayerAsync(updated, cancellationToken);
         return updated;
     }
@@ -274,7 +318,7 @@ public sealed class RealityWorld
     {
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
-            HealthHearts = 10, TravelMode = TravelMode.Walk, Version = player.Version + 1 };
+            HealthHearts = 10, Stamina = 10, TravelMode = TravelMode.Walk, Version = player.Version + 1 };
     }
 
     private async Task SavePlayerAsync(PlayerState player, CancellationToken cancellationToken)

@@ -25,6 +25,8 @@ public sealed class NavigationTests
         var navigation = CreateNavigation();
 
         Assert.Equal(navigation.SpeedFor(TerrainType.Road) * 2, navigation.SpeedFor(TerrainType.Road, TravelMode.Run));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Road) * 1.5, navigation.SpeedFor(TerrainType.Road, TravelMode.Run, .5));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Road), navigation.SpeedFor(TerrainType.Road, TravelMode.Run, 0));
         Assert.Equal(navigation.SpeedFor(TerrainType.Road) * 4, navigation.SpeedFor(TerrainType.Road, TravelMode.Skateboard));
         Assert.Equal(navigation.SpeedFor(TerrainType.Sidewalk) * 3, navigation.SpeedFor(TerrainType.Sidewalk, TravelMode.Skateboard));
         Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.Grass, TravelMode.Skateboard));

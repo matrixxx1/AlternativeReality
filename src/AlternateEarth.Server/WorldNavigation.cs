@@ -59,9 +59,9 @@ public sealed class WorldNavigation
         _ => MilesPerHour(2.75)
     };
 
-    public double SpeedFor(TerrainType terrain, TravelMode mode) => mode switch
+    public double SpeedFor(TerrainType terrain, TravelMode mode, double staminaFraction = 1) => mode switch
     {
-        TravelMode.Run => SpeedFor(terrain) * 2,
+        TravelMode.Run => SpeedFor(terrain) * (1 + Math.Clamp(staminaFraction, 0, 1)),
         TravelMode.Skateboard when terrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(terrain) * 4,
         TravelMode.Skateboard when terrain == TerrainType.Sidewalk => SpeedFor(terrain) * 3,
         TravelMode.Skateboard => SpeedFor(terrain),

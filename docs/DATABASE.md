@@ -5,7 +5,7 @@ SQLite runs in WAL mode. The schema is intentionally small and uses logical text
 | Table | Purpose |
 |---|---|
 | `Reality` | identity, seed, and serialized server configuration |
-| `Characters` | reality-owned authoritative name, region, position, ten-heart health, travel mode, version |
+| `Characters` | reality-owned authoritative name, region, position, ten-heart health, stamina, travel mode, version |
 | `RealityDeltas` | entity upserts and removal tombstones over regenerated base geography |
 | `Inventories` | owner/slot item stacks and logical metadata |
 | `Containers` | entity-to-inventory ownership and capacity |

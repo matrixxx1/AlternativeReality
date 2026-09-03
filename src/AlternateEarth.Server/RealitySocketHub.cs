@@ -88,6 +88,11 @@ public sealed class RealitySocketHub
                         var rebuilt = await _world.RebuildAsync(characterId, rebuildRequest.GodMode, cancellationToken);
                         await BroadcastAsync(new { type = "worldRebuilt", snapshot = rebuilt }, null, cancellationToken);
                         break;
+                    case "teleport":
+                        var teleportRequest = root.Deserialize<TeleportRequest>(SharedJson.Options)!;
+                        var teleportedPlayer = await _world.TeleportAsync(characterId, teleportRequest, cancellationToken);
+                        await BroadcastAsync(new { type = "playerTeleported", player = teleportedPlayer }, null, cancellationToken);
+                        break;
                     case "pathRequest":
                         var pathRequest = root.Deserialize<PathRequest>(SharedJson.Options)!;
                         var path = _world.FindPath(characterId, pathRequest);
@@ -140,6 +145,9 @@ public sealed class RealitySocketHub
 
     public Task BroadcastActorsAsync(IReadOnlyList<ActorState> actors, CancellationToken cancellationToken = default) =>
         actors.Count == 0 ? Task.CompletedTask : BroadcastAsync(new { type = "actorsMoved", actors }, null, cancellationToken);
+
+    public Task BroadcastPlayersAsync(IReadOnlyList<PlayerState> players, CancellationToken cancellationToken = default) =>
+        players.Count == 0 ? Task.CompletedTask : BroadcastAsync(new { type = "playersUpdated", players }, null, cancellationToken);
 
     private static string NormalizeCharacterId(string? value) =>
         Guid.TryParse(value, out var parsed) ? parsed.ToString("N") : Guid.NewGuid().ToString("N");
