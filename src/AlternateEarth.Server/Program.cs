@@ -44,6 +44,7 @@ builder.Services.AddSingleton<DeterministicWorldGenerator>();
 builder.Services.AddSingleton<IWeatherProvider>(services =>
     new OpenMeteoWeatherProvider(services.GetRequiredService<IHttpClientFactory>().CreateClient("weather")));
 builder.Services.AddSingleton<RealityWorld>();
+builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<RealitySocketHub>();
 builder.Services.AddHostedService<WeatherRefreshService>();
 builder.Services.AddHostedService<ActorSimulationService>();
@@ -77,6 +78,38 @@ app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
 }));
 app.MapGet("/api/world", (RealityWorld state) => Results.Ok(state.CreateSnapshot()));
 app.MapGet("/api/weather", (RealityWorld state) => Results.Ok(state.Weather));
+app.MapGet("/api/account/me", async (HttpContext context, AccountService accounts) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    return login is null ? Results.Unauthorized() : Results.Ok(new { login.AccountId, login.CharacterId, login.Username });
+});
+app.MapPost("/api/account/setup", async (HttpContext context, AccountService accounts, AccountRequest request) =>
+{
+    try
+    {
+        var login = await accounts.SetupOrLoginAsync(request.Username, request.Password, context.RequestAborted);
+        context.Response.Cookies.Append(AccountService.CookieName, login.SessionToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, Secure = context.Request.IsHttps, MaxAge = TimeSpan.FromDays(365) });
+        return Results.Ok(new { login.AccountId, login.CharacterId, login.Username, login.SessionToken });
+    }
+    catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+});
+app.MapGet("/api/account/characters", async (HttpContext context, AccountService accounts) =>
+{
+    var login=await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName],context.RequestAborted);if(login is null)return Results.Unauthorized();
+    return Results.Ok(new{activeCharacterId=login.CharacterId,characters=await accounts.GetCharactersAsync(login.AccountId,context.RequestAborted)});
+});
+app.MapPost("/api/account/characters", async (HttpContext context,AccountService accounts,RealityWorld state,CharacterRequest request) =>
+{
+    try{var login=await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName],context.RequestAborted);if(login is null)return Results.Unauthorized();if(!state.IsInOwnHome(login.CharacterId))return Results.BadRequest(new{message="Characters can only be managed inside your base."});var character=await accounts.AddCharacterAsync(login.AccountId,request.Name,context.RequestAborted);return Results.Ok(character);}catch(InvalidOperationException exception){return Results.BadRequest(new{message=exception.Message});}
+});
+app.MapPost("/api/account/characters/{characterId}/select", async (HttpContext context,AccountService accounts,RealityWorld state,string characterId) =>
+{
+    try{var login=await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName],context.RequestAborted);if(login is null)return Results.Unauthorized();var characters=await accounts.GetCharactersAsync(login.AccountId,context.RequestAborted);var target=characters.FirstOrDefault(c=>c.Id==characterId)??throw new InvalidOperationException("Character does not belong to this account.");await state.PrepareCharacterSwitchAsync(login.CharacterId,target.Id,target.Name,context.RequestAborted);await accounts.SetActiveCharacterAsync(login.AccountId,target.Id,context.RequestAborted);return Results.Ok(target);}catch(InvalidOperationException exception){return Results.BadRequest(new{message=exception.Message});}
+});
+app.MapDelete("/api/account/characters/{characterId}",async(HttpContext context,AccountService accounts,RealityWorld state,string characterId)=>
+{
+    try{var login=await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName],context.RequestAborted);if(login is null)return Results.Unauthorized();if(!state.IsInOwnHome(login.CharacterId))return Results.BadRequest(new{message="Characters can only be managed inside your base."});await accounts.DeleteCharacterAsync(login.AccountId,login.CharacterId,characterId,context.RequestAborted);return Results.Ok();}catch(InvalidOperationException exception){return Results.BadRequest(new{message=exception.Message});}
+});
 app.Map("/ws", async (HttpContext context, RealitySocketHub hub) => await hub.AcceptAsync(context));
 app.MapFallbackToFile("index.html");
 

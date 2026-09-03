@@ -67,15 +67,17 @@ public sealed class WorldNavigation
         TravelMode.Skateboard => SpeedFor(terrain),
         TravelMode.Bike when terrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(terrain) * 4,
         TravelMode.Bike when terrain == TerrainType.Sidewalk => SpeedFor(terrain) * 3,
-        TravelMode.Bike when terrain is TerrainType.Grass or TerrainType.Forest => SpeedFor(terrain) * 1.5,
-        TravelMode.Bike => SpeedFor(terrain),
+        TravelMode.Bike => SpeedFor(terrain) * 2.6,
+        TravelMode.Raft when terrain is TerrainType.ShallowWater or TerrainType.DeepWater => MilesPerHour(3),
+        TravelMode.Raft => MilesPerHour(.5),
         _ => SpeedFor(terrain)
     };
 
     public static bool SupportsTravelMode(TerrainType terrain, TravelMode mode) => mode switch
     {
         TravelMode.Skateboard => terrain is TerrainType.Road or TerrainType.Pavement or TerrainType.Sidewalk,
-        TravelMode.Bike => terrain is not (TerrainType.Mud or TerrainType.Sand or TerrainType.ShallowWater or TerrainType.DeepWater),
+        TravelMode.Bike => terrain != TerrainType.DeepWater,
+        TravelMode.Raft => terrain is TerrainType.ShallowWater or TerrainType.DeepWater,
         _ => true
     };
 
@@ -138,8 +140,8 @@ public sealed class WorldNavigation
         if (!_bounds.Contains(targetX, targetY)) return new(false, Array.Empty<WorldPosition>(), "That destination is outside this reality.");
         if (IsBlocked(targetX, targetY) || TerrainAt(targetX, targetY) == TerrainType.DeepWater) return new(false, Array.Empty<WorldPosition>(), "That destination is blocked or in deep water.");
         var target = start with { X = targetX, Y = targetY, Z = ElevationAt(targetX, targetY) };
-        if (start.Distance2D(target) > 300) return new(false, Array.Empty<WorldPosition>(), "That destination is too far away. Choose a closer point.");
         if (CanTraverse(start, target, true)) return new(true, new[] { target });
+        if (start.Distance2D(target) > 1500) return new(false, Array.Empty<WorldPosition>(), "That destination is too far away. Choose a closer point.");
 
         const double cell = 1.5;
         const double padding = 18;

@@ -52,7 +52,7 @@ public sealed class PersistenceTests : IAsyncLifetime
         var store = new SqliteRealityStore(Path.Combine(_directory, "characters.db"));
         await store.InitializeAsync(_reality);
         var player = new PlayerState("character-1", "Ada", new WorldPosition(_reality.Area.Region, 15, 25), 7,
-            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard, 6.5, 10);
+            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard, 6.5, 10, FlashlightOn:true,LanternOn:true);
 
         await store.SaveCharacterAsync(_reality.Id, player);
         var loaded = await new SqliteRealityStore(Path.Combine(_directory, "characters.db")).LoadCharacterAsync(_reality.Id, player.Id);
@@ -65,5 +65,18 @@ public sealed class PersistenceTests : IAsyncLifetime
         Assert.Equal(9.75, loaded.HealthHearts);
         Assert.Equal(TravelMode.Skateboard, loaded.TravelMode);
         Assert.Equal(6.5, loaded.Stamina);
+        Assert.True(loaded.FlashlightOn);Assert.True(loaded.LanternOn);
+    }
+
+    [Fact]
+    public async Task AccountNamesAreUniqueAndServerValidated()
+    {
+        var store=new SqliteRealityStore(Path.Combine(_directory,"accounts.db"));await store.InitializeAsync(_reality);var accounts=new AccountService(store);
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>accounts.SetupOrLoginAsync("ab","password"));
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>accounts.SetupOrLoginAsync("bad_name","password"));
+        var created=await accounts.SetupOrLoginAsync("Player-1","password");
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>accounts.SetupOrLoginAsync("player-1","wrong-password"));
+        var resumed=await accounts.SetupOrLoginAsync("player-1","password");
+        Assert.Equal(created.AccountId,resumed.AccountId);Assert.Equal(created.CharacterId,resumed.CharacterId);Assert.NotEqual(created.SessionToken,resumed.SessionToken);
     }
 }

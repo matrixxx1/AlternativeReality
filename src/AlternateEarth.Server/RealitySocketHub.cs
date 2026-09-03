@@ -9,9 +9,10 @@ namespace AlternateEarth.Server;
 public sealed class RealitySocketHub
 {
     private readonly RealityWorld _world;
+    private readonly AccountService _accounts;
     private readonly ConcurrentDictionary<string, ClientConnection> _clients = new();
 
-    public RealitySocketHub(RealityWorld world) => _world = world;
+    public RealitySocketHub(RealityWorld world, AccountService accounts) { _world = world; _accounts = accounts; }
 
     public async Task AcceptAsync(HttpContext context)
     {
@@ -22,16 +23,18 @@ public sealed class RealitySocketHub
             return;
         }
 
-        var characterId = NormalizeCharacterId(context.Request.Query["characterId"].FirstOrDefault());
-        var name = context.Request.Query["name"].FirstOrDefault() ?? "Explorer";
+        var identity = await _accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName] ?? context.Request.Query["session"].FirstOrDefault(), context.RequestAborted);
+        if (identity is null) { context.Response.StatusCode = StatusCodes.Status401Unauthorized; await context.Response.WriteAsync("Account setup is required."); return; }
+        var characterId = identity.CharacterId;
+        var name = identity.Username;
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var connection = new ClientConnection(socket);
         try
         {
             if (_clients.TryRemove(characterId, out var previous)) await previous.CloseAsync("Reconnected from another client.");
-            var player = await _world.JoinAsync(characterId, name, context.RequestAborted);
+            var player = await _world.JoinAsync(characterId, name, identity.AccountId, context.RequestAborted);
             _clients[characterId] = connection;
-            await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateSnapshot() }, context.RequestAborted);
+            await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateSnapshot(), privateState = _world.GetPrivateState(characterId) }, context.RequestAborted);
             await BroadcastAsync(new { type = "playerJoined", player }, characterId, context.RequestAborted);
             await ReceiveLoopAsync(characterId, connection, context.RequestAborted);
         }
@@ -76,12 +79,76 @@ public sealed class RealitySocketHub
                             if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", message = "Something is blocking the way." }, cancellationToken);
                             if (movement.Fell) await connection.SendAsync(new { type = "playerFell", message = movement.Message, player = movement.Player }, cancellationToken);
                             if (movement.Died) await connection.SendAsync(new { type = "playerDied", reason = movement.Message, player = movement.Player }, cancellationToken);
+                            if (movement.Player.LocationId != "outdoor") await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         }
                         break;
                     case "setTravelMode":
                         var travelRequest = root.Deserialize<SetTravelModeRequest>(SharedJson.Options)!;
                         var travelPlayer = await _world.SetTravelModeAsync(characterId, travelRequest.Mode, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = travelPlayer }, null, cancellationToken);
+                        break;
+                    case "setGodMode":
+                        var godRequest = root.Deserialize<SetGodModeRequest>(SharedJson.Options)!;
+                        var godPlayer = await _world.SetGodModeAsync(characterId, godRequest.Enabled, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = godPlayer }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "setLights":
+                        var lightRequest=root.Deserialize<SetLightsRequest>(SharedJson.Options)!;var litPlayer=await _world.SetLightsAsync(characterId,lightRequest.FlashlightOn,lightRequest.LanternOn,cancellationToken);await BroadcastAsync(new{type="playerUpdated",player=litPlayer},null,cancellationToken);break;
+                    case "enterDungeon":
+                        var enter = root.Deserialize<EnterDungeonRequest>(SharedJson.Options)!;
+                        var entered = await _world.EnterDungeonAsync(characterId, enter.DoorId, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = entered.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "dungeonEntered", player = entered.Player, dungeon = entered.Dungeon, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "exitDungeon":
+                        var exited = await _world.ExitDungeonAsync(characterId, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = exited }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "dungeonExited", player = exited, snapshot = _world.CreateSnapshot(), privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "consumeItem":
+                        var consume = root.Deserialize<ConsumeItemRequest>(SharedJson.Options)!;
+                        var consumingPlayer = await _world.ConsumeItemAsync(characterId, consume.ItemType, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = consumingPlayer }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "restAtBed":
+                        var rest = root.Deserialize<RestAtBedRequest>(SharedJson.Options)!;
+                        var rested = await _world.RestAtBedAsync(characterId, rest.BedId, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = rested }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "rested", player = rested, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "requestTrade":
+                        var tradeRequest = root.Deserialize<RequestTradeRequest>(SharedJson.Options)!;
+                        await connection.SendAsync(new { type = "tradeQuote", quote = _world.RequestTrade(characterId, tradeRequest.MerchantId) }, cancellationToken);
+                        break;
+                    case "confirmTrade":
+                        var confirmation = root.Deserialize<ConfirmTradeRequest>(SharedJson.Options)!;
+                        var purchase = await _world.ConfirmTradeAsync(characterId, confirmation, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = purchase.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "tradeCompleted", player = purchase.Player, inventory = purchase.Inventory, relationship = purchase.Relationship }, cancellationToken);
+                        break;
+                    case "attack":
+                        var attack = await _world.AttackAsync(characterId, root.Deserialize<CombatRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "combatEvent", combat = attack.Event }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        if (attack.Dungeon is not null) await connection.SendAsync(new { type = "dungeonUpdated", dungeon = attack.Dungeon }, cancellationToken);
+                        break;
+                    case "openChest":
+                        var chestRequest = root.Deserialize<OpenChestRequest>(SharedJson.Options)!;
+                        var reward = await _world.OpenChestAsync(characterId, chestRequest.ChestId, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = reward.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "chestOpened", message = reward.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "chestSeen":
+                        var seen = root.Deserialize<ChestSeenRequest>(SharedJson.Options)!;
+                        await connection.SendAsync(new { type = "chestUpdated", chest = _world.MarkChestSeen(characterId, seen.ChestId) }, cancellationToken);
+                        break;
+                    case "collectLoot":
+                        var lootId = root.GetProperty("lootId").GetString() ?? string.Empty;
+                        var collected = await _world.CollectLootAsync(characterId, lootId, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = collected.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "lootCollected", message = collected.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "rebuildArea":
                         var rebuildRequest = root.Deserialize<RebuildAreaRequest>(SharedJson.Options)!;
@@ -99,11 +166,12 @@ public sealed class RealitySocketHub
                         break;
                     case "pathRequest":
                         var pathRequest = root.Deserialize<PathRequest>(SharedJson.Options)!;
-                        var path = _world.FindPath(characterId, pathRequest);
-                        if (path.Success)
-                            await connection.SendAsync(new { type = "pathResult", sequence = pathRequest.Sequence, waypoints = path.Waypoints }, cancellationToken);
+                        var pathResult = await _world.FindPathAsync(characterId, pathRequest, cancellationToken);
+                        if (pathResult.Expanded) await connection.SendAsync(new { type = "worldExpanded", snapshot = _world.CreateSnapshot() }, cancellationToken);
+                        if (pathResult.Result.Success)
+                            await connection.SendAsync(new { type = "pathResult", sequence = pathRequest.Sequence, waypoints = pathResult.Result.Waypoints }, cancellationToken);
                         else
-                            await connection.SendAsync(new { type = "pathUnavailable", sequence = pathRequest.Sequence, message = path.Message }, cancellationToken);
+                            await connection.SendAsync(new { type = "pathUnavailable", sequence = pathRequest.Sequence, message = pathResult.Result.Message }, cancellationToken);
                         break;
                     case "placeObject":
                         var created = await _world.PlaceObjectAsync(characterId, root.Deserialize<PlaceObjectRequest>(SharedJson.Options)!, cancellationToken);
@@ -116,6 +184,11 @@ public sealed class RealitySocketHub
                         break;
                     case "requestChunk":
                         await connection.SendAsync(new { type = "chunkSnapshot", snapshot = _world.CreateSnapshot() }, cancellationToken);
+                        break;
+                    case "requestArea":
+                        var requestedArea=root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;if(await _world.LoadAreaAsync(requestedArea.X,requestedArea.Y,cancellationToken))await connection.SendAsync(new{type="worldExpanded",snapshot=_world.CreateSnapshot()},cancellationToken);break;
+                    case "requestPrivateState":
+                        await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "ping":
                         await connection.SendAsync(new { type = "pong", serverTime = DateTimeOffset.UtcNow }, cancellationToken);
@@ -152,6 +225,11 @@ public sealed class RealitySocketHub
 
     public Task BroadcastPlayersAsync(IReadOnlyList<PlayerState> players, CancellationToken cancellationToken = default) =>
         players.Count == 0 ? Task.CompletedTask : BroadcastAsync(new { type = "playersUpdated", players }, null, cancellationToken);
+
+    public async Task BroadcastCombatAsync(IReadOnlyList<CombatEvent> combat, CancellationToken cancellationToken = default)
+    {
+        foreach (var item in combat) await BroadcastAsync(new { type = "combatEvent", combat = item }, null, cancellationToken);
+    }
 
     public async Task BroadcastChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
     {

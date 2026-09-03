@@ -15,6 +15,9 @@ public enum EntityKind
     Bush,
     Fence,
     Vehicle,
+    StreetLight,
+    TreasureChest,
+    Tombstone,
     Animal,
     Npc,
     ResourceNode,
@@ -27,7 +30,8 @@ public enum TravelMode
     Walk,
     Run,
     Skateboard,
-    Bike
+    Bike,
+    Raft
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -66,7 +70,16 @@ public sealed record PlayerState(
     double MaximumHealthHearts = 10,
     TravelMode TravelMode = TravelMode.Walk,
     double Stamina = 10,
-    double MaximumStamina = 10);
+    double MaximumStamina = 10,
+    double Water = 10,
+    double MaximumWater = 10,
+    long WalletCents = 0,
+    bool GodMode = false,
+    DateTimeOffset? FoodProtectedUntilUtc = null,
+    DateTimeOffset? WaterProtectedUntilUtc = null,
+    string LocationId = "outdoor",
+    bool FlashlightOn = false,
+    bool LanternOn = false);
 
 public sealed record ActorState(
     string Id,
@@ -76,7 +89,39 @@ public sealed record ActorState(
     WorldPosition Position,
     string Facing = "south",
     bool IsMoving = false,
-    long Version = 1);
+    long Version = 1,
+    double HealthHearts = 5,
+    double MaximumHealthHearts = 5,
+    double FriendRating = 0,
+    bool IsMerchant = false,
+    TravelMode TravelMode = TravelMode.Walk,
+    string LocationId = "outdoor");
+
+public sealed record ItemStack(string ItemType, int Quantity);
+public sealed record InventoryState(string PlayerId, IReadOnlyList<ItemStack> Items);
+public sealed record MerchantOffer(string ItemType, int Quantity, long UnitPriceCents);
+public sealed record TradeQuote(string MerchantId, string MerchantName, double FriendRating, IReadOnlyList<MerchantOffer> Offers);
+public sealed record PurchaseLine(string ItemType, int Quantity);
+public sealed record RelationshipState(string PlayerId, string ActorId, double FriendRating);
+public sealed record DungeonRoom(double X, double Y, double Width, double Height);
+public sealed record DungeonWall(double X1, double Y1, double X2, double Y2, double DoorStart = -1, double DoorEnd = -1);
+public sealed record TreasureChestState(string Id, WorldPosition Position, string LocationId, DateTimeOffset? ExpiresAtUtc = null, bool IsOpened = false);
+public sealed record LootDropState(string Id, WorldPosition Position, string LocationId, long MoneyCents, IReadOnlyList<ItemStack> Items, DateTimeOffset ExpiresAtUtc);
+public sealed record DungeonState(
+    string Id, string BuildingId, double Width, double Height,
+    IReadOnlyList<DungeonRoom> Rooms, IReadOnlyList<DungeonWall> Walls,
+    WorldPosition Exit, IReadOnlyList<ActorState> Actors,
+    IReadOnlyList<TreasureChestState> Chests, IReadOnlyList<string> RevealedCells,
+    bool IsHome = false, IReadOnlyList<CanonicalEntity>? Furnishings = null);
+public sealed record BaseState(string BuildingId, string DoorId, WorldPosition Position, string OwnerName);
+public sealed record PlayerPrivateState(
+    InventoryState Inventory,
+    DungeonState? Dungeon,
+    IReadOnlyList<RelationshipState> Relationships,
+    IReadOnlyList<TreasureChestState>? Chests = null,
+    IReadOnlyList<LootDropState>? Loot = null,
+    BaseState? Base = null);
+public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(
     string Id,

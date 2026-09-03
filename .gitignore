@@ -5,6 +5,7 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/*.log
 data/geo-cache/area-*.json
 data/geo-cache/overpass-*.json
 TestResults/

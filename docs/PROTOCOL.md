@@ -1,6 +1,6 @@
-# Renderer-neutral protocol v5
+# Renderer-neutral protocol v6
 
-The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Clients connect with a server-issued or locally remembered character ID and a display name. The server sends `welcome` with the assigned player ID and an authoritative `WorldSnapshot`.
+The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state.
 
 ## Client to server
 
@@ -8,7 +8,13 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Clients
 |---|---|---|
 | `moveRequest` | direction `x`, `y`; client `sequence` | normalizes direction, bounds elapsed time/speed, clamps world bounds |
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
-| `setTravelMode` | logical `mode`: walk, run, skateboard, or bike | validates the enum and persists the authoritative character mode |
+| `setTravelMode` | walk, run, skateboard, bike, or raft | validates terrain and equipment ownership |
+| `setGodMode`, `setLights` | requested administrative and light state | persists state; equipment checks are bypassed only while God Mode is active |
+| `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, and current location |
+| `attack` | target ID and rock/slingshot weapon | validates ammo, range, accuracy, damage, death, and relationship change |
+| `requestTrade`, `confirmTrade`, `consumeItem` | merchant/item intent | validates proximity, inventory, stock, wallet, and effects |
+| `openChest`, `chestSeen`, `collectLoot` | world-object intent | validates visibility/proximity and authoritative rewards |
+| `requestArea` | local-meter camera location | streams and locally caches another geographic cell |
 | `rebuildArea` | `godMode` acknowledgement | requires a connected character and explicit God Mode; clears deltas, regenerates, safely repositions players |
 | `teleport` | destination `x`, `y`; `godMode` acknowledgement | requires God Mode and resolves the requested point to a safe canonical destination |
 | `say` | `message` text | derives username/player ID and UTC time on the server; rejects blank, rapid, or over-180-character messages |
@@ -27,6 +33,9 @@ The exploration client currently sends movement, path, chunk, and ping requests.
 | `chunkSnapshot` | authoritative base and reality state for requested scope |
 | `playerJoined`, `playerMoved`, `playerUpdated`, `playerLeft` | multiplayer presence, health, and travel mode |
 | `actorsMoved` | server-simulated wildlife and NPC position/state changes |
+| `privateState`, `dungeonEntered`, `dungeonUpdated`, `dungeonExited` | character-private inventory, base, relationships, fog, and interior state |
+| `tradeQuote`, `tradeCompleted`, `combatEvent`, `chestOpened`, `lootCollected` | authoritative gameplay outcomes |
+| `worldExpanded` | merged snapshot after another local geographic cell loads |
 | `playerFell`, `playerDied` | authoritative damage, death, and safe respawn outcomes |
 | `worldRebuilt` | regenerated base snapshot and safe positions after a God Mode refresh |
 | `playerTeleported` | authoritative instant relocation visible to every connected client |

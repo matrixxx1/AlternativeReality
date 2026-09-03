@@ -21,6 +21,10 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.BroadcastActorsAsync(actors, stoppingToken);
             var players = await _world.AdvanceStaminaAsync(Tick, stoppingToken);
             await _hub.BroadcastPlayersAsync(players, stoppingToken);
+            var hostile = await _world.AdvanceHostilityAsync(Tick, stoppingToken);
+            await _hub.BroadcastActorsAsync(hostile.Actors, stoppingToken);
+            await _hub.BroadcastPlayersAsync(hostile.Players, stoppingToken);
+            await _hub.BroadcastCombatAsync(hostile.Combat, stoppingToken);
             var speech = _world.AdvanceActorSpeech(DateTimeOffset.UtcNow);
             await _hub.BroadcastChatAsync(speech, stoppingToken);
         }

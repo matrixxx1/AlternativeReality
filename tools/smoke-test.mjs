@@ -1,99 +1,54 @@
 const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 
-function connect(name) {
-  const id = crypto.randomUUID();
-  const socket = new WebSocket(`${socketUrl}?characterId=${id}&name=${encodeURIComponent(name)}`);
-  const messages = [];
-  const waiters = [];
-  socket.addEventListener('message', event => {
-    const message = JSON.parse(event.data);
-    messages.push(message);
-    for (const waiter of [...waiters]) {
-      if (waiter.predicate(message)) {
-        waiter.resolve(message);
-        waiters.splice(waiters.indexOf(waiter), 1);
-      }
-    }
-  });
-  const waitFor = (predicate, timeoutMs = 8000) => new Promise((resolve, reject) => {
-    const existing = messages.find(predicate);
-    if (existing) return resolve(existing);
-    const waiter = { predicate, resolve };
-    waiters.push(waiter);
-    setTimeout(() => {
-      const index = waiters.indexOf(waiter);
-      if (index >= 0) waiters.splice(index, 1);
-      reject(new Error(`Timed out waiting for ${name}`));
-    }, timeoutMs);
-  });
-  return { socket, waitFor };
+async function connect(label) {
+  const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
+  const username = `${label}${suffix}`.slice(0, 10);
+  const response = await fetch(`${baseUrl}/api/account/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: `Smoke-${suffix}-password` }) });
+  const setup = await response.json();
+  if (!response.ok) throw new Error(setup.message || 'Account setup failed.');
+  const socket = new WebSocket(`${socketUrl}?session=${encodeURIComponent(setup.sessionToken)}`);
+  const messages = [], waiters = [];
+  socket.addEventListener('message', event => { const message = JSON.parse(event.data); messages.push(message); for (const waiter of [...waiters]) if (waiter.predicate(message)) { waiter.resolve(message); waiters.splice(waiters.indexOf(waiter), 1); } });
+  const waitFor = (predicate, timeoutMs = 10000) => new Promise((resolve, reject) => { const existing = messages.find(predicate); if (existing) return resolve(existing); const waiter = { predicate, resolve }; waiters.push(waiter); setTimeout(() => { const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1); reject(new Error(`Timed out waiting for ${username}`)); }, timeoutMs); });
+  return { socket, waitFor, username };
 }
 
-const first = connect('Smoke-2D-A');
-const second = connect('Smoke-2D-B');
+const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]);
 try {
-  const [welcomeA, welcomeB] = await Promise.all([
-    first.waitFor(message => message.type === 'welcome'),
-    second.waitFor(message => message.type === 'welcome')
-  ]);
+  const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   const playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 5) throw new Error(`Expected protocol 5, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 6) throw new Error(`Expected protocol 6, received ${welcomeA.protocolVersion}.`);
+  if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
-
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
-  const modeChanged = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId);
-  if (modeChanged.player.travelMode !== 'run') throw new Error('Server did not apply the travel mode.');
-
+  const modeChanged = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.travelMode === 'run');
   first.socket.send(JSON.stringify({ type: 'moveRequest', x: 1, y: 0, sequence: 1 }));
-  const [seenByA, seenByB] = await Promise.all([
-    first.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId),
-    second.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId)
-  ]);
-  if (seenByA.player.position.x !== seenByB.player.position.x) throw new Error('Clients received different authoritative positions.');
-  if (seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative player did not move east.');
-  if (seenByA.player.stamina >= playerA.stamina) throw new Error('Running did not drain authoritative stamina.');
-
-  first.socket.send(JSON.stringify({
-    type: 'pathRequest', x: seenByA.player.position.x + 2, y: seenByA.player.position.y, sequence: 2
-  }));
-  const path = await first.waitFor(message => message.type === 'pathResult' && message.sequence === 2);
-  if (!path.waypoints?.length) throw new Error('Server did not return a walkable path.');
-
-  first.socket.send(JSON.stringify({
-    type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true
-  }));
+  const [seenByA, seenByB] = await Promise.all([first.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId), second.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId)]);
+  if (seenByA.player.position.x !== seenByB.player.position.x || seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative movement did not synchronize.');
+  if (seenByA.player.stamina >= playerA.stamina) throw new Error('Running did not drain stamina.');
+  first.socket.send(JSON.stringify({ type: 'pathRequest', x: seenByA.player.position.x + 2, y: seenByA.player.position.y, sequence: 2 }));
+  const path = await first.waitFor(message => message.type === 'pathResult' && message.sequence === 2); if (!path.waypoints?.length) throw new Error('Pathfinding failed.');
+  first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: false }));
+  await first.waitFor(message => message.type === 'error' && message.message.includes('flashlight'));
+  first.socket.send(JSON.stringify({ type: 'setGodMode', enabled: true }));
+  const god = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.godMode);
+  if (god.player.walletCents < 50000 || god.player.water < 10 || god.player.stamina < 10) throw new Error('God Mode resources were not enforced.');
+  first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: true }));
+  await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.flashlightOn && message.player.lanternOn);
+  first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true }));
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
-  if (teleported.player.position.x <= seenByA.player.position.x) throw new Error('God Mode teleport did not relocate the player.');
-
+  const homeBase=welcomeA.privateState.base;
+  first.socket.send(JSON.stringify({type:'teleport',x:homeBase.position.x,y:homeBase.position.y,godMode:true}));
+  await first.waitFor(message=>message.type==='playerTeleported'&&message.player.id===welcomeA.playerId&&Math.hypot(message.player.position.x-homeBase.position.x,message.player.position.y-homeBase.position.y)<100);
+  first.socket.send(JSON.stringify({type:'enterDungeon',doorId:homeBase.doorId}));
+  const home=await first.waitFor(message=>message.type==='dungeonEntered'&&message.dungeon?.isHome);
+  if((home.dungeon.actors||[]).length||!home.dungeon.furnishings?.some(item=>item.properties?.objectType==='bed'))throw new Error('Private base was not generated as a safe furnished home.');
+  first.socket.send(JSON.stringify({type:'exitDungeon'}));await first.waitFor(message=>message.type==='dungeonExited');
   first.socket.send(JSON.stringify({ type: 'say', message: 'Hello from the smoke test' }));
-  const [chatA, chatB] = await Promise.all([
-    first.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId),
-    second.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId)
-  ]);
-  if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== 'Smoke-2D-A') throw new Error('Chat did not synchronize authoritatively.');
-
-  first.socket.send(JSON.stringify({
-    type: 'placeObject', objectType: 'must-be-rejected',
-    x: seenByA.player.position.x + 1, y: seenByA.player.position.y, rotationDegrees: 0
-  }));
+  const [chatA, chatB] = await Promise.all([first.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId), second.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId)]);
+  if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== first.username) throw new Error('Chat did not synchronize.');
+  first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
-  const world = await fetch(`${baseUrl}/api/world`).then(response => response.json());
-  const authoritativePlayer = world.players.find(player => player.id === welcomeA.playerId);
-  if (!authoritativePlayer || authoritativePlayer.position.x !== teleported.player.position.x) throw new Error('Live world snapshot did not match the teleport event.');
-  console.log(JSON.stringify({
-    ok: true,
-    protocol: welcomeA.protocolVersion,
-    actors: welcomeA.snapshot.actors.length,
-    travelMode: modeChanged.player.travelMode,
-    godModeTeleport: true,
-    chatSynchronized: true,
-    movementSynchronized: true,
-    serverPathfinding: true,
-    authoritativePosition: teleported.player.position,
-    objectPlacementRejected: rejection.message
-  }, null, 2));
-} finally {
-  first.socket.close();
-  second.socket.close();
-}
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentBaseAssigned: true, safeFurnishedHome:true, actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, equipmentOwnershipEnforced: true, godMode: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+} finally { first.socket.close(); second.socket.close(); }

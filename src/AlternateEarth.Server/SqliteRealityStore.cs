@@ -35,6 +35,9 @@ public sealed class SqliteRealityStore
                 RegionLatitude INTEGER NOT NULL, RegionLongitude INTEGER NOT NULL,
                 X REAL NOT NULL, Y REAL NOT NULL, Z REAL NOT NULL,
                 Health REAL NOT NULL DEFAULT 10, TravelMode TEXT NOT NULL DEFAULT 'Walk', Stamina REAL NOT NULL DEFAULT 10,
+                Water REAL NOT NULL DEFAULT 10, WalletCents INTEGER NOT NULL DEFAULT 0, GodMode INTEGER NOT NULL DEFAULT 0,
+                FoodProtectedUntilUtc TEXT, WaterProtectedUntilUtc TEXT, LocationId TEXT NOT NULL DEFAULT 'outdoor',
+                FlashlightOn INTEGER NOT NULL DEFAULT 0, LanternOn INTEGER NOT NULL DEFAULT 0,
                 Version INTEGER NOT NULL, UpdatedUtc TEXT NOT NULL,
                 FOREIGN KEY (RealityId) REFERENCES Reality(Id)
             );
@@ -58,10 +61,43 @@ public sealed class SqliteRealityStore
                 SubjectId TEXT NOT NULL, Permission TEXT NOT NULL,
                 PRIMARY KEY (SubjectId, Permission)
             );
+            CREATE TABLE IF NOT EXISTS PlayerRelationships (
+                RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, ActorId TEXT NOT NULL, FriendRating REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (RealityId, PlayerId, ActorId)
+            );
+            CREATE TABLE IF NOT EXISTS DungeonDiscovery (
+                RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, DungeonId TEXT NOT NULL, Cell TEXT NOT NULL,
+                PRIMARY KEY (RealityId, PlayerId, DungeonId, Cell)
+            );
+            CREATE TABLE IF NOT EXISTS OpenedChests (
+                RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, ChestId TEXT NOT NULL, OpenedUtc TEXT NOT NULL,
+                PRIMARY KEY (RealityId, PlayerId, ChestId)
+            );
+            CREATE TABLE IF NOT EXISTS Accounts (
+                Id TEXT PRIMARY KEY, Username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                PasswordHash TEXT NOT NULL, PasswordSalt TEXT NOT NULL, SessionTokenHash TEXT NOT NULL,
+                ActiveCharacterId TEXT NOT NULL, CreatedUtc TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS AccountCharacters (
+                Id TEXT PRIMARY KEY, AccountId TEXT NOT NULL, Name TEXT NOT NULL, CreatedUtc TEXT NOT NULL,
+                FOREIGN KEY (AccountId) REFERENCES Accounts(Id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS AccountBases (
+                AccountId TEXT NOT NULL, RealityId TEXT NOT NULL, BuildingId TEXT NOT NULL,
+                PRIMARY KEY (AccountId, RealityId)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Stamina", "REAL NOT NULL DEFAULT 10", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "Water", "REAL NOT NULL DEFAULT 10", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "WalletCents", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "GodMode", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "FoodProtectedUntilUtc", "TEXT", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "WaterProtectedUntilUtc", "TEXT", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "LocationId", "TEXT NOT NULL DEFAULT 'outdoor'", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "FlashlightOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "LanternOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
 
         command = connection.CreateCommand();
         command.CommandText = """
@@ -149,7 +185,7 @@ public sealed class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -158,7 +194,10 @@ public sealed class SqliteRealityStore
             new WorldPosition(new RegionId(reader.GetInt32(1), reader.GetInt32(2)), reader.GetDouble(3), reader.GetDouble(4), reader.GetDouble(5)),
             reader.GetInt64(6), HealthHearts: Math.Clamp(reader.GetDouble(7), 0, 10),
             TravelMode: Enum.TryParse<TravelMode>(reader.GetString(8), true, out var mode) ? mode : TravelMode.Walk,
-            Stamina: Math.Clamp(reader.GetDouble(9), 0, 10));
+            Stamina: Math.Clamp(reader.GetDouble(9), 0, 10), Water: Math.Clamp(reader.GetDouble(10), 0, 10),
+            WalletCents: reader.GetInt64(11), GodMode: reader.GetInt64(12) != 0,
+            FoodProtectedUntilUtc: ReadDate(reader, 13), WaterProtectedUntilUtc: ReadDate(reader, 14),
+            LocationId: reader.GetString(15), FlashlightOn: reader.GetInt64(16)!=0, LanternOn: reader.GetInt64(17)!=0);
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default)
@@ -166,10 +205,13 @@ public sealed class SqliteRealityStore
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
-                Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina,
+                Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina, Water = excluded.Water,
+                WalletCents = excluded.WalletCents, GodMode = excluded.GodMode,
+                FoodProtectedUntilUtc = excluded.FoodProtectedUntilUtc, WaterProtectedUntilUtc = excluded.WaterProtectedUntilUtc,
+                LocationId = excluded.LocationId, FlashlightOn=excluded.FlashlightOn, LanternOn=excluded.LanternOn,
                 Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
@@ -183,6 +225,14 @@ public sealed class SqliteRealityStore
         command.Parameters.AddWithValue("$health", player.HealthHearts);
         command.Parameters.AddWithValue("$travelMode", player.TravelMode.ToString());
         command.Parameters.AddWithValue("$stamina", player.Stamina);
+        command.Parameters.AddWithValue("$water", player.Water);
+        command.Parameters.AddWithValue("$wallet", player.WalletCents);
+        command.Parameters.AddWithValue("$god", player.GodMode ? 1 : 0);
+        command.Parameters.AddWithValue("$foodUntil", (object?)player.FoodProtectedUntilUtc?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$waterUntil", (object?)player.WaterProtectedUntilUtc?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$location", player.LocationId);
+        command.Parameters.AddWithValue("$flashlight",player.FlashlightOn?1:0);
+        command.Parameters.AddWithValue("$lantern",player.LanternOn?1:0);
         command.Parameters.AddWithValue("$version", player.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -196,6 +246,112 @@ public sealed class SqliteRealityStore
         command.Parameters.AddWithValue("$reality", realityId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    public async Task<InventoryState> LoadInventoryAsync(string playerId, CancellationToken cancellationToken = default)
+    {
+        var items = new List<ItemStack>();
+        await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT ItemType, Quantity FROM Inventories WHERE OwnerId = $owner ORDER BY Slot";
+        command.Parameters.AddWithValue("$owner", playerId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) items.Add(new ItemStack(reader.GetString(0), reader.GetInt32(1)));
+        return new InventoryState(playerId, items);
+    }
+
+    public async Task SaveInventoryAsync(InventoryState inventory, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var remove = connection.CreateCommand(); remove.Transaction = (SqliteTransaction)transaction;
+        remove.CommandText = "DELETE FROM Inventories WHERE OwnerId = $owner"; remove.Parameters.AddWithValue("$owner", inventory.PlayerId);
+        await remove.ExecuteNonQueryAsync(cancellationToken);
+        for (var slot = 0; slot < inventory.Items.Count; slot++)
+        {
+            var item = inventory.Items[slot]; if (item.Quantity <= 0) continue;
+            var insert = connection.CreateCommand(); insert.Transaction = (SqliteTransaction)transaction;
+            insert.CommandText = "INSERT INTO Inventories (OwnerId, Slot, ItemType, Quantity) VALUES ($owner,$slot,$type,$quantity)";
+            insert.Parameters.AddWithValue("$owner", inventory.PlayerId); insert.Parameters.AddWithValue("$slot", slot);
+            insert.Parameters.AddWithValue("$type", item.ItemType); insert.Parameters.AddWithValue("$quantity", item.Quantity);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RelationshipState>> LoadRelationshipsAsync(string realityId, string playerId, CancellationToken cancellationToken = default)
+    {
+        var result = new List<RelationshipState>(); await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand(); command.CommandText = "SELECT ActorId, FriendRating FROM PlayerRelationships WHERE RealityId=$reality AND PlayerId=$player";
+        command.Parameters.AddWithValue("$reality", realityId); command.Parameters.AddWithValue("$player", playerId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(new(playerId, reader.GetString(0), reader.GetDouble(1)));
+        return result;
+    }
+
+    public async Task SaveRelationshipAsync(string realityId, RelationshipState relationship, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO PlayerRelationships (RealityId,PlayerId,ActorId,FriendRating) VALUES ($r,$p,$a,$f) ON CONFLICT(RealityId,PlayerId,ActorId) DO UPDATE SET FriendRating=excluded.FriendRating";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", relationship.PlayerId);
+        command.Parameters.AddWithValue("$a", relationship.ActorId); command.Parameters.AddWithValue("$f", relationship.FriendRating);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<HashSet<string>> LoadDiscoveryAsync(string realityId, string playerId, string dungeonId, CancellationToken cancellationToken = default)
+    {
+        var result = new HashSet<string>(); await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Cell FROM DungeonDiscovery WHERE RealityId=$r AND PlayerId=$p AND DungeonId=$d";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId); command.Parameters.AddWithValue("$d", dungeonId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0)); return result;
+    }
+
+    public async Task SaveDiscoveryAsync(string realityId, string playerId, string dungeonId, string cell, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR IGNORE INTO DungeonDiscovery (RealityId,PlayerId,DungeonId,Cell) VALUES ($r,$p,$d,$c)";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId); command.Parameters.AddWithValue("$d", dungeonId); command.Parameters.AddWithValue("$c", cell);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<AccountRecord?> FindAccountByUsernameAsync(string username, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id,Username,PasswordHash,PasswordSalt,SessionTokenHash,ActiveCharacterId FROM Accounts WHERE Username=$u"; command.Parameters.AddWithValue("$u", username);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken); return await reader.ReadAsync(cancellationToken) ? ReadAccount(reader) : null;
+    }
+
+    public async Task<AccountRecord?> FindAccountBySessionHashAsync(string tokenHash, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id,Username,PasswordHash,PasswordSalt,SessionTokenHash,ActiveCharacterId FROM Accounts WHERE SessionTokenHash=$t"; command.Parameters.AddWithValue("$t", tokenHash);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken); return await reader.ReadAsync(cancellationToken) ? ReadAccount(reader) : null;
+    }
+
+    public async Task CreateAccountAsync(AccountRecord account, string characterName, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var accountCommand = connection.CreateCommand(); accountCommand.Transaction = (SqliteTransaction)transaction;
+        accountCommand.CommandText = "INSERT INTO Accounts (Id,Username,PasswordHash,PasswordSalt,SessionTokenHash,ActiveCharacterId,CreatedUtc) VALUES ($id,$u,$h,$s,$t,$c,$now)";
+        accountCommand.Parameters.AddWithValue("$id",account.Id);accountCommand.Parameters.AddWithValue("$u",account.Username);accountCommand.Parameters.AddWithValue("$h",account.PasswordHash);accountCommand.Parameters.AddWithValue("$s",account.PasswordSalt);accountCommand.Parameters.AddWithValue("$t",account.SessionTokenHash);accountCommand.Parameters.AddWithValue("$c",account.ActiveCharacterId);accountCommand.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await accountCommand.ExecuteNonQueryAsync(cancellationToken);
+        var character = connection.CreateCommand(); character.Transaction = (SqliteTransaction)transaction; character.CommandText="INSERT INTO AccountCharacters (Id,AccountId,Name,CreatedUtc) VALUES ($id,$a,$n,$now)";character.Parameters.AddWithValue("$id",account.ActiveCharacterId);character.Parameters.AddWithValue("$a",account.Id);character.Parameters.AddWithValue("$n",characterName);character.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await character.ExecuteNonQueryAsync(cancellationToken);await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task UpdateSessionAsync(string accountId, string sessionTokenHash, CancellationToken cancellationToken = default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="UPDATE Accounts SET SessionTokenHash=$t WHERE Id=$a";command.Parameters.AddWithValue("$t",sessionTokenHash);command.Parameters.AddWithValue("$a",accountId);await command.ExecuteNonQueryAsync(cancellationToken); }
+
+    public async Task<IReadOnlyList<AccountCharacter>> LoadAccountCharactersAsync(string accountId,CancellationToken cancellationToken=default)
+    { var result=new List<AccountCharacter>();await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT Id,Name FROM AccountCharacters WHERE AccountId=$a ORDER BY CreatedUtc";command.Parameters.AddWithValue("$a",accountId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);while(await reader.ReadAsync(cancellationToken))result.Add(new(reader.GetString(0),reader.GetString(1)));return result; }
+    public async Task AddAccountCharacterAsync(string accountId,AccountCharacter character,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="INSERT INTO AccountCharacters (Id,AccountId,Name,CreatedUtc) VALUES ($id,$a,$n,$now)";command.Parameters.AddWithValue("$id",character.Id);command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$n",character.Name);command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await command.ExecuteNonQueryAsync(cancellationToken); }
+    public async Task SetActiveCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="UPDATE Accounts SET ActiveCharacterId=$c WHERE Id=$a AND EXISTS (SELECT 1 FROM AccountCharacters WHERE Id=$c AND AccountId=$a)";command.Parameters.AddWithValue("$c",characterId);command.Parameters.AddWithValue("$a",accountId);if(await command.ExecuteNonQueryAsync(cancellationToken)!=1)throw new InvalidOperationException("Character does not belong to this account."); }
+    public async Task DeleteAccountCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);await using var transaction=await connection.BeginTransactionAsync(cancellationToken);foreach(var sql in new[]{"DELETE FROM Inventories WHERE OwnerId=$c","DELETE FROM PlayerRelationships WHERE PlayerId=$c","DELETE FROM DungeonDiscovery WHERE PlayerId=$c","DELETE FROM Characters WHERE Id=$c","DELETE FROM AccountCharacters WHERE Id=$c AND AccountId=$a"}){var command=connection.CreateCommand();command.Transaction=(SqliteTransaction)transaction;command.CommandText=sql;command.Parameters.AddWithValue("$c",characterId);command.Parameters.AddWithValue("$a",accountId);await command.ExecuteNonQueryAsync(cancellationToken);}await transaction.CommitAsync(cancellationToken); }
+
+    public async Task<string?> LoadBaseBuildingAsync(string accountId, string realityId, CancellationToken cancellationToken = default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT BuildingId FROM AccountBases WHERE AccountId=$a AND RealityId=$r";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);return (string?)await command.ExecuteScalarAsync(cancellationToken); }
+    public async Task SaveBaseBuildingAsync(string accountId,string realityId,string buildingId,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="INSERT INTO AccountBases (AccountId,RealityId,BuildingId) VALUES ($a,$r,$b) ON CONFLICT(AccountId,RealityId) DO UPDATE SET BuildingId=excluded.BuildingId";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$b",buildingId);await command.ExecuteNonQueryAsync(cancellationToken); }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken cancellationToken)
     {
@@ -217,4 +373,10 @@ public sealed class SqliteRealityStore
         await connection.OpenAsync(cancellationToken);
         return connection;
     }
+
+    private static DateTimeOffset? ReadDate(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : DateTimeOffset.Parse(reader.GetString(ordinal), System.Globalization.CultureInfo.InvariantCulture);
+    private static AccountRecord ReadAccount(SqliteDataReader reader) => new(reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetString(3),reader.GetString(4),reader.GetString(5));
 }
+
+public sealed record AccountRecord(string Id,string Username,string PasswordHash,string PasswordSalt,string SessionTokenHash,string ActiveCharacterId);
+public sealed record AccountCharacter(string Id,string Name);

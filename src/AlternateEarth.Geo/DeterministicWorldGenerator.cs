@@ -18,11 +18,12 @@ public sealed class DeterministicWorldGenerator
         var sidewalks = GenerateSidewalks(geographic.Features);
         var withSidewalks = geographic.Features.Concat(sidewalks).ToArray();
         var doors = GenerateDoors(withSidewalks);
-        var trees = GenerateResourceNodes(reality, 96, withSidewalks);
-        var bushes = GenerateBushes(reality, 180, withSidewalks);
+        var trees = GenerateResourceNodes(reality, 220, withSidewalks);
+        var bushes = GenerateBushes(reality, 360, withSidewalks);
         var vehicles = GenerateVehicles(reality, withSidewalks, 12);
+        var streetLights = GenerateStreetLights(reality, withSidewalks);
         var actors = GenerateActors(reality, withSidewalks.Concat(trees).Concat(bushes).Concat(vehicles).ToArray());
-        return geographic with { Features = withSidewalks.Concat(doors).Concat(trees).Concat(bushes).Concat(vehicles).Concat(actors).ToArray() };
+        return geographic with { Features = withSidewalks.Concat(doors).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray() };
     }
 
     public static IReadOnlyList<CanonicalEntity> GenerateResourceNodes(
@@ -31,7 +32,7 @@ public sealed class DeterministicWorldGenerator
         IReadOnlyList<CanonicalEntity>? obstacles = null)
     {
         var bounds = reality.Area.Bounds;
-        var random = new Random(StableSeed(reality.Seed, reality.Area.Region));
+        var random = new Random(StableSeed(reality.Seed, reality));
         var result = new List<CanonicalEntity>(count);
         for (var i = 0; i < count; i++)
         {
@@ -47,7 +48,7 @@ public sealed class DeterministicWorldGenerator
                      (!IsOpenGrass(obstacles.Concat(result).ToArray(), x, y) || obstacles.Concat(result).Any(entity => BlocksGeneratedPoint(entity, x, y, 1.2))));
             var subtype = random.Next(0, 3) switch { 0 => "pine", 1 => "fir", _ => "oak" };
             result.Add(new CanonicalEntity(
-                $"generated:{reality.Id}:tree:{i}",
+                $"generated:{reality.Id}:{AreaKey(reality)}:tree:{i}",
                 EntityKind.Tree,
                 new WorldPosition(reality.Area.Region, x, y),
                 Array.Empty<GeometryPoint>(),
@@ -134,7 +135,7 @@ public sealed class DeterministicWorldGenerator
     {
         var roads = features.Where(entity => entity.Kind == EntityKind.Road && entity.Geometry.Count >= 2).ToArray();
         if (roads.Length == 0) return Array.Empty<CanonicalEntity>();
-        var random = new Random(StableSeed(reality.Seed + 7919, reality.Area.Region));
+        var random = new Random(StableSeed(reality.Seed + 7919, reality));
         var vehicles = new List<CanonicalEntity>();
         for (var index = 0; index < count; index++)
         {
@@ -151,7 +152,7 @@ public sealed class DeterministicWorldGenerator
             x += -Math.Sin(rotation) * offset;
             y += Math.Cos(rotation) * offset;
             vehicles.Add(new CanonicalEntity(
-                $"generated:{reality.Id}:vehicle:{index}",
+                $"generated:{reality.Id}:{AreaKey(reality)}:vehicle:{index}",
                 EntityKind.Vehicle,
                 new WorldPosition(reality.Area.Region, x, y),
                 Array.Empty<GeometryPoint>(),
@@ -169,7 +170,7 @@ public sealed class DeterministicWorldGenerator
     public static IReadOnlyList<CanonicalEntity> GenerateBushes(RealityConfiguration reality, int count, IReadOnlyList<CanonicalEntity> features)
     {
         var bounds = reality.Area.Bounds;
-        var random = new Random(StableSeed(reality.Seed + 3571, reality.Area.Region));
+        var random = new Random(StableSeed(reality.Seed + 3571, reality));
         var bushes = new List<CanonicalEntity>(count);
         for (var index = 0; index < count; index++)
         {
@@ -184,7 +185,7 @@ public sealed class DeterministicWorldGenerator
             }
             if (!found) continue;
             bushes.Add(new CanonicalEntity(
-                $"generated:{reality.Id}:bush:{index}",
+                $"generated:{reality.Id}:{AreaKey(reality)}:bush:{index}",
                 EntityKind.Bush,
                 new WorldPosition(reality.Area.Region, x, y),
                 Array.Empty<GeometryPoint>(),
@@ -203,7 +204,7 @@ public sealed class DeterministicWorldGenerator
         };
         var names = new[] { "Alex", "Bailey", "Casey", "Drew", "Emery", "Finley", "Gray", "Harper" };
         var bounds = reality.Area.Bounds;
-        var random = new Random(StableSeed(reality.Seed + 104729, reality.Area.Region));
+        var random = new Random(StableSeed(reality.Seed + 104729, reality));
         var result = new List<CanonicalEntity>();
         var actorIndex = 0;
         foreach (var definition in definitions)
@@ -221,7 +222,7 @@ public sealed class DeterministicWorldGenerator
                 } while (attempts < 80 && obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, .5)));
                 var name = definition.Kind == EntityKind.Npc ? names[index % names.Length] : definition.Subtype;
                 result.Add(new CanonicalEntity(
-                    $"generated:{reality.Id}:actor:{actorIndex++}",
+                    $"generated:{reality.Id}:{AreaKey(reality)}:actor:{actorIndex++}",
                     definition.Kind,
                     new WorldPosition(reality.Area.Region, x, y),
                     Array.Empty<GeometryPoint>(),
@@ -230,6 +231,33 @@ public sealed class DeterministicWorldGenerator
                         ["subtype"] = definition.Subtype,
                         ["name"] = name
                     }));
+            }
+        }
+        return result;
+    }
+
+    public static IReadOnlyList<CanonicalEntity> GenerateStreetLights(RealityConfiguration reality, IReadOnlyList<CanonicalEntity> features)
+    {
+        var result = new List<CanonicalEntity>();
+        var index = 0;
+        foreach (var road in features.Where(entity => entity.Kind == EntityKind.Road && entity.Geometry.Count >= 2 &&
+                     entity.Properties.GetValueOrDefault("highway") is not ("motorway" or "trunk" or "track")))
+        {
+            for (var segment = 0; segment < road.Geometry.Count - 1; segment++)
+            {
+                var start = road.Geometry[segment]; var end = road.Geometry[segment + 1];
+                var dx = end.X - start.X; var dy = end.Y - start.Y; var length = Math.Sqrt(dx * dx + dy * dy);
+                if (length < 18) continue;
+                var width = ParseDouble(road.Properties.GetValueOrDefault("widthMeters"), 5);
+                var count = (int)Math.Floor(length / 32);
+                for (var light = 1; light <= count; light++)
+                {
+                    var amount = light / (double)(count + 1); var side = (light + segment) % 2 == 0 ? 1 : -1;
+                    var x = start.X + dx * amount - dy / length * (width / 2 + 1.7) * side;
+                    var y = start.Y + dy * amount + dx / length * (width / 2 + 1.7) * side;
+                    result.Add(new CanonicalEntity($"generated:{reality.Id}:{AreaKey(reality)}:streetlight:{index++}", EntityKind.StreetLight,
+                        new WorldPosition(reality.Area.Region, x, y), Array.Empty<GeometryPoint>(), new Dictionary<string, string> { ["schedule"] = "19:00-07:00" }));
+                }
             }
         }
         return result;
@@ -297,9 +325,11 @@ public sealed class DeterministicWorldGenerator
     private static double Distance(GeometryPoint a, GeometryPoint b) => Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
     private static double ParseDouble(string? value, double fallback) => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
-    private static int StableSeed(long seed, RegionId region)
+    private static int StableSeed(long seed, RealityConfiguration reality)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{seed}:{region.LatitudeBand}:{region.LongitudeBand}"));
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{seed}:{reality.Area.Region.LatitudeBand}:{reality.Area.Region.LongitudeBand}:{AreaKey(reality)}"));
         return BitConverter.ToInt32(bytes, 0);
     }
+
+    private static string AreaKey(RealityConfiguration reality) => $"{Math.Round(reality.Area.Center.Latitude, 4):F4}:{Math.Round(reality.Area.Center.Longitude, 4):F4}";
 }

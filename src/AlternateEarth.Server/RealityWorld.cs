@@ -4,7 +4,7 @@ using AlternateEarth.Shared;
 
 namespace AlternateEarth.Server;
 
-public sealed class RealityWorld
+public sealed partial class RealityWorld
 {
     private readonly DeterministicWorldGenerator _generator;
     private readonly IWeatherProvider _weatherProvider;
@@ -17,8 +17,13 @@ public sealed class RealityWorld
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastMovement = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastChat = new();
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
+    private readonly SemaphoreSlim _areaLoadLock = new(1, 1);
     private readonly Random _actorRandom;
     private GeographicDataset? _geographic;
+    private readonly ConcurrentDictionary<string, CanonicalEntity> _baseEntities = new();
+    private readonly ConcurrentDictionary<string, ElevationSample> _elevationSamples = new();
+    private readonly ConcurrentDictionary<string, byte> _loadedAreas = new();
+    private WorldBounds? _loadedBounds;
     private WorldNavigation? _navigation;
 
     public RealityWorld(RealityConfiguration configuration, DeterministicWorldGenerator generator, IWeatherProvider weatherProvider, SqliteRealityStore store)
@@ -32,7 +37,7 @@ public sealed class RealityWorld
 
     public RealityConfiguration Configuration { get; }
     public int PlayerCount => _players.Count;
-    public int BaseEntityCount => (_geographic?.Features.Count ?? 0) + _actors.Count;
+    public int BaseEntityCount => _baseEntities.Count + _actors.Count;
     public int RealityEntityCount => _realityEntities.Count;
     public string GeographicProvider => _geographic?.Provider ?? "not loaded";
     public WeatherState Weather { get; private set; } = WeatherState.Unavailable;
@@ -42,6 +47,7 @@ public sealed class RealityWorld
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
+        _loadedAreas["0:0"] = 1;
         await RefreshWeatherAsync(cancellationToken);
     }
 
@@ -55,22 +61,47 @@ public sealed class RealityWorld
         catch (Exception) when (!cancellationToken.IsCancellationRequested) { return false; }
     }
 
-    public async Task<PlayerState> JoinAsync(string characterId, string requestedName, CancellationToken cancellationToken = default)
+    public async Task<PlayerState> JoinAsync(string characterId, string requestedName, string? accountId = null, CancellationToken cancellationToken = default)
     {
         if (_players.Count >= Configuration.MaximumPlayers) throw new InvalidOperationException("This reality is full.");
         var name = SanitizeName(requestedName);
         var existing = await _store.LoadCharacterAsync(Configuration.Id, characterId, cancellationToken);
         var center = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
-        var position = existing?.Position ?? Navigation.FindNearestWalkable(center);
-        if (Navigation.IsBlocked(position.X, position.Y) || Navigation.TerrainAt(position.X, position.Y) == TerrainType.DeepWater)
-            position = Navigation.FindNearestWalkable(center);
-        position = position with { Z = Navigation.ElevationAt(position.X, position.Y) };
+        var location = existing?.LocationId ?? "outdoor";
+        var resumeInterior = location != "outdoor" && _dungeons.ContainsKey(location);
+        var position = resumeInterior ? existing!.Position : existing?.Position ?? Navigation.FindNearestWalkable(center);
+        if (!resumeInterior && (Navigation.IsBlocked(position.X, position.Y) || Navigation.TerrainAt(position.X, position.Y) == TerrainType.DeepWater)) position = Navigation.FindNearestWalkable(center);
+        position = resumeInterior ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
+        if (!resumeInterior) location = "outdoor";
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
-            Navigation.TerrainAt(position.X, position.Y), 0, health, 10, existing?.TravelMode ?? TravelMode.Walk,
-            Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10);
+            resumeInterior ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, existing?.TravelMode ?? TravelMode.Walk,
+            Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10,
+            Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
+            existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
+            existing?.FlashlightOn ?? false, existing?.LanternOn ?? false);
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
+        _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
+        var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
+        _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+        foreach (var relationship in await _store.LoadRelationshipsAsync(Configuration.Id, characterId, cancellationToken))
+            _relationships[(characterId, relationship.ActorId)] = relationship.FriendRating;
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            _playerAccounts[characterId] = accountId;
+            var baseBuilding = await _store.LoadBaseBuildingAsync(accountId, Configuration.Id, cancellationToken);
+            if (baseBuilding is null || !_baseEntities.ContainsKey(baseBuilding))
+            {
+                var buildings = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building).OrderBy(entity => entity.Id).ToArray();
+                if (buildings.Length > 0)
+                {
+                    baseBuilding = buildings[(StableInt(accountId) & int.MaxValue) % buildings.Length].Id;
+                    await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, baseBuilding, cancellationToken);
+                }
+            }
+            if (baseBuilding is not null) _baseBuildings[accountId] = baseBuilding;
+        }
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
         return player;
     }
@@ -80,6 +111,8 @@ public sealed class RealityWorld
         _players.TryRemove(characterId, out _);
         _lastMovement.TryRemove(characterId, out _);
         _lastChat.TryRemove(characterId, out _);
+        _lastIdleHeal.TryRemove(characterId, out _);
+        _playerAccounts.TryRemove(characterId, out _);
     }
 
     public ChatMessage Say(string characterId, SayRequest request)
@@ -98,6 +131,7 @@ public sealed class RealityWorld
     public async Task<MovementOutcome?> MoveAsync(string characterId, MoveRequest request, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
+        if (player.LocationId != "outdoor") return await MoveInDungeonAsync(player, request, cancellationToken);
         var length = Math.Sqrt((request.X * request.X) + (request.Y * request.Y));
         var directionX = length > 1 ? request.X / length : request.X;
         var directionY = length > 1 ? request.Y / length : request.Y;
@@ -106,8 +140,8 @@ public sealed class RealityWorld
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
         var currentTerrain = Navigation.TerrainAt(player.Position.X, player.Position.Y);
         var staminaFraction = player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina;
-        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction);
-        var requested = Configuration.Area.Bounds.Clamp(player.Position with
+        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
             X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
             Y = player.Position.Y + (directionY * metersPerSecond * elapsed * Configuration.GameSpeed)
@@ -116,7 +150,7 @@ public sealed class RealityWorld
         var requestedTerrain = Navigation.TerrainAt(requested.X, requested.Y);
         if (player.TravelMode == TravelMode.Skateboard && !WorldNavigation.SupportsTravelMode(requestedTerrain, TravelMode.Skateboard))
         {
-            var damaged = player with { HealthHearts = Math.Max(0, player.HealthHearts - .25), TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
+            var damaged = player with { HealthHearts = player.GodMode ? Math.Max(1, player.HealthHearts - .25) : Math.Max(0, player.HealthHearts - .25), TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
             if (damaged.HealthHearts <= 0)
             {
                 var reset = ResetPlayer(damaged);
@@ -138,7 +172,7 @@ public sealed class RealityWorld
             else next = player.Position;
         }
         var nextTerrain = Navigation.TerrainAt(next.X, next.Y);
-        if (nextTerrain == TerrainType.DeepWater)
+        if (nextTerrain == TerrainType.DeepWater && player.TravelMode != TravelMode.Raft && !player.GodMode)
         {
             var reset = ResetPlayer(player with { HealthHearts = 0 });
             await SavePlayerAsync(reset, cancellationToken);
@@ -150,7 +184,7 @@ public sealed class RealityWorld
         {
             Position = next with { Z = Navigation.ElevationAt(next.X, next.Y) }, Terrain = nextTerrain,
             SpeedMetersPerSecond = distance > .001 ? distance / elapsed : 0,
-            Stamina = player.TravelMode == TravelMode.Run && distance > .001 ? Math.Max(0, player.Stamina - (.45 * elapsed)) : player.Stamina,
+            Stamina = player.TravelMode == TravelMode.Run && distance > .001 && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - (.45 * elapsed)) : player.Stamina,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken);
@@ -160,36 +194,33 @@ public sealed class RealityWorld
     public async Task<PlayerState> SetTravelModeAsync(string characterId, TravelMode mode, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
+        if (!player.GodMode && mode == TravelMode.Bike && InventoryQuantity(characterId, "bike") <= 0) throw new InvalidOperationException("You need a bike in your inventory.");
+        if (mode == TravelMode.Raft)
+        {
+            if (!player.GodMode && InventoryQuantity(characterId, "inflatableRaft") <= 0) throw new InvalidOperationException("You need an inflatable raft.");
+            if (player.Terrain != TerrainType.ShallowWater && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed from shallow water.");
+        }
+        if (player.TravelMode == TravelMode.Raft && mode != TravelMode.Raft && player.Terrain == TerrainType.DeepWater && !player.GodMode)
+        {
+            var drowned = ResetPlayer(player with { HealthHearts = 0 });
+            await SavePlayerAsync(drowned, cancellationToken);
+            return drowned;
+        }
         var updated = player with { TravelMode = mode, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
         await SavePlayerAsync(updated, cancellationToken);
         return updated;
     }
 
-    public async Task<IReadOnlyList<PlayerState>> AdvanceStaminaAsync(TimeSpan elapsed, CancellationToken cancellationToken = default)
-    {
-        var changed = new List<PlayerState>();
-        var now = DateTimeOffset.UtcNow;
-        foreach (var pair in _players.ToArray())
-        {
-            if (pair.Value.Stamina >= pair.Value.MaximumStamina ||
-                !_lastMovement.TryGetValue(pair.Key, out var lastMove) || now - lastMove < TimeSpan.FromSeconds(1)) continue;
-            var updated = pair.Value with
-            {
-                Stamina = Math.Min(pair.Value.MaximumStamina, pair.Value.Stamina + (.25 * elapsed.TotalSeconds)),
-                SpeedMetersPerSecond = 0,
-                Version = pair.Value.Version + 1
-            };
-            await SavePlayerAsync(updated, cancellationToken);
-            changed.Add(updated);
-        }
-        return changed;
-    }
+    public Task<IReadOnlyList<PlayerState>> AdvanceStaminaAsync(TimeSpan elapsed, CancellationToken cancellationToken = default) =>
+        AdvanceVitalsAsync(elapsed, cancellationToken);
 
     public async Task<PlayerState> TeleportAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default)
     {
-        if (!request.GodMode) throw new InvalidOperationException("God Mode must be enabled to teleport.");
+        if (!request.GodMode || !playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to teleport.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
-        var requested = Configuration.Area.Bounds.Clamp(player.Position with { X = request.X, Y = request.Y });
+        await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
+        var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with { X = request.X, Y = request.Y });
         var destination = Navigation.IsBlocked(requested.X, requested.Y) || Navigation.TerrainAt(requested.X, requested.Y) == TerrainType.DeepWater
             ? Navigation.FindNearestWalkable(requested)
             : requested with { Z = Navigation.ElevationAt(requested.X, requested.Y) };
@@ -205,10 +236,19 @@ public sealed class RealityWorld
         return updated;
     }
 
-    public NavigationResult FindPath(string characterId, PathRequest request) =>
-        _players.TryGetValue(characterId, out var player)
-            ? Navigation.FindPath(player.Position, request.X, request.Y)
-            : new(false, Array.Empty<WorldPosition>(), "Unknown player.");
+    public async Task<(NavigationResult Result, bool Expanded)> FindPathAsync(string characterId, PathRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(characterId, out var player)) return (new(false, Array.Empty<WorldPosition>(), "Unknown player."), false);
+        if (player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var dungeon))
+        {
+            if (request.X < .5 || request.Y < .5 || request.X > dungeon.Width - .5 || request.Y > dungeon.Height - .5) return (new(false, Array.Empty<WorldPosition>(), "That point is outside the dungeon."), false);
+            var target = player.Position with { X = request.X, Y = request.Y, Z = 0 };
+            if (dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, target, wall))) return (new(false, Array.Empty<WorldPosition>(), "A dungeon wall blocks that route. Move through a doorway."), false);
+            return (new(true, new[] { target }), false);
+        }
+        var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
+        return (Navigation.FindPath(player.Position, request.X, request.Y), expanded);
+    }
 
     public IReadOnlyList<ActorState> AdvanceActors(TimeSpan elapsed)
     {
@@ -265,13 +305,15 @@ public sealed class RealityWorld
 
     public async Task<WorldSnapshot> RebuildAsync(string characterId, bool godMode, CancellationToken cancellationToken = default)
     {
-        if (!godMode || !_players.ContainsKey(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this area.");
+        if (!godMode || !playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this area.");
         await _rebuildLock.WaitAsync(cancellationToken);
         try
         {
             await _store.ClearRealityDeltasAsync(Configuration.Id, cancellationToken);
             _realityEntities.Clear();
+            _baseEntities.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _loadedBounds = null; _geographic = null;
             ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
+            _loadedAreas["0:0"] = 1;
             foreach (var pair in _players.ToArray())
             {
                 var safe = Navigation.IsBlocked(pair.Value.Position.X, pair.Value.Position.Y) || Navigation.TerrainAt(pair.Value.Position.X, pair.Value.Position.Y) == TerrainType.DeepWater
@@ -290,7 +332,7 @@ public sealed class RealityWorld
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         var requestedPosition = new WorldPosition(player.Position.Region, request.X, request.Y, player.Position.Z);
         if (player.Position.Distance2D(requestedPosition) > 5.0) throw new InvalidOperationException("Objects must be placed within five meters of the character.");
-        if (!Configuration.Area.Bounds.Contains(request.X, request.Y)) throw new InvalidOperationException("Object is outside the reality bounds.");
+        if (!(_loadedBounds ?? Configuration.Area.Bounds).Contains(request.X, request.Y)) throw new InvalidOperationException("Object is outside the loaded world.");
         var snapped = requestedPosition with { X = Math.Round(request.X * 2) / 2.0, Y = Math.Round(request.Y * 2) / 2.0 };
         var type = string.IsNullOrWhiteSpace(request.ObjectType) ? "marker" : request.ObjectType[..Math.Min(request.ObjectType.Length, 32)];
         var entity = new CanonicalEntity($"placed:{Guid.NewGuid():N}", EntityKind.PlayerStructure, snapped, Array.Empty<GeometryPoint>(),
@@ -312,27 +354,68 @@ public sealed class RealityWorld
         return entity;
     }
 
-    public WorldSnapshot CreateSnapshot() => new(Configuration, Configuration.Area.Bounds,
-        _geographic?.Features ?? Array.Empty<CanonicalEntity>(), _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
-        _players.Values.OrderBy(player => player.Id).ToArray(), _geographic?.Elevation ?? Array.Empty<ElevationSample>(),
+    public WorldSnapshot CreateSnapshot() => new(Configuration, _loadedBounds ?? Configuration.Area.Bounds,
+        _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
+        _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
         Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray());
 
     private void ApplyGeneratedWorld(GeographicDataset generated)
     {
         var actorEntities = generated.Features.Where(entity => entity.Kind is EntityKind.Animal or EntityKind.Npc).ToArray();
         var staticEntities = generated.Features.Where(entity => entity.Kind is not (EntityKind.Animal or EntityKind.Npc)).ToArray();
-        _geographic = generated with { Features = staticEntities };
-        _navigation = new WorldNavigation(Configuration.Area.Bounds, staticEntities.Concat(_realityEntities.Values).ToArray(), generated.Elevation);
-        _actors.Clear();
-        _actorRoutes.Clear();
-        _nextActorSpeech.Clear();
+        _geographic ??= generated with { Features = staticEntities };
+        foreach (var entity in staticEntities) _baseEntities[entity.Id] = entity;
+        foreach (var sample in generated.Elevation) _elevationSamples[$"{sample.X:F1}:{sample.Y:F1}"] = sample;
+        var bounds = generated.Area.Bounds;
+        _loadedBounds = _loadedBounds is null ? bounds : new WorldBounds(Math.Min(_loadedBounds.MinimumX, bounds.MinimumX), Math.Min(_loadedBounds.MinimumY, bounds.MinimumY), Math.Max(_loadedBounds.MaximumX, bounds.MaximumX), Math.Max(_loadedBounds.MaximumY, bounds.MaximumY));
+        _navigation = new WorldNavigation(_loadedBounds, _baseEntities.Values.Concat(_realityEntities.Values).ToArray(), _elevationSamples.Values.ToArray());
+        var chestRandom = new Random(StableInt($"chests:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
+        for (var chestIndex = 0; chestIndex < 2; chestIndex++)
+        {
+            var candidate = new WorldPosition(generated.Area.Region,
+                bounds.MinimumX + chestRandom.NextDouble() * (bounds.MaximumX - bounds.MinimumX),
+                bounds.MinimumY + chestRandom.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
+            var safe = Navigation.FindNearestWalkable(candidate);
+            var id = $"chest:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{chestIndex}";
+            _outdoorChests.TryAdd(id, new TreasureChestState(id, safe, "outdoor"));
+        }
         foreach (var entity in actorEntities)
         {
             var safe = Navigation.FindNearestWalkable(entity.Position);
+            var identity = StableInt(entity.Id) & int.MaxValue;
+            var merchant = entity.Kind == EntityKind.Npc && identity % 4 == 0;
+            var maximumHealth = entity.Kind == EntityKind.Animal && entity.Properties.GetValueOrDefault("subtype") is "bear" or "cougar" ? 8 : 5;
+            var travel = entity.Kind == EntityKind.Npc ? (TravelMode)(identity % 10 == 0 ? 3 : identity % 8 == 0 ? 2 : 0) : TravelMode.Walk;
             _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, entity.Properties.GetValueOrDefault("subtype") ?? "unknown",
-                entity.Properties.GetValueOrDefault("name") ?? "Wanderer", safe);
+                entity.Properties.GetValueOrDefault("name") ?? "Wanderer", safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
+                IsMerchant: merchant, TravelMode: travel);
         }
     }
+
+    private async Task<bool> EnsureAreaLoadedAsync(double x, double y, CancellationToken cancellationToken)
+    {
+        var origin = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
+        var size = Configuration.Area.SizeMeters;
+        var cellX = (int)Math.Floor((x - (origin.X - size / 2d)) / size);
+        var cellY = (int)Math.Floor((y - (origin.Y - size / 2d)) / size);
+        var key = $"{cellX}:{cellY}";
+        if (_loadedAreas.ContainsKey(key)) return false;
+        await _areaLoadLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_loadedAreas.ContainsKey(key)) return false;
+            var centerPosition = new WorldPosition(Configuration.Area.Region, origin.X + cellX * size, origin.Y + cellY * size);
+            var center = new LocalTangentProjection(Configuration.Area.Region).Unproject(centerPosition);
+            if (RegionId.FromGeo(center) != Configuration.Area.Region) throw new InvalidOperationException("This prototype reached a geographic projection boundary. Cross-region Earth streaming is the next world-scale milestone.");
+            var areaConfiguration = Configuration with { Area = new GeographicArea(center, size) };
+            ApplyGeneratedWorld(await _generator.GenerateAsync(areaConfiguration, cancellationToken));
+            _loadedAreas[key] = 1;
+            return true;
+        }
+        finally { _areaLoadLock.Release(); }
+    }
+
+    public Task<bool> LoadAreaAsync(double x,double y,CancellationToken cancellationToken=default)=>EnsureAreaLoadedAsync(x,y,cancellationToken);
 
     private Queue<WorldPosition> CreateActorRoute(ActorState actor)
     {
@@ -356,6 +439,12 @@ public sealed class RealityWorld
     {
         if (actor.Kind == EntityKind.Npc)
         {
+            if (actor.IsMerchant)
+            {
+                var goods = new[] { ("rocks", "$0.01-$1.00"), ("ball bearings", "$0.05-$2.00"), ("food", "$2-$5"), ("water", "$0.50-$2"), ("a flashlight", "$10-$50"), ("a lantern", "$50-$100"), ("a skateboard", "$200-$300"), ("a bike", "$400-$500"), ("an inflatable raft", "$450-$650") };
+                var good = goods[_actorRandom.Next(goods.Length)];
+                return $"For sale! {good.Item1} for {good.Item2}.";
+            }
             var jokes = new[]
             {
                 "Why did the scarecrow win an award? It was outstanding in its field!",
@@ -390,7 +479,8 @@ public sealed class RealityWorld
     {
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
-            HealthHearts = 10, Stamina = 10, TravelMode = TravelMode.Walk, Version = player.Version + 1 };
+            HealthHearts = 10, Stamina = 10, Water = 10, TravelMode = TravelMode.Walk, LocationId = "outdoor",
+            FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, Version = player.Version + 1 };
     }
 
     private async Task SavePlayerAsync(PlayerState player, CancellationToken cancellationToken)

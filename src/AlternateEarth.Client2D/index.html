@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -27,6 +27,10 @@
     <div><span>Moon</span><strong id="moonValue">—</strong></div>
     <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
     <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
+    <div class="water"><span>Water</span><strong id="waterValue">●●●●●●●●●●</strong></div>
+    <div><span>Wallet</span><strong id="walletValue">$0.00</strong></div>
+    <div><span>Effects</span><strong id="effectsValue">None</strong></div>
+    <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
     <button id="centerButton" type="button">Center on player</button>
   </section>
   <section class="panel travel-panel" aria-label="Travel mode">
@@ -36,7 +40,9 @@
       <button type="button" data-mode="run">Run</button>
       <button type="button" data-mode="skateboard">Skateboard</button>
       <button type="button" data-mode="bike">Bike</button>
+      <button type="button" data-mode="raft">Raft</button>
     </div>
+    <div class="light-switches"><label><input id="flashlightToggle" type="checkbox"> Flashlight</label><label><input id="lanternToggle" type="checkbox"> Lantern</label></div>
   </section>
   <section class="panel help-panel">
     <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
@@ -50,6 +56,15 @@
     <label><input id="godMode" type="checkbox"> God Mode</label>
     <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
   </section>
+  <section class="panel inventory-panel">
+    <strong>Inventory</strong>
+    <div id="inventoryItems" class="inventory-items">Empty</div>
+  </section>
+  <section id="characterPanel" class="panel character-panel" hidden>
+    <strong>Base character switcher</strong>
+    <div id="characterList"></div>
+    <form id="characterForm"><input id="characterName" minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" placeholder="New character" required><button type="submit">Add</button></form>
+  </section>
   <section id="chatHistory" class="panel chat-history" hidden>
     <strong>Recent chat</strong>
     <div id="chatMessages" class="chat-messages"><div class="empty-chat">No messages yet.</div></div>
@@ -62,8 +77,29 @@
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
+    <button id="throwButton" type="button" hidden>Throw rock</button>
+    <button id="shootButton" type="button" hidden>Shoot slingshot</button>
+    <button id="tradeButton" type="button" hidden>Trade</button>
+  </section>
+  <section id="tradeWindow" class="panel trade-window" hidden>
+    <h2 id="tradeTitle">Merchant</h2>
+    <div id="tradeFriend"></div>
+    <div id="tradeOffers"></div>
+    <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm purchase</button></div>
+  </section>
+  <div id="actorTooltip" class="actor-tooltip" hidden></div>
+  <section id="accountSetup" class="account-setup">
+    <form id="accountForm" class="panel account-card">
+      <div class="eyebrow">ALTERNATIVEREALITY // PLAYER SETUP</div>
+      <h2>Create or resume your player</h2>
+      <p>Your username is unique on this reality. Returning players can enter the same username and password.</p>
+      <label>Username <input id="accountUsername" required minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" autocomplete="username" placeholder="3-10 characters"></label>
+      <label>Password <input id="accountPassword" required minlength="6" maxlength="72" type="password" autocomplete="current-password" placeholder="6 or more characters"></label>
+      <div id="accountError" class="account-error"></div>
+      <button type="submit">Enter reality</button>
+    </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
