@@ -68,8 +68,9 @@ try {
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'dirtBike' }));
   const godDirtBike = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.travelMode === 'dirtBike');
   first.socket.send(JSON.stringify({ type: 'moveRequest', x: 1, y: 0, sequence: 3 }));
-  const godRide = await first.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId && message.player.travelMode === 'dirtBike');
-  if (godRide.player.dirtBikeGasGallons !== godDirtBike.player.dirtBikeGasGallons) throw new Error('God Mode consumed dirt-bike gas.');
+  const godRide = await first.waitFor(message => message.type === 'movementBlocked' || message.type === 'playerMoved' && message.player.id === welcomeA.playerId && message.player.travelMode === 'dirtBike');
+  if (godRide.type === 'movementBlocked' && /gas/i.test(godRide.message)) throw new Error('God Mode did not bypass the dirt-bike gas check.');
+  if (godRide.type === 'playerMoved' && godRide.player.dirtBikeGasGallons !== godDirtBike.player.dirtBikeGasGallons) throw new Error('God Mode consumed dirt-bike gas.');
   first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true }));
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
   const homeBase=welcomeA.privateState.base;

@@ -30,10 +30,10 @@ For access from other devices on the same network, run `tools/open-lan-port.ps1`
 - Move with WASD or the arrow keys.
 - Left-click anywhere in the world to walk toward that location.
 - Use WASD or an arrow key to take direct control and cancel click-to-walk.
-- Right-drag to pan the camera; a stationary right-click opens the action window.
+- Left-drag or right-drag to pan the camera. A stationary left click still walks toward the clicked location, while a stationary right-click opens the action window.
 - Use the mouse wheel to zoom.
 - Choose Walk, Run, Skateboard, Bike, Dirt bike, Motorcycle, or Raft. Equipment must be bought before use; God Mode bypasses ownership checks. Running drains stamina, dehydration halves speed, skateboards fail off paved surfaces, bikes retain most of their speed off-road, and rafts make deep water safe.
-- Dirt bikes cost $3,000–$5,000 and reach 40 mph; motorcycles reach 90 mph and currently cost $5,000–$10,000. Their separate 2- and 4-gallon tanks consume fuel by actual distance at representative 50 and 45 mpg. Merchants sell gallons for $5–$10 at one advertised randomized price. Empty motorized vehicles cannot move until refueled; God Mode bypasses both fuel checks and consumption.
+- Dirt bikes cost $3,000–$5,000 and reach 40 mph; motorcycles reach 90 mph and currently cost $5,000–$10,000. Their separate 2- and 4-gallon tanks consume fuel by actual distance at representative 50 and 45 mpg. Merchants sell gallons for $5–$10 at one advertised randomized price. Empty motorized vehicles cannot move until refueled; God Mode bypasses both fuel checks and consumption. The close-up client gives bicycles, dirt bikes, and motorcycles distinct rider and vehicle animations.
 - God Mode supplies a 5× movement multiplier, full water/stamina, a $500 wallet floor, health protection/regeneration, equipment access, rebuilding, and teleporting.
 - Flashlight, lantern, and laser checkboxes control persistent equipment. A flashlight casts a facing cone, a lantern lights a circle, and the laser draws a straight beam to the first solid object. Each requires its purchased item unless God Mode is active; randomized merchants price lasers from $200–$400.
 - Magic hiking shoes are randomized merchant gear priced from $100–$400. Equipping them doubles walking and running speed, halves running stamina drain, and removes the normal mud, grass, and shallow-water speed penalties. God Mode can equip them without ownership.
@@ -45,6 +45,8 @@ For access from other devices on the same network, run `tools/open-lan-port.ps1`
 - Wildlife and human NPCs use the same speech system. Birds squeak or call, cats meow, dogs bark, and residents tell random jokes on independently randomized schedules ranging from two to thirty minutes.
 
 Paved surfaces use a representative 3.5 mph walking speed, forest uses 2 mph, sand uses 1 mph, and mud, grass, and shallow water have their own canonical rates. Click-to-walk asks the server for a route around solid geometry. Deep water is deliberately excluded from routes; manually entering it drowns and resets the character to a safe starting point.
+
+The browser starts at a close 26-pixels-per-meter view and can zoom further in to 40 pixels per meter. Zooming out still activates the lighter rendering levels for performance.
 
 Real street names are drawn over the stylized road network when OpenStreetMap supplies them. Moving the camera into a new geographic cell shows a loading message; the newly generated terrain arrives under fog of war and is revealed around the player during exploration. Generated maps and raw geographic caches stay local to each reality server under `data/`.
 
