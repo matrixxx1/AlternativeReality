@@ -90,7 +90,7 @@ Ephemeral chat is server-authored and renderer-neutral. Player messages are vali
 
 `IGeographicProvider.GetAreaAsync` returns a canonical `GeographicDataset`, and `IElevationProvider` returns meter samples. The current adapters query OpenStreetMap through Overpass with endpoint failover and SRTM90m elevation through OpenTopoData. Raw and converted results are cached before play, so normal movement generates no public map API traffic.
 
-Provider data remains descriptive—road way, building polygon, water feature, elevation sample. `DeterministicWorldGenerator` performs the game conversion and adds seed-driven resource entities. Future providers can read regional PBF extracts, GeoPackage files, government elevation rasters, or offline packs without changing server or client code.
+Provider data remains descriptive—road way, building polygon/address, water feature, airport, state/parcel boundary, business point, and elevation sample. `DeterministicWorldGenerator` performs the game conversion, converts supported businesses into categorized merchants, adds two-gate parcel fences, and adds seed-driven resource entities. Future providers can read regional PBF extracts, GeoPackage files, government parcel/state layers, elevation rasters, or offline packs without changing server or client code.
 
 Road metadata produces separate canonical road and sidewalk traversal bands. Land use and natural polygons become grass, forest, sand, mud, or pavement. Every building receives a deterministic logical door facing the nearest available sidewalk, falling back to a road. Closed water polygons use a three-meter shallow shoreline band and a deep interior.
 

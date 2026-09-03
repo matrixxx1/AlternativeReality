@@ -154,7 +154,7 @@ public sealed class RealitySocketHub
                         var confirmation = root.Deserialize<ConfirmTradeRequest>(SharedJson.Options)!;
                         var purchase = await _world.ConfirmTradeAsync(characterId, confirmation, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = purchase.Player }, null, cancellationToken);
-                        await connection.SendAsync(new { type = "tradeCompleted", player = purchase.Player, inventory = purchase.Inventory, relationship = purchase.Relationship }, cancellationToken);
+                        await connection.SendAsync(new { type = "tradeCompleted", player = purchase.Player, inventory = purchase.Inventory, relationship = purchase.Relationship, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "attack":
                         var attack = await _world.AttackAsync(characterId, root.Deserialize<CombatRequest>(SharedJson.Options)!, cancellationToken);
@@ -192,8 +192,11 @@ public sealed class RealitySocketHub
                         break;
                     case "teleport":
                         var teleportRequest = root.Deserialize<TeleportRequest>(SharedJson.Options)!;
-                        var teleportedPlayer = await _world.TeleportAsync(characterId, teleportRequest, cancellationToken);
-                        await BroadcastAsync(new { type = "playerTeleported", player = teleportedPlayer }, null, cancellationToken);
+                        var needsTeleportArea = !_world.IsAreaLoaded(teleportRequest.X, teleportRequest.Y);
+                        if (needsTeleportArea) await connection.SendAsync(new { type = "taskStatus", task = "Loading and generating teleport destination…" }, cancellationToken);
+                        var teleport = await _world.TeleportWithAreaAsync(characterId, teleportRequest, cancellationToken);
+                        if (teleport.Expanded) await connection.SendAsync(new { type = "worldExpanded", expanded = true, snapshot = _world.CreateSnapshot() }, cancellationToken);
+                        await BroadcastAsync(new { type = "playerTeleported", player = teleport.Player }, null, cancellationToken);
                         break;
                     case "say":
                         var chat = _world.Say(characterId, root.Deserialize<SayRequest>(SharedJson.Options)!);
@@ -201,6 +204,7 @@ public sealed class RealitySocketHub
                         break;
                     case "pathRequest":
                         var pathRequest = root.Deserialize<PathRequest>(SharedJson.Options)!;
+                        await connection.SendAsync(new { type = "taskStatus", task = _world.IsAreaLoaded(pathRequest.X, pathRequest.Y) ? "Finding route…" : "Loading area and finding route…" }, cancellationToken);
                         var pathResult = await _world.FindPathAsync(characterId, pathRequest, cancellationToken);
                         if (pathResult.Expanded) await connection.SendAsync(new { type = "worldExpanded", snapshot = _world.CreateSnapshot() }, cancellationToken);
                         if (pathResult.Result.Success)
@@ -221,7 +225,7 @@ public sealed class RealitySocketHub
                         await connection.SendAsync(new { type = "chunkSnapshot", snapshot = _world.CreateSnapshot() }, cancellationToken);
                         break;
                     case "requestArea":
-                        var requestedArea=root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;var areaExpanded=await _world.LoadAreaAsync(requestedArea.X,requestedArea.Y,cancellationToken);await connection.SendAsync(new{type="worldExpanded",expanded=areaExpanded,snapshot=_world.CreateSnapshot()},cancellationToken);break;
+                        var requestedArea=root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;await connection.SendAsync(new{type="taskStatus",task="Loading and generating visible area…"},cancellationToken);var areaExpanded=await _world.LoadAreaAsync(requestedArea.X,requestedArea.Y,cancellationToken);await connection.SendAsync(new{type="worldExpanded",expanded=areaExpanded,snapshot=_world.CreateSnapshot()},cancellationToken);break;
                     case "requestPrivateState":
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;

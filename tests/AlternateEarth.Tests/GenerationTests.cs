@@ -69,4 +69,32 @@ public sealed class GenerationTests
         Assert.Equal(8, first.Count(actor => actor.Kind == EntityKind.Npc));
         Assert.Equal(first.Select(actor => actor.Position), second.Select(actor => actor.Position));
     }
+
+    [Fact]
+    public void PropertyFencesLeaveOpenGatesOnTwoSides()
+    {
+        var region = Reality.Area.Region;
+        var parcel = new CanonicalEntity("parcel", EntityKind.PropertyBoundary, new WorldPosition(region, 10, 10),
+            new GeometryPoint[] { new(0, 0), new(20, 0), new(20, 20), new(0, 20), new(0, 0) }, new Dictionary<string, string>());
+
+        var fences = DeterministicWorldGenerator.GeneratePropertyFences(new[] { parcel });
+
+        Assert.Equal(6, fences.Count);
+        Assert.Equal(4, fences.Count(fence => fence.Properties["openGateAdjacent"] == "true"));
+        Assert.All(fences, fence => Assert.Equal("parcel", fence.Properties["parcelId"]));
+    }
+
+    [Fact]
+    public void GeographicBusinessesBecomeCategorizedMerchants()
+    {
+        var region = Reality.Area.Region;
+        var station = new CanonicalEntity("station", EntityKind.PointOfInterest, new WorldPosition(region, 10, 10),
+            Array.Empty<GeometryPoint>(), new Dictionary<string, string> { ["name"] = "Test Fuel", ["merchantCategory"] = "gas" });
+
+        var merchant = Assert.Single(DeterministicWorldGenerator.GeneratePoiMerchants(Reality, new[] { station }));
+
+        Assert.Equal(EntityKind.Npc, merchant.Kind);
+        Assert.Equal("gas", merchant.Properties["merchantCategory"]);
+        Assert.Contains("Test Fuel", merchant.Properties["name"]);
+    }
 }

@@ -61,7 +61,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await store.SaveInventoryAsync(new InventoryState("rider", new[] { new ItemStack("dirtBike", 1), new ItemStack("gallonOfGas", 1) }));
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
-        var player = await world.JoinAsync("rider", "Rider", "fuel-account");
+        var player = await world.JoinAsync("rider", "Rider");
 
         var empty = await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.DirtBike));
         Assert.Contains("out of gas", empty.Message);
@@ -92,7 +92,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await store.InitializeAsync(configuration);
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
-        var player = await world.JoinAsync("teleporter", "Traveler", "teleport-account");
+        var player = await world.JoinAsync("teleporter", "Traveler");
         await world.SetGodModeAsync(player.Id, true);
 
         var teleported = await world.TeleportAsync(player.Id, new TeleportRequest(20, 20, false));
@@ -278,6 +278,76 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(-1, persisted.TerrainSpeedModifiersMph[TerrainType.Grass]);
         Assert.Equal(2, persisted.TravelModeSpeedModifiersMph[TravelMode.Run]);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateMovementConfigurationAsync(other.Id, new UpdateMovementConfigurationRequest(4, 120, terrain, modes)));
+    }
+
+    [Fact]
+    public async Task PurchasedAreaMapRevealsCurrentBlockAndPersists()
+    {
+        var configuration = new RealityConfiguration("map-purchase", "Map Purchase", 44, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "map-purchase.db"));
+        await store.InitializeAsync(configuration);
+        var merchantPoi = new CanonicalEntity("map-store", EntityKind.PointOfInterest, new WorldPosition(configuration.Area.Region, 15, 15),
+            Array.Empty<GeometryPoint>(), new Dictionary<string, string> { ["name"] = "Map Store", ["merchantCategory"] = "general" });
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(merchantPoi)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("map-buyer", "MapBuyer");
+        await world.SetGodModeAsync(player.Id, true);
+        await world.UpdateItemConfigurationAsync(player.Id, new UpdateItemConfigurationRequest("areaMap", 0, 0, 1, 1));
+        var merchant = world.CreateSnapshot().Actors!.First(actor => actor.IsMerchant);
+        await world.TeleportAsync(player.Id, new TeleportRequest(merchant.Position.X, merchant.Position.Y, true));
+        var quote = world.RequestTrade(player.Id, merchant.Id);
+        Assert.Contains(quote.Offers, offer => offer.ItemType == "areaMap" && offer.UnitPriceCents == 1);
+
+        await world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine("areaMap", 1) }));
+        var expectedArea = world.AreaKeyFor(merchant.Position.X, merchant.Position.Y);
+        Assert.Contains(expectedArea, world.GetPrivateState(player.Id).RevealedWorldAreas!);
+        Assert.DoesNotContain(world.RequestTrade(player.Id, merchant.Id).Offers, offer => offer.ItemType == "areaMap");
+
+        world.Leave(player.Id);
+        await world.JoinAsync(player.Id, "MapBuyer");
+        Assert.Contains(expectedArea, world.GetPrivateState(player.Id).RevealedWorldAreas!);
+    }
+
+    [Fact]
+    public async Task IndoorTravelRejectsBikesButAllowsDungeonModes()
+    {
+        var configuration = new RealityConfiguration("indoor-travel", "Indoor Travel", 45, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "indoor-travel.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("indoor-account", "Indoor", "hash", "salt", "token", "indoor-player"), "Indoor");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("indoor-building", region, 20, 20))), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("indoor-player", "Indoor", "indoor-account");
+        await world.SetGodModeAsync(player.Id, true);
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        await world.EnterDungeonAsync(player.Id, door.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.Bike));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.DirtBike));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.Motorcycle));
+        Assert.Equal(TravelMode.Skateboard, (await world.SetTravelModeAsync(player.Id, TravelMode.Skateboard)).TravelMode);
+        Assert.Equal(TravelMode.Raft, (await world.SetTravelModeAsync(player.Id, TravelMode.Raft)).TravelMode);
+        Assert.Equal(TravelMode.Run, (await world.SetTravelModeAsync(player.Id, TravelMode.Run)).TravelMode);
+    }
+
+    [Fact]
+    public async Task MovementHonorsRemainingDistanceToPreventFastVehicleOvershoot()
+    {
+        var configuration = new RealityConfiguration("arrival-cap", "Arrival Cap", 46, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "arrival-cap.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("arrival-player", "Arrival");
+        await world.SetGodModeAsync(player.Id, true);
+        await world.SetTravelModeAsync(player.Id, TravelMode.Motorcycle);
+
+        var moved = await world.MoveAsync(player.Id, new MoveRequest(1, 0, 1, .05));
+
+        Assert.NotNull(moved);
+        Assert.InRange(moved.Player.Position.Distance2D(player.Position), 0, .050001);
     }
 
     private static CanonicalEntity Building(string id, RegionId region, double x, double y) =>

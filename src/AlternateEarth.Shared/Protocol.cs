@@ -5,11 +5,11 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 14;
+    public const int Version = 15;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
-public sealed record MoveRequest(double X, double Y, long Sequence);
+public sealed record MoveRequest(double X, double Y, long Sequence, double? MaximumDistanceMeters = null);
 public sealed record PathRequest(double X, double Y, long Sequence);
 public sealed record SetTravelModeRequest(TravelMode Mode);
 public sealed record RebuildAreaRequest(bool GodMode);

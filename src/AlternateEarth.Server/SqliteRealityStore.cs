@@ -72,6 +72,10 @@ public sealed class SqliteRealityStore
                 RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, DungeonId TEXT NOT NULL, Cell TEXT NOT NULL,
                 PRIMARY KEY (RealityId, PlayerId, DungeonId, Cell)
             );
+            CREATE TABLE IF NOT EXISTS WorldMapDiscovery (
+                RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, AreaKey TEXT NOT NULL, PurchasedUtc TEXT NOT NULL,
+                PRIMARY KEY (RealityId, PlayerId, AreaKey)
+            );
             CREATE TABLE IF NOT EXISTS OpenedChests (
                 RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, ChestId TEXT NOT NULL, OpenedUtc TEXT NOT NULL,
                 PRIMARY KEY (RealityId, PlayerId, ChestId)
@@ -413,6 +417,22 @@ public sealed class SqliteRealityStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<HashSet<string>> LoadWorldMapDiscoveryAsync(string realityId, string playerId, CancellationToken cancellationToken = default)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal); await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT AreaKey FROM WorldMapDiscovery WHERE RealityId=$r AND PlayerId=$p";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0)); return result;
+    }
+
+    public async Task SaveWorldMapDiscoveryAsync(string realityId, string playerId, string areaKey, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR IGNORE INTO WorldMapDiscovery (RealityId,PlayerId,AreaKey,PurchasedUtc) VALUES ($r,$p,$a,$u)";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId); command.Parameters.AddWithValue("$a", areaKey); command.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<AccountRecord?> FindAccountByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
@@ -446,7 +466,7 @@ public sealed class SqliteRealityStore
     public async Task SetActiveCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
     { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="UPDATE Accounts SET ActiveCharacterId=$c WHERE Id=$a AND EXISTS (SELECT 1 FROM AccountCharacters WHERE Id=$c AND AccountId=$a)";command.Parameters.AddWithValue("$c",characterId);command.Parameters.AddWithValue("$a",accountId);if(await command.ExecuteNonQueryAsync(cancellationToken)!=1)throw new InvalidOperationException("Character does not belong to this account."); }
     public async Task DeleteAccountCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
-    { await using var connection=await OpenAsync(cancellationToken);await using var transaction=await connection.BeginTransactionAsync(cancellationToken);foreach(var sql in new[]{"DELETE FROM Inventories WHERE OwnerId=$c","DELETE FROM PlayerRelationships WHERE PlayerId=$c","DELETE FROM DungeonDiscovery WHERE PlayerId=$c","DELETE FROM Characters WHERE Id=$c","DELETE FROM AccountCharacters WHERE Id=$c AND AccountId=$a"}){var command=connection.CreateCommand();command.Transaction=(SqliteTransaction)transaction;command.CommandText=sql;command.Parameters.AddWithValue("$c",characterId);command.Parameters.AddWithValue("$a",accountId);await command.ExecuteNonQueryAsync(cancellationToken);}await transaction.CommitAsync(cancellationToken); }
+    { await using var connection=await OpenAsync(cancellationToken);await using var transaction=await connection.BeginTransactionAsync(cancellationToken);foreach(var sql in new[]{"DELETE FROM Inventories WHERE OwnerId=$c","DELETE FROM PlayerRelationships WHERE PlayerId=$c","DELETE FROM DungeonDiscovery WHERE PlayerId=$c","DELETE FROM WorldMapDiscovery WHERE PlayerId=$c","DELETE FROM Characters WHERE Id=$c","DELETE FROM AccountCharacters WHERE Id=$c AND AccountId=$a"}){var command=connection.CreateCommand();command.Transaction=(SqliteTransaction)transaction;command.CommandText=sql;command.Parameters.AddWithValue("$c",characterId);command.Parameters.AddWithValue("$a",accountId);await command.ExecuteNonQueryAsync(cancellationToken);}await transaction.CommitAsync(cancellationToken); }
 
     public async Task<bool> IsFirstAccountCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
     { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT Id=$c FROM AccountCharacters WHERE AccountId=$a ORDER BY CreatedUtc LIMIT 1";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$c",characterId);var result=await command.ExecuteScalarAsync(cancellationToken);return result is not null&&Convert.ToInt64(result)!=0; }

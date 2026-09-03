@@ -18,13 +18,66 @@ public sealed class DeterministicWorldGenerator
         var sidewalks = GenerateSidewalks(geographic.Features);
         var withSidewalks = geographic.Features.Concat(sidewalks).ToArray();
         var doors = GenerateDoors(withSidewalks);
+        var propertyFences = GeneratePropertyFences(withSidewalks);
         var trees = GenerateResourceNodes(reality, 220, withSidewalks);
         var bushes = GenerateBushes(reality, 360, withSidewalks);
         var vehicles = GenerateVehicles(reality, withSidewalks, 12);
         var streetLights = GenerateStreetLights(reality, withSidewalks);
-        var actors = GenerateActors(reality, withSidewalks.Concat(trees).Concat(bushes).Concat(vehicles).ToArray());
-        return geographic with { Features = withSidewalks.Concat(doors).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray() };
+        var obstacles = withSidewalks.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
+        var actors = GenerateActors(reality, obstacles).Concat(GeneratePoiMerchants(reality, withSidewalks)).ToArray();
+        return geographic with { Features = withSidewalks.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray() };
     }
+
+    public static IReadOnlyList<CanonicalEntity> GeneratePropertyFences(IReadOnlyList<CanonicalEntity> features)
+    {
+        var result = new List<CanonicalEntity>();
+        foreach (var parcel in features.Where(entity => entity.Kind == EntityKind.PropertyBoundary && entity.Geometry.Count >= 2))
+        {
+            var segments = Enumerable.Range(0, parcel.Geometry.Count - 1)
+                .Select(index => (Index: index, Start: parcel.Geometry[index], End: parcel.Geometry[index + 1], Length: Distance(parcel.Geometry[index], parcel.Geometry[index + 1])))
+                .Where(segment => segment.Length > .5).ToArray();
+            var gated = segments.OrderByDescending(segment => segment.Length).Take(2).Select(segment => segment.Index).ToHashSet();
+            var piece = 0;
+            foreach (var segment in segments)
+            {
+                if (!gated.Contains(segment.Index))
+                {
+                    result.Add(PropertyFence(parcel, piece++, segment.Start, segment.End, false));
+                    continue;
+                }
+                var gap = Math.Min(2.5, segment.Length * .35);
+                var halfGapFraction = gap / segment.Length / 2;
+                var before = Interpolate(segment.Start, segment.End, .5 - halfGapFraction);
+                var after = Interpolate(segment.Start, segment.End, .5 + halfGapFraction);
+                result.Add(PropertyFence(parcel, piece++, segment.Start, before, true));
+                result.Add(PropertyFence(parcel, piece++, after, segment.End, true));
+            }
+        }
+        return result;
+    }
+
+    private static CanonicalEntity PropertyFence(CanonicalEntity parcel, int piece, GeometryPoint start, GeometryPoint end, bool hasGate) =>
+        new($"generated:parcel-fence:{parcel.Id}:{piece}", EntityKind.Fence,
+            parcel.Position with { X = (start.X + end.X) / 2, Y = (start.Y + end.Y) / 2 }, new[] { start, end },
+            new Dictionary<string, string> { ["parcelId"] = parcel.Id, ["openGateAdjacent"] = hasGate.ToString().ToLowerInvariant() });
+
+    private static GeometryPoint Interpolate(GeometryPoint start, GeometryPoint end, double amount) =>
+        new(start.X + (end.X - start.X) * amount, start.Y + (end.Y - start.Y) * amount, start.Z + (end.Z - start.Z) * amount);
+
+    public static IReadOnlyList<CanonicalEntity> GeneratePoiMerchants(RealityConfiguration reality, IReadOnlyList<CanonicalEntity> features) => features
+        .Where(entity => entity.Kind is EntityKind.Building or EntityKind.PointOfInterest)
+        .Where(entity => entity.Properties.ContainsKey("merchantCategory"))
+        .GroupBy(entity => $"{entity.Properties.GetValueOrDefault("merchantCategory")}:{entity.Properties.GetValueOrDefault("name") ?? entity.Properties.GetValueOrDefault("brand") ?? entity.Id}", StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .OrderBy(entity => entity.Id).Take(30)
+        .Select((entity, index) => new CanonicalEntity($"generated:{reality.Id}:{AreaKey(reality)}:merchant:{index}", EntityKind.Npc,
+            entity.Position, Array.Empty<GeometryPoint>(), new Dictionary<string, string>
+            {
+                ["subtype"] = "merchant",
+                ["name"] = entity.Properties.GetValueOrDefault("name") is { Length: > 0 } name ? $"{name} clerk" : $"{entity.Properties.GetValueOrDefault("merchantCategory")} merchant",
+                ["merchantCategory"] = entity.Properties.GetValueOrDefault("merchantCategory") ?? "general",
+                ["sourceFeatureId"] = entity.Id
+            })).ToArray();
 
     public static IReadOnlyList<CanonicalEntity> GenerateResourceNodes(
         RealityConfiguration reality,

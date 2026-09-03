@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
+  <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
   <header class="panel title-panel">
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
     <h1>AlternativeReality</h1>
@@ -57,12 +58,13 @@
     <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
     <div><kbd>Left click</kbd> travel / use weapon</div>
     <div><kbd>Left / right drag</kbd> pan</div>
-    <div><kbd>Right click</kbd> actions</div>
+    <div><kbd>Right click</kbd> / <kbd>double-click</kbd> actions</div>
     <div><kbd>Wheel</kbd> zoom</div>
   </section>
   <section class="panel god-panel">
     <button id="toggleChatButton" type="button">Show chat</button>
     <label><input id="godMode" type="checkbox"> God Mode</label>
+    <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
     <button id="gpsTeleportButton" class="gps-teleport" type="button" hidden title="Teleport near my real location" aria-label="Teleport near my real GPS location">
       <span class="compass-icon" aria-hidden="true"><b>N</b><i></i></span>
       <span class="gps-button-label">My location</span>
@@ -94,7 +96,7 @@
     </div>
   </section>
   <section id="characterPanel" class="panel character-panel" hidden>
-    <strong>Base character switcher</strong>
+    <strong>Home character switcher</strong>
     <div id="characterList"></div>
     <form id="characterForm"><input id="characterName" minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" placeholder="New character" required><button type="submit">Add</button></form>
   </section>
@@ -109,6 +111,7 @@
   <section id="actionMenu" class="panel action-menu" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
+    <button id="moveToButton" type="button" hidden>Move here</button>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
     <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
@@ -156,6 +159,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=38"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>

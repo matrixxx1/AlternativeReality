@@ -116,6 +116,8 @@ public sealed partial class RealityWorld
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         foreach (var relationship in await _store.LoadRelationshipsAsync(Configuration.Id, characterId, cancellationToken))
             _relationships[(characterId, relationship.ActorId)] = relationship.FriendRating;
+        foreach (var areaKey in await _store.LoadWorldMapDiscoveryAsync(Configuration.Id, characterId, cancellationToken))
+            _revealedWorldAreas[(characterId, areaKey)] = 0;
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
         return player;
     }
@@ -222,10 +224,12 @@ public sealed partial class RealityWorld
         var wearingMagicRunningShoes = player.MagicRunningShoesOn && (player.GodMode || InventoryQuantity(characterId, "magicRunningShoes") > 0);
         var reducedStaminaDrain = wearingMagicHikingShoes || wearingMagicRunningShoes && WorldNavigation.MagicRunningShoesReduceStaminaOn(currentTerrain);
         var metersPerSecond = ConfiguredSpeedMetersPerSecond(player, currentTerrain, staminaFraction, wearingMagicHikingShoes, wearingMagicRunningShoes);
+        var maximumStep = request.MaximumDistanceMeters is > 0 and < double.MaxValue ? request.MaximumDistanceMeters.Value : double.MaxValue;
+        var step = Math.Min(metersPerSecond * elapsed * Configuration.GameSpeed, maximumStep);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
-            X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
-            Y = player.Position.Y + (directionY * metersPerSecond * elapsed * Configuration.GameSpeed)
+            X = player.Position.X + (directionX * step),
+            Y = player.Position.Y + (directionY * step)
         });
 
         var requestedTerrain = Navigation.TerrainAt(requested.X, requested.Y);
@@ -284,6 +288,8 @@ public sealed partial class RealityWorld
     public async Task<PlayerState> SetTravelModeAsync(string characterId, TravelMode mode, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.DirtBike or TravelMode.Motorcycle)
+            throw new InvalidOperationException("Bikes, dirt bikes, and motorcycles cannot be used inside a dungeon or Home.");
         if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
         if (!player.GodMode && mode == TravelMode.Bike && InventoryQuantity(characterId, "bike") <= 0) throw new InvalidOperationException("You need a bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.DirtBike && InventoryQuantity(characterId, "dirtBike") <= 0) throw new InvalidOperationException("You need a dirt bike in your inventory.");
@@ -293,7 +299,7 @@ public sealed partial class RealityWorld
         if (mode == TravelMode.Raft)
         {
             if (!player.GodMode && InventoryQuantity(characterId, "inflatableRaft") <= 0) throw new InvalidOperationException("You need an inflatable raft.");
-            if (player.Terrain != TerrainType.ShallowWater && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed from shallow water.");
+            if (player.LocationId == "outdoor" && player.Terrain != TerrainType.ShallowWater && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed from shallow water.");
         }
         if (player.TravelMode == TravelMode.Raft && mode != TravelMode.Raft && player.Terrain == TerrainType.DeepWater && !player.GodMode)
         {
@@ -309,11 +315,12 @@ public sealed partial class RealityWorld
     public Task<IReadOnlyList<PlayerState>> AdvanceStaminaAsync(TimeSpan elapsed, CancellationToken cancellationToken = default) =>
         AdvanceVitalsAsync(elapsed, cancellationToken);
 
-    public async Task<PlayerState> TeleportAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default)
+    public async Task<(PlayerState Player, bool Expanded)> TeleportWithAreaAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default)
     {
         if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to teleport.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
-        await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
+        if (player.LocationId != "outdoor") throw new InvalidOperationException("Leave the dungeon or Home before teleporting.");
+        var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with { X = request.X, Y = request.Y });
         var destination = Navigation.IsBlocked(requested.X, requested.Y) || Navigation.TerrainAt(requested.X, requested.Y) == TerrainType.DeepWater
             ? Navigation.FindNearestWalkable(requested)
@@ -327,17 +334,20 @@ public sealed partial class RealityWorld
         };
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         await SavePlayerAsync(updated, cancellationToken);
-        return updated;
+        return (updated, expanded);
     }
+
+    public async Task<PlayerState> TeleportAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default) =>
+        (await TeleportWithAreaAsync(characterId, request, cancellationToken)).Player;
 
     public async Task<(NavigationResult Result, bool Expanded)> FindPathAsync(string characterId, PathRequest request, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) return (new(false, Array.Empty<WorldPosition>(), "Unknown player."), false);
         if (player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var dungeon))
         {
-            if (request.X < .5 || request.Y < .5 || request.X > dungeon.Width - .5 || request.Y > dungeon.Height - .5) return (new(false, Array.Empty<WorldPosition>(), "That point is outside the dungeon."), false);
+            if (request.X < .5 || request.Y < .5 || request.X > dungeon.Width - .5 || request.Y > dungeon.Height - .5) return (new(false, Array.Empty<WorldPosition>(), dungeon.IsHome ? "That point is outside Home." : "That point is outside the dungeon."), false);
             var target = player.Position with { X = request.X, Y = request.Y, Z = 0 };
-            if (dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, target, wall))) return (new(false, Array.Empty<WorldPosition>(), "A dungeon wall blocks that route. Move through a doorway."), false);
+            if (dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, target, wall))) return (new(false, Array.Empty<WorldPosition>(), dungeon.IsHome ? "A wall in Home blocks that route. Move through a doorway." : "A dungeon wall blocks that route. Move through a doorway."), false);
             return (new(true, new[] { target }), false);
         }
         var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
@@ -476,12 +486,13 @@ public sealed partial class RealityWorld
         {
             var safe = Navigation.FindNearestWalkable(entity.Position);
             var identity = StableInt(entity.Id) & int.MaxValue;
-            var merchant = entity.Kind == EntityKind.Npc && identity % 4 == 0;
+            var merchantCategory = entity.Properties.GetValueOrDefault("merchantCategory");
+            var merchant = entity.Kind == EntityKind.Npc && (merchantCategory is not null || identity % 4 == 0);
             var maximumHealth = entity.Kind == EntityKind.Animal && entity.Properties.GetValueOrDefault("subtype") is "bear" or "cougar" ? 8 : 5;
             var travel = entity.Kind == EntityKind.Npc ? (TravelMode)(identity % 10 == 0 ? 3 : identity % 8 == 0 ? 2 : 0) : TravelMode.Walk;
             _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, entity.Properties.GetValueOrDefault("subtype") ?? "unknown",
                 entity.Properties.GetValueOrDefault("name") ?? "Wanderer", safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
-                IsMerchant: merchant, TravelMode: travel);
+                IsMerchant: merchant, TravelMode: travel, MerchantCategory: merchantCategory);
         }
     }
 
@@ -510,6 +521,16 @@ public sealed partial class RealityWorld
     }
 
     public Task<bool> LoadAreaAsync(double x,double y,CancellationToken cancellationToken=default)=>EnsureAreaLoadedAsync(x,y,cancellationToken);
+    public bool IsAreaLoaded(double x, double y) => _loadedAreas.ContainsKey(AreaKeyFor(x, y));
+
+    public string AreaKeyFor(double x, double y)
+    {
+        var origin = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
+        var size = Configuration.Area.SizeMeters;
+        var cellX = (int)Math.Floor((x - (origin.X - size / 2d)) / size);
+        var cellY = (int)Math.Floor((y - (origin.Y - size / 2d)) / size);
+        return $"{cellX}:{cellY}";
+    }
 
     private Queue<WorldPosition> CreateActorRoute(ActorState actor)
     {

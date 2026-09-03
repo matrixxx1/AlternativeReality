@@ -25,7 +25,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     public async Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            FormattableString.Invariant($"v2:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
+            FormattableString.Invariant($"v3:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_cacheDirectory, $"area-{cacheKey}.json");
         if (File.Exists(canonicalCachePath))
         {
@@ -117,6 +117,11 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
                $"way[\"landuse\"]({bbox});" +
                $"way[\"leisure\"~\"park|garden|recreation_ground\"]({bbox});" +
                $"way[\"amenity\"=\"parking\"]({bbox});" +
+               $"nwr[\"amenity\"=\"fuel\"]({bbox});" +
+               $"nwr[\"shop\"]({bbox});" +
+               $"nwr[\"aeroway\"=\"aerodrome\"]({bbox});" +
+               $"way[\"boundary\"~\"parcel|lot|cadastral\"]({bbox});" +
+               $"way[\"boundary\"=\"administrative\"][\"admin_level\"=\"4\"]({bbox});" +
                ");out body;>;out skel qt;";
     }
 
@@ -124,30 +129,33 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     {
         using var document = JsonDocument.Parse(rawJson);
         var nodes = new Dictionary<long, GeoCoordinate>();
+        var taggedNodes = new List<(long Id, GeoCoordinate Coordinate, Dictionary<string, string> Tags)>();
         var ways = new List<(long Id, long[] Nodes, Dictionary<string, string> Tags)>();
+        var relations = new List<(long Id, long[] Ways, Dictionary<string, string> Tags)>();
 
         foreach (var element in document.RootElement.GetProperty("elements").EnumerateArray())
         {
             var type = element.GetProperty("type").GetString();
             if (type == "node" && element.TryGetProperty("lat", out var latitude) && element.TryGetProperty("lon", out var longitude))
             {
-                nodes[element.GetProperty("id").GetInt64()] = new GeoCoordinate(latitude.GetDouble(), longitude.GetDouble());
+                var id = element.GetProperty("id").GetInt64();
+                var coordinate = new GeoCoordinate(latitude.GetDouble(), longitude.GetDouble());
+                nodes[id] = coordinate;
+                var tags = ReadTags(element);
+                if (tags.Count > 0) taggedNodes.Add((id, coordinate, tags));
             }
             else if (type == "way" && element.TryGetProperty("nodes", out var nodeArray))
             {
-                var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (element.TryGetProperty("tags", out var tagObject))
-                {
-                    foreach (var tag in tagObject.EnumerateObject())
-                    {
-                        tags[tag.Name] = tag.Value.GetString() ?? string.Empty;
-                    }
-                }
-
                 ways.Add((
                     element.GetProperty("id").GetInt64(),
                     nodeArray.EnumerateArray().Select(value => value.GetInt64()).ToArray(),
-                    tags));
+                    ReadTags(element)));
+            }
+            else if (type == "relation" && element.TryGetProperty("members", out var members))
+            {
+                relations.Add((element.GetProperty("id").GetInt64(), members.EnumerateArray()
+                    .Where(member => member.GetProperty("type").GetString() == "way")
+                    .Select(member => member.GetProperty("ref").GetInt64()).ToArray(), ReadTags(element)));
             }
         }
 
@@ -175,8 +183,10 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             var centerX = geometry.Average(point => point.X);
             var centerY = geometry.Average(point => point.Y);
             var properties = way.Tags
-                .Where(pair => pair.Key is "name" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width")
+                .Where(pair => KeepProperty(pair.Key))
                 .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            AddDerivedProperties(properties, way.Tags);
+            if (kind == EntityKind.StateBoundary) properties["stateName"] = way.Tags.GetValueOrDefault("name") ?? "State boundary";
             if (kind == EntityKind.Terrain)
             {
                 properties["terrain"] = ClassifyTerrain(way.Tags).ToString().ToLowerInvariant();
@@ -193,14 +203,71 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
                 properties));
         }
 
+        foreach (var node in taggedNodes)
+        {
+            if (Classify(node.Tags) != EntityKind.PointOfInterest) continue;
+            var position = projection.Project(node.Coordinate);
+            if (!area.Bounds.Contains(position.X, position.Y)) continue;
+            var properties = node.Tags.Where(pair => KeepProperty(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            AddDerivedProperties(properties, node.Tags);
+            result.Add(new CanonicalEntity($"geo:osm:node:{node.Id}", EntityKind.PointOfInterest, position, Array.Empty<GeometryPoint>(), properties));
+        }
+
+        var waysById = ways.ToDictionary(way => way.Id);
+        foreach (var relation in relations.Where(relation => relation.Tags.GetValueOrDefault("boundary") == "administrative" && relation.Tags.GetValueOrDefault("admin_level") == "4" || relation.Tags.GetValueOrDefault("aeroway") == "aerodrome"))
+        {
+            var kind = relation.Tags.GetValueOrDefault("aeroway") == "aerodrome" ? EntityKind.Airport : EntityKind.StateBoundary;
+            foreach (var wayId in relation.Ways.Distinct())
+            {
+                if (!waysById.TryGetValue(wayId, out var member)) continue;
+                var geometry = member.Nodes.Where(nodes.ContainsKey).Select(nodeId => projection.Project(nodes[nodeId]))
+                    .Where(position => area.Bounds.Contains(position.X, position.Y)).Select(position => new GeometryPoint(position.X, position.Y, position.Z)).ToArray();
+                if (geometry.Length < 2) continue;
+                var properties = relation.Tags.Where(pair => KeepProperty(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                if (kind == EntityKind.StateBoundary) properties["stateName"] = relation.Tags.GetValueOrDefault("name") ?? "State boundary";
+                result.Add(new CanonicalEntity($"geo:osm:relation:{relation.Id}:way:{wayId}", kind,
+                    new WorldPosition(area.Region, geometry.Average(point => point.X), geometry.Average(point => point.Y)), geometry, properties));
+            }
+        }
+
         return result;
+    }
+
+    private static Dictionary<string, string> ReadTags(JsonElement element)
+    {
+        var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!element.TryGetProperty("tags", out var tagObject)) return tags;
+        foreach (var tag in tagObject.EnumerateObject()) tags[tag.Name] = tag.Value.GetString() ?? string.Empty;
+        return tags;
+    }
+
+    private static bool KeepProperty(string key) => key is "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
+
+    private static void AddDerivedProperties(Dictionary<string, string> properties, IReadOnlyDictionary<string, string> tags)
+    {
+        var category = MerchantCategory(tags);
+        if (category is not null) properties["merchantCategory"] = category;
+    }
+
+    private static string? MerchantCategory(IReadOnlyDictionary<string, string> tags)
+    {
+        if (tags.GetValueOrDefault("amenity") == "fuel") return "gas";
+        if (!tags.TryGetValue("shop", out var shop)) return null;
+        if (shop is "clothes" or "fashion" or "shoes" or "outdoor") return "clothing";
+        if (shop is "supermarket" or "grocery" or "bakery" or "butcher" or "greengrocer" or "deli") return "food";
+        if (shop == "convenience") return "convenience";
+        return "general";
     }
 
     private static EntityKind? Classify(IReadOnlyDictionary<string, string> tags)
     {
+        if (tags.GetValueOrDefault("aeroway") == "aerodrome") return EntityKind.Airport;
+        if (tags.TryGetValue("boundary", out var boundary) && boundary is "parcel" or "lot" or "cadastral") return EntityKind.PropertyBoundary;
+        if (boundary == "administrative" && tags.GetValueOrDefault("admin_level") == "4") return EntityKind.StateBoundary;
         if (tags.TryGetValue("natural", out var natural) && natural == "water") return EntityKind.Water;
         if (tags.ContainsKey("waterway")) return EntityKind.Water;
         if (tags.ContainsKey("building")) return EntityKind.Building;
+        if (tags.ContainsKey("shop") || tags.GetValueOrDefault("amenity") == "fuel") return EntityKind.PointOfInterest;
         if (tags.TryGetValue("barrier", out var barrier) && barrier == "fence") return EntityKind.Fence;
         if (tags.TryGetValue("highway", out var highway))
             return highway is "footway" or "pedestrian" or "steps" ? EntityKind.Sidewalk : EntityKind.Road;

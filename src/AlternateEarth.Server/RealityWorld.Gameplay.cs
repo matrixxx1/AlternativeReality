@@ -22,7 +22,8 @@ public sealed partial class RealityWorld
         new("gallonOfGas","Gallon of gas","Refuels the selected motor vehicle",0,0,500,1_000), new("inflatableRaft","Inflatable raft","Safe travel through deep water",0,0,45_000,65_000,true,true,null,2.75),
         new("flashlight","Flashlight","Directional light",0,0,1_000,5_000,true,true,null,0,50), new("lantern","Lantern","Circular area light",0,0,5_000,10_000,true,true,null,0,30), new("laser","Laser","Straight light beam until collision",0,0,20_000,40_000,true,true,null,0,150),
         new("magicHikingShoes","Magic hiking shoes","Additive movement and stamina bonus",0,0,10_000,40_000,true,true,null,3.5), new("magicRunningShoes","Magic running shoes","Larger additive movement and conditional stamina bonus",0,0,10_000,40_000,true,true,null,7),
-        new("hat","Hat","Halves water drain while worn",0,0,3_000,7_500,true,true), new("water","Water","Restores water and 2 hearts; pauses drain for 5 minutes",0,0,50,200), new("food","Food","Restores stamina and 2 hearts; pauses drain for 5 minutes",0,0,200,500)
+        new("hat","Hat","Halves water drain while worn",0,0,3_000,7_500,true,true), new("water","Water","Restores water and 2 hearts; pauses drain for 5 minutes",0,0,50,200), new("food","Food","Restores stamina and 2 hearts; pauses drain for 5 minutes",0,0,200,500),
+        new("areaMap","Map of this block","Permanently reveals the current geographic block",0,0,100,100_000,true,true)
     };
     private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     private static readonly MovementConfiguration DefaultMovementConfiguration = new(
@@ -54,6 +55,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<(string Actor, string Player), DateTimeOffset> _lastActorAttack = new();
     private readonly ConcurrentDictionary<string, string> _playerAccounts = new();
     private readonly ConcurrentDictionary<string, string> _baseBuildings = new();
+    private readonly ConcurrentDictionary<(string Player, string Area), byte> _revealedWorldAreas = new();
 
     public PlayerPrivateState GetPrivateState(string playerId)
     {
@@ -72,7 +74,8 @@ public sealed partial class RealityWorld
             if (door is not null) baseState = new BaseState(buildingId, door.Id, door.Position, player?.Name ?? "Explorer");
         }
         var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration);
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration);
+        var revealedAreas = _revealedWorldAreas.Keys.Where(key => key.Player == playerId).Select(key => key.Area).OrderBy(key => key).ToArray();
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas);
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
@@ -216,7 +219,7 @@ public sealed partial class RealityWorld
 
     public async Task<(PlayerState Player, DungeonState Dungeon)> EnterDungeonAsync(string playerId, string doorId, CancellationToken cancellationToken = default)
     {
-        if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("You cannot enter that dungeon now.");
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("You cannot enter that interior now.");
         var door = _baseEntities.Values.FirstOrDefault(entity => entity.Id == doorId && entity.Kind == EntityKind.Door) ?? throw new InvalidOperationException("That door does not exist.");
         if (player.Position.Distance2D(door.Position) > 6) throw new InvalidOperationException("Move closer to the door first.");
         var buildingId = door.Properties.GetValueOrDefault("buildingId") ?? throw new InvalidOperationException("The door has no building.");
@@ -237,7 +240,7 @@ public sealed partial class RealityWorld
 
     public async Task<PlayerState> ExitDungeonAsync(string playerId, CancellationToken cancellationToken = default)
     {
-        if (!_players.TryGetValue(playerId, out var player) || player.LocationId == "outdoor") throw new InvalidOperationException("You are not inside a dungeon.");
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId == "outdoor") throw new InvalidOperationException("You are not inside a dungeon or Home.");
         var dungeonId = player.LocationId;
         var destination = _returnPositions.TryRemove(playerId, out var saved) ? saved : Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         var updated = player with { LocationId = "outdoor", Position = destination, Terrain = Navigation.TerrainAt(destination.X, destination.Y), SpeedMetersPerSecond = 0, Version = player.Version + 1 };
@@ -286,7 +289,12 @@ public sealed partial class RealityWorld
 
     private async Task<MovementOutcome> MoveInDungeonAsync(PlayerState player, MoveRequest request, CancellationToken cancellationToken)
     {
-        if (!_dungeons.TryGetValue(player.LocationId, out var dungeon)) return new(player, false, true, false, false, false, "Dungeon unavailable.");
+        if (!_dungeons.TryGetValue(player.LocationId, out var dungeon)) return new(player, false, true, false, false, false, player.LocationId.StartsWith("home:", StringComparison.Ordinal) ? "Home unavailable." : "Dungeon unavailable.");
+        if (player.TravelMode is TravelMode.Bike or TravelMode.DirtBike or TravelMode.Motorcycle)
+        {
+            player = player with { TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+            await SavePlayerAsync(player, cancellationToken);
+        }
         if (!player.GodMode && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
         {
             var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
@@ -298,7 +306,9 @@ public sealed partial class RealityWorld
         var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicHikingShoes") > 0);
         var wearingMagicRunningShoes = player.MagicRunningShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicRunningShoes") > 0);
         var speed = ConfiguredSpeedMetersPerSecond(player, TerrainType.Pavement, player.Stamina / player.MaximumStamina, wearingMagicHikingShoes, wearingMagicRunningShoes);
-        var next = player.Position with { X = Math.Clamp(player.Position.X + dx * speed * elapsed, .5, dungeon.Width - .5), Y = Math.Clamp(player.Position.Y + dy * speed * elapsed, .5, dungeon.Height - .5), Z = 0 };
+        var maximumStep = request.MaximumDistanceMeters is > 0 and < double.MaxValue ? request.MaximumDistanceMeters.Value : double.MaxValue;
+        var step = Math.Min(speed * elapsed, maximumStep);
+        var next = player.Position with { X = Math.Clamp(player.Position.X + dx * step, .5, dungeon.Width - .5), Y = Math.Clamp(player.Position.Y + dy * step, .5, dungeon.Height - .5), Z = 0 };
         var blocked = dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, next, wall)); if (blocked) next = player.Position;
         var distance = player.Position.Distance2D(next);
         var dirtBikeGas = player.DirtBikeGasGallons;
@@ -384,15 +394,27 @@ public sealed partial class RealityWorld
         var requested = request.Purchases.Where(line => line.Quantity > 0).ToArray(); if (requested.Length == 0) throw new InvalidOperationException("Select at least one item.");
         long total = 0; foreach (var line in requested) { var offer = quote.Offers.FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("Item not offered."); if (line.Quantity > offer.Quantity) throw new InvalidOperationException("Not enough stock."); checked { total += offer.UnitPriceCents * line.Quantity; } }
         if (total > player.WalletCents) throw new InvalidOperationException("You cannot spend more than you have.");
-        foreach (var line in requested) AddInventory(playerId, line.ItemType, line.Quantity); var updated = player with { WalletCents = player.WalletCents - total, Version = player.Version + 1 };
+        foreach (var line in requested)
+        {
+            if (line.ItemType.Equals("areaMap", StringComparison.OrdinalIgnoreCase))
+            {
+                var mapMerchant = FindActor(playerId, request.MerchantId) ?? throw new InvalidOperationException("Merchant unavailable.");
+                var areaKey = AreaKeyFor(mapMerchant.Position.X, mapMerchant.Position.Y);
+                _revealedWorldAreas[(playerId, areaKey)] = 0;
+                await _store.SaveWorldMapDiscoveryAsync(Configuration.Id, playerId, areaKey, cancellationToken);
+            }
+            else AddInventory(playerId, line.ItemType, line.Quantity);
+        }
+        var updated = player with { WalletCents = player.WalletCents - total, Version = player.Version + 1 };
         var friend = Relationship(playerId, request.MerchantId) + .5; _relationships[(playerId, request.MerchantId)] = friend; await _store.SaveRelationshipAsync(Configuration.Id, new(playerId, request.MerchantId, friend), cancellationToken);
-        _tradeQuotes.TryRemove((playerId, request.MerchantId), out _); await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
+        foreach (var key in _tradeQuotes.Keys.Where(key => key.Player == playerId).ToArray()) _tradeQuotes.TryRemove(key, out _);
+        await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
         return (updated, new InventoryState(playerId, GetInventoryItems(playerId)), new RelationshipState(playerId, request.MerchantId, friend));
     }
 
     private TradeQuote GenerateTradeQuote(string playerId, ActorState merchant)
     {
-        var baseOffers = BaseMerchantOffers(merchant); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
+        var baseOffers = BaseMerchantOffers(merchant, playerId); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
         var offers = baseOffers.Select(offer =>
         {
             var range = _itemConfigurations[offer.ItemType];
@@ -401,10 +423,20 @@ public sealed partial class RealityWorld
         return new TradeQuote(merchant.Id, merchant.Name, friendship, offers);
     }
 
-    private MerchantOffer[] BaseMerchantOffers(ActorState merchant)
+    private MerchantOffer[] BaseMerchantOffers(ActorState merchant, string? playerId = null)
     {
         var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}"));
-        var selected = _itemConfigurations.Values.Where(item=>item.ForSale).OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray();
+        var allowed = merchant.MerchantCategory switch
+        {
+            "gas" => new HashSet<string>(["gallonOfGas"], StringComparer.OrdinalIgnoreCase),
+            "clothing" => new HashSet<string>(["hat", "magicHikingShoes", "magicRunningShoes"], StringComparer.OrdinalIgnoreCase),
+            "food" => new HashSet<string>(["food", "water"], StringComparer.OrdinalIgnoreCase),
+            "convenience" => new HashSet<string>(["food", "water"], StringComparer.OrdinalIgnoreCase),
+            _ => null
+        };
+        var pool = _itemConfigurations.Values.Where(item => item.ForSale && item.ItemType != "areaMap" && (allowed is null || allowed.Contains(item.ItemType))).ToArray();
+        var selected = pool.OrderBy(_ => random.Next()).Take(Math.Min(pool.Length, allowed is null ? random.Next(3, 7) : Math.Max(1, pool.Length))).ToList();
+        if (playerId is not null && merchant.LocationId == "outdoor" && !_revealedWorldAreas.ContainsKey((playerId, AreaKeyFor(merchant.Position.X, merchant.Position.Y)))) selected.Add(_itemConfigurations["areaMap"]);
         return selected.Select(item => new MerchantOffer(item.ItemType, item.Single ? 1 : random.Next(3, 31), random.NextInt64(item.MinimumPriceCents, item.MaximumPriceCents + 1))).ToArray();
     }
 

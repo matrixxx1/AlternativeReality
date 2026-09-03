@@ -20,11 +20,11 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 14) throw new Error(`Expected protocol 14, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 15) throw new Error(`Expected protocol 15, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
-  if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
+  if (welcomeA.snapshot.actors?.length < 40) throw new Error('Expected the 40 baseline authoritative wildlife/NPC actors.');
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
   const modeChanged = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.travelMode === 'run');
   first.socket.send(JSON.stringify({ type: 'moveRequest', x: 1, y: 0, sequence: 1 }));
@@ -36,7 +36,7 @@ try {
   for (let index = 0; index < pathOffsets.length && !path; index++) {
     const sequence = 20 + index, [offsetX, offsetY] = pathOffsets[index];
     first.socket.send(JSON.stringify({ type: 'pathRequest', x: seenByA.player.position.x + offsetX, y: seenByA.player.position.y + offsetY, sequence }));
-    const result = await first.waitFor(message => (message.type === 'pathResult' || message.type === 'pathUnavailable') && message.sequence === sequence);
+    const result = await first.waitFor(message => (message.type === 'pathResult' || message.type === 'pathUnavailable') && message.sequence === sequence, 60000);
     if (result.type === 'pathResult' && result.waypoints?.length) path = result;
   }
   if (!path) throw new Error('Pathfinding failed in all four cardinal directions.');

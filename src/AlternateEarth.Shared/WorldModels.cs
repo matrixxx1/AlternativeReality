@@ -21,7 +21,11 @@ public enum EntityKind
     Animal,
     Npc,
     ResourceNode,
-    PlayerStructure
+    PlayerStructure,
+    PointOfInterest,
+    Airport,
+    StateBoundary,
+    PropertyBoundary
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -104,7 +108,8 @@ public sealed record ActorState(
     double FriendRating = 0,
     bool IsMerchant = false,
     TravelMode TravelMode = TravelMode.Walk,
-    string LocationId = "outdoor");
+    string LocationId = "outdoor",
+    string? MerchantCategory = null);
 
 public sealed record ItemStack(string ItemType, int Quantity);
 public sealed record InventoryState(string PlayerId, IReadOnlyList<ItemStack> Items);
@@ -139,7 +144,8 @@ public sealed record PlayerPrivateState(
     BaseState? Base = null,
     long BasePurchasePriceCents = 35_000_000,
     long GodModeBasePurchasePriceCents = 1,
-    ServerConfigurationState? ServerConfiguration = null);
+    ServerConfigurationState? ServerConfiguration = null,
+    IReadOnlyList<string>? RevealedWorldAreas = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(
