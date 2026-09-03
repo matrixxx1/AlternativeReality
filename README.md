@@ -1,14 +1,14 @@
 # Alternate Earth
 
-A renderer-neutral, self-hosted multiplayer world derived from real geography. One authoritative reality server drives every client: the current browser-based top-down client and, later, full Godot 2D and 3D clients.
+A renderer-neutral, self-hosted multiplayer world derived from real geography. One authoritative reality server drives every client: the current browser-based top-down client and, later, a browser-based WebGL 3D client.
 
 The first vertical slice is runnable now. It imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington; samples elevation; renders roads, building footprints, water, trees, and players; accepts server-validated movement and object placement; broadcasts changes over WebSockets; and persists reality deltas and character positions in SQLite.
 
 ## Chosen stack
 
-- **Server and canonical model:** C# / .NET 8 and ASP.NET Core. It is cross-platform, fast, debuggable, Docker-friendly, and has a strong typed contract shared with future Godot C# clients.
-- **Production clients:** Godot 4 with C#. Godot has first-class 2D and 3D renderers, is open source, and lets both presentations share protocol/model code without making either renderer authoritative.
-- **Prototype 2D client:** dependency-free HTML Canvas and JavaScript, served by the reality server. This proves the architecture immediately and makes the two-client synchronization test as easy as opening two tabs.
+- **Server and canonical model:** C# / .NET 8 and ASP.NET Core. It is cross-platform, fast, easy to debug and publish as a native service, and exposes a renderer-neutral protocol.
+- **Browser clients:** dependency-free HTML Canvas and JavaScript for 2D now, with WebGL through an open-source library such as Babylon.js for the later 3D view. Browsers are not limited to tile graphics; the current client already renders projected vector roads and footprints.
+- **Shared contract:** canonical C# records define server state, while the versioned JSON protocol is the client boundary. TypeScript definitions can be generated from that contract as the browser client grows.
 - **Networking:** JSON over WebSockets for the prototype. Messages describe logical actions and entities. Binary serialization can be added after profiling without changing simulation semantics.
 - **Persistence:** SQLite in WAL mode. Only characters and reality deltas are saved; untouched geographic features regenerate from cache and seed.
 - **Geography:** cached OpenStreetMap/Overpass plus a cached SRTM90m elevation grid through OpenTopoData, behind provider interfaces.
@@ -40,14 +40,6 @@ node tools/smoke-test.mjs
 ```
 
 The smoke test opens two real WebSocket clients, places one object through client A, confirms both receive the same canonical entity, and checks the authoritative world snapshot. Restart the server and query `/api/world` to prove the SQLite delta reload path.
-
-## Docker
-
-```powershell
-docker compose up --build
-```
-
-The container listens on port 8080 internally and is mapped to [http://localhost:5080](http://localhost:5080). Its database and map cache live in the mounted `data` directory.
 
 ## Geographic attribution
 

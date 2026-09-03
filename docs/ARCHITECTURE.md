@@ -20,9 +20,9 @@ Each hosted server is one independent reality with its own configuration, seed, 
 
 The canonical server, coordinate math, protocol records, persistence, and geographic conversion use .NET 8/C#. ASP.NET Core supplies a mature cross-platform host and WebSocket stack. SQLite is embedded, easy to back up, and adequate for a small server; repository interfaces and logical IDs keep a later PostgreSQL implementation possible.
 
-Godot 4 C# is the preferred production client technology for both 2D and 3D. It is open source, good at both rendering modes, deploys broadly, and can consume the same C# shared contracts. The browser Canvas client is deliberately small and disposable: it validates the server boundary before engine and asset work begin.
+Browser clients are the near-term and default presentation technology. The current dependency-free Canvas client handles the top-down view. A later browser 3D client can use WebGL through an open-source library such as Babylon.js or Three.js while consuming the exact same protocol. This does not constrain the canonical world to tiles: roads and footprints are already continuous vector geometry, and terrain can become meshes in WebGL.
 
-Unity and Unreal are capable but introduce larger runtimes, licensing/platform complexity, and stronger pressure to let an engine-specific physics model leak into gameplay. MonoGame is a good 2D option but offers less leverage for the eventual 3D client. None is prohibited because the wire protocol remains renderer-neutral.
+Native engines remain possible later, but are intentionally out of scope for now. Keeping the wire protocol renderer-neutral preserves that option without adding an engine toolchain to the current project.
 
 ## Repository topology
 
@@ -32,7 +32,7 @@ src/
   AlternateEarth.Geo/        provider interfaces, OSM importer, elevation, generator
   AlternateEarth.Server/     authoritative state, WebSockets, SQLite, static host
   AlternateEarth.Client2D/   current Canvas renderer and input only
-  AlternateEarth.Client3D/   future Godot client boundary
+  AlternateEarth.Client3D/   future browser WebGL client boundary
 tests/AlternateEarth.Tests/  coordinate, generation, and persistence tests
 tools/                       end-to-end protocol smoke tests and future import tools
 docs/                        architecture and contracts
@@ -105,4 +105,4 @@ Generated resource IDs and positions are stable for the same inputs. Untouched b
 
 ## Near-term implementation order
 
-The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic generation, authoritative server, SQLite deltas, 2D movement, two-client sync, placement, removal, and restart persistence. Next: chunk-specific snapshots, collision, harvesting/inventory, structured building pieces, authentication/admin controls, then a minimal Godot 3D observer using the same protocol.
+The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic generation, authoritative server, SQLite deltas, 2D movement, two-client sync, placement, removal, and restart persistence. Next: chunk-specific snapshots, collision, harvesting/inventory, structured building pieces, authentication/admin controls, then a minimal browser WebGL 3D observer using the same protocol.

@@ -1,6 +1,6 @@
-# Client3D boundary
+# Browser Client3D boundary
 
-The first 3D milestone will be a Godot 4 C# observer that references `AlternateEarth.Shared`, connects to protocol v1, and maps the same logical entities to meshes. No simulation, persistence, inventory, or authoritative physics belongs here.
+The first 3D milestone will be a browser WebGL observer using an open-source renderer such as Babylon.js. It will connect to protocol v1 and map the same logical entities to meshes. No simulation, persistence, inventory, or authoritative physics belongs here.
 
 Acceptance demonstration:
 
