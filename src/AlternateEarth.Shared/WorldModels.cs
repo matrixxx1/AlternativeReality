@@ -5,12 +5,31 @@ namespace AlternateEarth.Shared;
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum EntityKind
 {
+    Terrain,
     Road,
+    Sidewalk,
     Building,
+    Door,
     Water,
     Tree,
+    Fence,
+    Vehicle,
     ResourceNode,
     PlayerStructure
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TerrainType
+{
+    Grass,
+    Forest,
+    Sand,
+    Pavement,
+    Road,
+    ShallowWater,
+    DeepWater,
+    Mud,
+    Sidewalk
 }
 
 public readonly record struct GeometryPoint(double X, double Y, double Z = 0);
@@ -28,7 +47,24 @@ public sealed record PlayerState(
     string Id,
     string Name,
     WorldPosition Position,
-    long Version = 1);
+    long Version = 1,
+    TerrainType Terrain = TerrainType.Grass,
+    double SpeedMetersPerSecond = 0);
+
+public sealed record WeatherState(
+    string Condition,
+    int WeatherCode,
+    double TemperatureCelsius,
+    double PrecipitationMillimeters,
+    double WindSpeedKilometersPerHour,
+    bool IsDay,
+    DateTimeOffset ObservedAtUtc,
+    string Source,
+    bool IsAvailable = true)
+{
+    public static WeatherState Unavailable { get; } = new(
+        "Weather unavailable", -1, 0, 0, 0, true, DateTimeOffset.MinValue, "none", false);
+}
 
 public sealed record ElevationSample(double X, double Y, double ElevationMeters);
 
@@ -84,4 +120,5 @@ public sealed record WorldSnapshot(
     IReadOnlyList<CanonicalEntity> BaseEntities,
     IReadOnlyList<CanonicalEntity> RealityEntities,
     IReadOnlyList<PlayerState> Players,
-    IReadOnlyList<ElevationSample> Elevation);
+    IReadOnlyList<ElevationSample> Elevation,
+    WeatherState? Weather = null);

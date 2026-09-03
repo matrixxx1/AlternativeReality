@@ -18,19 +18,37 @@ h1 { margin: 5px 0 7px; font-size: clamp(19px, 3vw, 27px); font-weight: 700; let
 .status-row { display: flex; align-items: center; gap: 8px; color: #b9c4bb; font-size: 12px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #b75b4d; box-shadow: 0 0 12px currentColor; }
 .dot.online { background: #76c78c; }
-.legend-panel { top: 20px; right: 20px; padding: 12px 14px; display: grid; gap: 7px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.legend-panel { top: 20px; right: 20px; padding: 12px 14px; display: grid; grid-template-columns: repeat(2, auto); gap: 7px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .legend-panel div { display: flex; align-items: center; gap: 8px; }
 .swatch { width: 13px; height: 4px; display: inline-block; }
-.swatch.road { background: #d8cfb2; }
+.swatch.grass { background: #496b3b; height: 9px; }
+.swatch.forest { background: #244b32; height: 9px; }
+.swatch.sand { background: #c9ad68; height: 9px; }
+.swatch.mud { background: #72543c; height: 9px; }
+.swatch.pavement { background: #777a76; height: 9px; }
+.swatch.sidewalk { background: #b8b1a0; height: 9px; }
+.swatch.road { background: #555a58; height: 9px; }
 .swatch.building { background: #866e5b; height: 9px; }
 .swatch.water { background: #4c8794; height: 9px; }
 .help-panel { left: 20px; bottom: 20px; padding: 12px 14px; display: grid; gap: 6px; color: #b9c4bb; font-size: 12px; }
+.telemetry-panel { right: 20px; top: 128px; padding: 10px 12px; min-width: 220px; display: grid; gap: 6px; font-size: 11px; }
+.telemetry-panel div { display: flex; justify-content: space-between; gap: 18px; }
+.telemetry-panel span { color: #91a096; text-transform: uppercase; }
+.telemetry-panel strong { color: #f1e3b4; text-align: right; }
+.telemetry-panel button { margin-top: 4px; padding: 6px 10px; color: #f1e3b4; background: #26372f; border: 1px solid #9f8d5b; font: inherit; font-weight: 700; text-transform: uppercase; cursor: pointer; box-shadow: 2px 2px 0 #080e0b; }
+.telemetry-panel button:hover { background: #33483d; }
+.telemetry-panel button:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #080e0b; }
+.action-menu { min-width: 190px; padding: 11px 13px; font-size: 12px; }
+.action-menu[hidden] { display: none; }
+.action-menu strong { display: block; color: #f1d884; text-transform: uppercase; margin-bottom: 8px; }
+.action-menu div { color: #9da9a0; }
 kbd { border: 1px solid #56635b; border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; color: #ecf1e8; background: #26312c; font: inherit; font-size: 10px; }
 #toast { position: fixed; z-index: 3; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: #271e19; border: 1px solid #795746; color: #f2d5bd; padding: 9px 14px; opacity: 0; transition: .2s; pointer-events: none; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 @media (max-width: 650px) {
   .legend-panel { display: none; }
+  .telemetry-panel { right: 12px; top: auto; bottom: 12px; min-width: 180px; }
   .help-panel { left: 12px; bottom: 12px; }
   .title-panel { left: 12px; top: 12px; }
 }

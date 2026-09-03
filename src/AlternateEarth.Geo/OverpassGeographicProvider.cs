@@ -25,7 +25,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     public async Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            FormattableString.Invariant($"v1:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
+            FormattableString.Invariant($"v2:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_cacheDirectory, $"area-{cacheKey}.json");
         if (File.Exists(canonicalCachePath))
         {
@@ -108,7 +108,16 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         var east = area.Center.Longitude + longitudeDelta;
         var bbox = string.Join(',', new[] { south, west, north, east }.Select(v => v.ToString("F7", CultureInfo.InvariantCulture)));
 
-        return $"[out:json][timeout:30];(way[\"highway\"]({bbox});way[\"building\"]({bbox});way[\"natural\"=\"water\"]({bbox});way[\"waterway\"]({bbox}););out body;>;out skel qt;";
+        return $"[out:json][timeout:45];(" +
+               $"way[\"highway\"]({bbox});" +
+               $"way[\"building\"]({bbox});" +
+               $"way[\"barrier\"=\"fence\"]({bbox});" +
+               $"way[\"natural\"~\"water|wood|sand|beach|mud|wetland|grassland\"]({bbox});" +
+               $"way[\"waterway\"]({bbox});" +
+               $"way[\"landuse\"]({bbox});" +
+               $"way[\"leisure\"~\"park|garden|recreation_ground\"]({bbox});" +
+               $"way[\"amenity\"=\"parking\"]({bbox});" +
+               ");out body;>;out skel qt;";
     }
 
     private static IReadOnlyList<CanonicalEntity> ParseFeatures(string rawJson, GeographicArea area)
@@ -166,8 +175,16 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             var centerX = geometry.Average(point => point.X);
             var centerY = geometry.Average(point => point.Y);
             var properties = way.Tags
-                .Where(pair => pair.Key is "name" or "highway" or "building" or "natural" or "waterway" or "surface" or "levels")
+                .Where(pair => pair.Key is "name" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width")
                 .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            if (kind == EntityKind.Terrain)
+            {
+                properties["terrain"] = ClassifyTerrain(way.Tags).ToString().ToLowerInvariant();
+            }
+            if (kind == EntityKind.Road || kind == EntityKind.Sidewalk)
+            {
+                properties["widthMeters"] = EstimateWidthMeters(way.Tags).ToString("F1", CultureInfo.InvariantCulture);
+            }
             result.Add(new CanonicalEntity(
                 $"geo:osm:way:{way.Id}",
                 kind.Value,
@@ -181,10 +198,51 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
 
     private static EntityKind? Classify(IReadOnlyDictionary<string, string> tags)
     {
-        if (tags.ContainsKey("highway")) return EntityKind.Road;
-        if (tags.ContainsKey("building")) return EntityKind.Building;
         if (tags.TryGetValue("natural", out var natural) && natural == "water") return EntityKind.Water;
         if (tags.ContainsKey("waterway")) return EntityKind.Water;
+        if (tags.ContainsKey("building")) return EntityKind.Building;
+        if (tags.TryGetValue("barrier", out var barrier) && barrier == "fence") return EntityKind.Fence;
+        if (tags.TryGetValue("highway", out var highway))
+            return highway is "footway" or "pedestrian" or "steps" ? EntityKind.Sidewalk : EntityKind.Road;
+        if (tags.ContainsKey("landuse") || tags.ContainsKey("leisure") || tags.ContainsKey("amenity") ||
+            tags.TryGetValue("natural", out natural) && natural is "wood" or "sand" or "beach" or "mud" or "wetland" or "grassland")
+            return EntityKind.Terrain;
         return null;
+    }
+
+    private static TerrainType ClassifyTerrain(IReadOnlyDictionary<string, string> tags)
+    {
+        if (tags.TryGetValue("natural", out var natural))
+        {
+            if (natural is "sand" or "beach") return TerrainType.Sand;
+            if (natural is "mud" or "wetland") return TerrainType.Mud;
+            if (natural == "wood") return TerrainType.Forest;
+        }
+        if (tags.TryGetValue("landuse", out var landuse))
+        {
+            if (landuse is "forest" or "orchard") return TerrainType.Forest;
+            if (landuse is "industrial" or "commercial" or "retail" or "construction" or "railway") return TerrainType.Pavement;
+        }
+        if (tags.TryGetValue("amenity", out var amenity) && amenity == "parking") return TerrainType.Pavement;
+        return TerrainType.Grass;
+    }
+
+    private static double EstimateWidthMeters(IReadOnlyDictionary<string, string> tags)
+    {
+        if (tags.TryGetValue("width", out var width) && double.TryParse(width, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            return Math.Clamp(parsed, 0.8, 30);
+        if (!tags.TryGetValue("highway", out var highway)) return 2;
+        return highway switch
+        {
+            "motorway" or "trunk" => 12,
+            "primary" or "secondary" => 8,
+            "tertiary" => 7,
+            "residential" or "unclassified" => 6,
+            "service" => 4.5,
+            "cycleway" => 2.5,
+            "footway" or "pedestrian" or "steps" => 2,
+            "path" or "track" => 1.5,
+            _ => 4
+        };
     }
 }

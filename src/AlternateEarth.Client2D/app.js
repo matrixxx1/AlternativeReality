@@ -5,11 +5,20 @@
   const dot = document.querySelector('#connectionDot');
   const realityName = document.querySelector('#realityName');
   const toast = document.querySelector('#toast');
+  const terrainValue = document.querySelector('#terrainValue');
+  const elevationValue = document.querySelector('#elevationValue');
+  const speedValue = document.querySelector('#speedValue');
+  const distanceValue = document.querySelector('#distanceValue');
+  const weatherValue = document.querySelector('#weatherValue');
+  const actionMenu = document.querySelector('#actionMenu');
+  const centerButton = document.querySelector('#centerButton');
   const state = {
     socket: null, playerId: null, snapshot: null,
-    base: [], reality: new Map(), players: new Map(), facings: new Map(), keys: new Set(),
-    camera: { x: 0, y: 0 }, scale: 10, pitch: .7, shear: .12,
-    sequence: 0, facing: 'south', moveTarget: null
+    base: [], reality: new Map(), doorsByBuilding: new Map(), players: new Map(), facings: new Map(), keys: new Set(),
+    camera: { x: 0, y: 0 }, scale: 18, pitch: .7, shear: .12,
+    sequence: 0, pathSequence: 0, facing: 'south', moveTarget: null, path: [],
+    followCamera: true, weather: null, lastMovementAt: 0, lastBlockedToastAt: 0,
+    pointer: { down: false, dragged: false, startX: 0, startY: 0, lastX: 0, lastY: 0 }
   };
 
   function createClientId() {
@@ -45,8 +54,12 @@
         state.playerId = message.playerId;
         state.snapshot = message.snapshot;
         state.base = message.snapshot.baseEntities;
+        state.doorsByBuilding = new Map(state.base
+          .filter(entity => entity.kind === 'door' && entity.properties?.buildingId)
+          .map(entity => [entity.properties.buildingId, entity]));
         state.reality = new Map(message.snapshot.realityEntities.map(entity => [entity.id, entity]));
         state.players = new Map(message.snapshot.players.map(player => [player.id, player]));
+        state.weather = message.snapshot.weather;
         const me = state.players.get(state.playerId);
         if (me) state.camera = { x: me.position.x, y: me.position.y };
         realityName.textContent = message.snapshot.reality.name;
@@ -63,11 +76,25 @@
           else if (Math.abs(dy) > 0) state.facings.set(message.player.id, dy > 0 ? 'north' : 'south');
         }
         state.players.set(message.player.id, message.player);
+        if (message.player.id === state.playerId) state.lastMovementAt = Date.now();
         break;
       }
       case 'playerLeft': state.players.delete(message.playerId); break;
       case 'objectCreated': state.reality.set(message.entity.id, message.entity); break;
       case 'objectRemoved': state.reality.delete(message.entityId); break;
+      case 'pathResult':
+        if (message.sequence === state.pathSequence) state.path = message.waypoints;
+        break;
+      case 'pathUnavailable':
+        if (message.sequence === state.pathSequence) { state.path = []; state.moveTarget = null; showToast(message.message); }
+        break;
+      case 'movementBlocked':
+        state.path = []; state.moveTarget = null;
+        if (Date.now() - state.lastBlockedToastAt > 1200) { showToast(message.message); state.lastBlockedToastAt = Date.now(); }
+        break;
+      case 'playerDied':
+        state.path = []; state.moveTarget = null; state.followCamera = true; showToast(message.reason); break;
+      case 'weatherChanged': state.weather = message.weather; break;
       case 'error': showToast(message.message); break;
     }
   }
@@ -100,7 +127,7 @@
     const dy = point.y - state.camera.y;
     return {
       x: innerWidth / 2 + ((dx + dy * state.shear) * state.scale),
-      y: innerHeight / 2 - (dy * state.scale * state.pitch) - ((point.z || 0) * state.scale * .55)
+      y: innerHeight / 2 - (dy * state.scale * state.pitch)
     };
   };
   const toWorld = point => {
@@ -130,16 +157,20 @@
     if (!state.snapshot) return drawConnecting();
 
     const me = state.players.get(state.playerId);
-    if (me) {
+    if (me && state.followCamera) {
       state.camera.x += (me.position.x - state.camera.x) * .12;
       state.camera.y += (me.position.y - state.camera.y) * .12;
     }
     drawGroundTiles();
     drawChunkGrid();
-    for (const entity of state.base) if (entity.kind === 'water') drawGeometry(entity, 'rgba(46,112,132,.82)', '#6da6ae', 1, true);
+    for (const entity of state.base) if (entity.kind === 'terrain') drawTerrain(entity);
+    for (const entity of state.base) if (entity.kind === 'sidewalk') drawSidewalk(entity);
     for (const entity of state.base) if (entity.kind === 'road') drawRoad(entity);
+    for (const entity of state.base) if (entity.kind === 'water') drawWater(entity);
     drawMoveTarget();
     drawRaisedObjects();
+    drawWeatherEffects();
+    updateTelemetry(me);
     drawCoordinates();
   }
 
@@ -165,7 +196,7 @@
           toScreen({ x: x + tileMeters, y: y + tileMeters }), toScreen({ x, y: y + tileMeters })
         ];
         const checker = (Math.floor(x / tileMeters) + Math.floor(y / tileMeters)) & 1;
-        ctx.fillStyle = checker ? '#20372e' : '#223a31';
+        ctx.fillStyle = checker ? '#3e6337' : '#42693a';
         ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
         for (let index = 1; index < points.length; index++) ctx.lineTo(points[index].x, points[index].y);
         ctx.closePath(); ctx.fill();
@@ -196,24 +227,49 @@
   }
 
   function drawRoad(entity) {
-    const major = ['primary', 'secondary', 'tertiary'].includes(entity.properties?.highway);
-    const outerWidth = state.scale * (major ? 8 : 5);
-    const innerWidth = state.scale * (major ? 6 : 3.5);
-    drawGeometry(entity, null, '#36413b', Math.max(major ? 8 : 5, outerWidth));
-    drawGeometry(entity, null, major ? '#d4c7a6' : '#a8a38e', Math.max(major ? 5 : 3, innerWidth));
+    const width = propertyNumber(entity, 'widthMeters', 5) * state.scale;
+    drawGeometry(entity, null, '#343a38', Math.max(5, width + 2));
+    drawGeometry(entity, null, entity.properties?.surface === 'unpaved' ? '#72543c' : '#606663', Math.max(3, width));
+  }
+
+  function drawSidewalk(entity) {
+    const width = propertyNumber(entity, 'widthMeters', 8) * state.scale;
+    drawGeometry(entity, null, '#827e72', Math.max(5, width + 2));
+    drawGeometry(entity, null, '#b7b09e', Math.max(3, width));
+  }
+
+  function drawTerrain(entity) {
+    const terrain = entity.properties?.terrain || 'grass';
+    const colors = {
+      grass: ['#537643', '#72935a'], forest: ['#244b32', '#3b6944'], sand: ['#c3a765', '#e0c781'],
+      mud: ['#664833', '#886247'], pavement: ['#737875', '#929590']
+    };
+    const color = colors[terrain] || colors.grass;
+    drawGeometry(entity, color[0], color[1], 1.5, true);
+  }
+
+  function drawWater(entity) {
+    const closed = entity.geometry?.length > 3;
+    if (closed) {
+      drawGeometry(entity, '#174b66', '#65a9b6', Math.max(4, state.scale * 6), true);
+      drawGeometry(entity, null, '#327c91', Math.max(2, state.scale * 1.5), true);
+    } else {
+      drawGeometry(entity, null, '#65a9b6', Math.max(4, state.scale * 3));
+      drawGeometry(entity, null, '#327c91', Math.max(2, state.scale * 1.2));
+    }
   }
 
   function drawBuilding(entity) {
     if (!entity.geometry?.length) return;
     const ground = entity.geometry.map(toScreen);
-    const centerY = ground.reduce((sum, point) => sum + point.y, 0) / ground.length;
-    const levels = Math.max(1, Number(entity.properties?.['building:levels'] || entity.properties?.levels || 1));
-    const height = Math.min(75, levels * 3 * state.scale * .55);
+    const levels = Math.max(2, Number(entity.properties?.['building:levels'] || entity.properties?.levels || 2));
+    const height = Math.min(160, levels * 3.2 * state.scale * .55);
     const roof = ground.map(point => ({ x: point.x, y: point.y - height }));
 
-    for (let index = 0; index < ground.length - 1; index++) {
-      const next = index + 1;
-      if ((ground[index].y + ground[next].y) / 2 < centerY) continue;
+    const lastGround = ground[ground.length - 1];
+    const edgeCount = ground[0].x === lastGround.x && ground[0].y === lastGround.y ? ground.length - 1 : ground.length;
+    for (let index = 0; index < edgeCount; index++) {
+      const next = (index + 1) % ground.length;
       ctx.fillStyle = index % 2 ? '#59483e' : '#625044';
       ctx.beginPath(); ctx.moveTo(roof[index].x, roof[index].y); ctx.lineTo(roof[next].x, roof[next].y);
       ctx.lineTo(ground[next].x, ground[next].y); ctx.lineTo(ground[index].x, ground[index].y); ctx.closePath(); ctx.fill();
@@ -224,6 +280,23 @@
     ctx.beginPath(); ctx.moveTo(roof[0].x, roof[0].y);
     for (let index = 1; index < roof.length; index++) ctx.lineTo(roof[index].x, roof[index].y);
     ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    const door = state.doorsByBuilding.get(entity.id);
+    if (door) drawDoorOnBuilding(door);
+  }
+
+  function drawDoorOnBuilding(entity) {
+    const facing = propertyNumber(entity, 'facingDegrees', 0) * Math.PI / 180;
+    const tangentX = -Math.sin(facing) * .45;
+    const tangentY = Math.cos(facing) * .45;
+    const left = toScreen({ x: entity.position.x - tangentX, y: entity.position.y - tangentY });
+    const right = toScreen({ x: entity.position.x + tangentX, y: entity.position.y + tangentY });
+    const height = 2.1 * state.scale * .55;
+    ctx.fillStyle = '#35251b'; ctx.strokeStyle = '#c49a52'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(left.x, left.y); ctx.lineTo(right.x, right.y);
+    ctx.lineTo(right.x, right.y - height); ctx.lineTo(left.x, left.y - height); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#e0ba63';
+    ctx.beginPath(); ctx.arc(right.x - ((right.x - left.x) * .22), right.y - height * .48, 1.4, 0, Math.PI * 2); ctx.fill();
   }
 
   function drawRaisedObjects() {
@@ -234,6 +307,11 @@
         renderables.push({ depth, draw: () => drawBuilding(entity) });
       } else if (entity.kind === 'tree') {
         renderables.push({ depth: toScreen(entity.position).y, draw: () => drawTree(entity) });
+      } else if (entity.kind === 'fence') {
+        const depth = Math.max(...entity.geometry.map(point => toScreen(point).y));
+        renderables.push({ depth, draw: () => drawFence(entity) });
+      } else if (entity.kind === 'vehicle') {
+        renderables.push({ depth: toScreen(entity.position).y, draw: () => drawVehicle(entity) });
       }
     }
     for (const player of state.players.values()) {
@@ -241,6 +319,30 @@
     }
     renderables.sort((left, right) => left.depth - right.depth);
     for (const renderable of renderables) renderable.draw();
+  }
+
+  function drawFence(entity) {
+    if (!entity.geometry?.length) return;
+    drawGeometry(entity, null, '#4b3424', Math.max(2, state.scale * .16));
+    for (const point of entity.geometry) {
+      const p = toScreen(point);
+      ctx.fillStyle = '#86603a';
+      ctx.fillRect(p.x - 2, p.y - state.scale * .55, 4, state.scale * .65);
+    }
+  }
+
+  function drawVehicle(entity) {
+    const p = toScreen(entity.position);
+    const length = propertyNumber(entity, 'lengthMeters', 4.5) * state.scale;
+    const width = propertyNumber(entity, 'widthMeters', 1.9) * state.scale * state.pitch;
+    const angle = propertyNumber(entity, 'rotationDegrees', 0) * Math.PI / 180;
+    const projectedAngle = Math.atan2(-Math.sin(angle) * state.pitch, Math.cos(angle) + (Math.sin(angle) * state.shear));
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(projectedAngle);
+    ctx.fillStyle = 'rgba(3,8,7,.4)'; ctx.fillRect(-length / 2 + 3, -width / 2 + 5, length, width);
+    ctx.fillStyle = '#8d4e3e'; ctx.fillRect(-length / 2, -width / 2, length, width);
+    ctx.fillStyle = '#b7d0cf'; ctx.fillRect(-length * .15, -width * .42, length * .38, width * .84);
+    ctx.strokeStyle = '#302b29'; ctx.lineWidth = 2; ctx.strokeRect(-length / 2, -width / 2, length, width);
+    ctx.restore();
   }
 
   function drawTree(entity) {
@@ -266,7 +368,7 @@
 
   function drawPlayer(player, self) {
     const p = toScreen(player.position);
-    const unit = Math.max(2, Math.round(state.scale / 5));
+    const unit = Math.max(1, state.scale / 14);
     const facing = state.facings.get(player.id) || (self ? state.facing : 'south');
     const tunic = self ? '#d6a84a' : characterColor(player.id);
     const tunicDark = self ? '#8f652b' : '#31576b';
@@ -319,37 +421,134 @@
     return palette[hash % palette.length];
   }
 
+  function drawWeatherEffects() {
+    const weather = state.weather;
+    if (!weather?.isAvailable) return;
+    const rainy = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(weather.weatherCode);
+    const snowy = [71, 73, 75, 77, 85, 86].includes(weather.weatherCode);
+    if (!weather.isDay || weather.weatherCode >= 3) {
+      ctx.fillStyle = weather.isDay ? 'rgba(20,30,35,.11)' : 'rgba(5,12,24,.30)';
+      ctx.fillRect(0, 0, innerWidth, innerHeight);
+    }
+    if (!rainy && !snowy) return;
+    const count = Math.min(180, 45 + Math.round(weather.precipitationMillimeters * 55));
+    const time = Date.now() / 12;
+    ctx.strokeStyle = snowy ? 'rgba(241,246,241,.8)' : 'rgba(151,205,230,.52)';
+    ctx.fillStyle = 'rgba(241,246,241,.8)';
+    ctx.lineWidth = 1;
+    for (let index = 0; index < count; index++) {
+      const x = ((index * 83.17) + time * (snowy ? .15 : .8)) % (innerWidth + 40) - 20;
+      const y = ((index * 47.73) + time * (snowy ? .35 : 1.7)) % (innerHeight + 50) - 25;
+      if (snowy) { ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill(); }
+      else { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 13); ctx.stroke(); }
+    }
+  }
+
+  function updateTelemetry(player) {
+    if (player) {
+      terrainValue.textContent = formatTerrain(player.terrain);
+      elevationValue.textContent = `${player.position.z.toFixed(1)} m`;
+      const speed = Date.now() - state.lastMovementAt < 220 ? player.speedMetersPerSecond : 0;
+      speedValue.textContent = `${(speed * 2.23694).toFixed(1)} mph`;
+      distanceValue.textContent = state.moveTarget
+        ? `${Math.hypot(state.moveTarget.x - player.position.x, state.moveTarget.y - player.position.y).toFixed(1)} m away`
+        : '—';
+    }
+    const weather = state.weather;
+    weatherValue.textContent = weather?.isAvailable
+      ? `${weather.condition} · ${Math.round(weather.temperatureCelsius)}°C`
+      : 'Unavailable';
+  }
+
+  function formatTerrain(value) {
+    return String(value || 'grass').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, character => character.toUpperCase());
+  }
+
+  function propertyNumber(entity, key, fallback) {
+    const value = Number(entity.properties?.[key]);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
   function drawCoordinates() {
     const me = state.players.get(state.playerId); if (!me) return;
     ctx.fillStyle = 'rgba(229,234,222,.55)'; ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'right';
     ctx.fillText(`${me.position.region.latitudeBand},${me.position.region.longitudeBand}  X ${me.position.x.toFixed(1)}m  Y ${me.position.y.toFixed(1)}m  Z ${me.position.z.toFixed(1)}m  ·  ${state.scale.toFixed(1)}px/m`, innerWidth - 18, innerHeight - 18);
   }
 
-  addEventListener('keydown', event => { if (!event.repeat) state.keys.add(event.key.toLowerCase()); });
+  addEventListener('keydown', event => {
+    if (!event.repeat) state.keys.add(event.key.toLowerCase());
+    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(event.key.toLowerCase())) {
+      state.followCamera = true;
+      actionMenu.hidden = true;
+    }
+  });
   addEventListener('keyup', event => state.keys.delete(event.key.toLowerCase()));
   addEventListener('blur', () => state.keys.clear());
   canvas.addEventListener('wheel', event => { event.preventDefault(); state.scale = Math.max(.5, Math.min(32, state.scale * (event.deltaY > 0 ? .88 : 1.14))); }, { passive: false });
   canvas.addEventListener('click', event => {
+    if (event.button !== 0) return;
+    actionMenu.hidden = true;
+    state.followCamera = true;
     state.moveTarget = toWorld({ x: event.clientX, y: event.clientY });
+    state.path = [];
+    send({ type: 'pathRequest', x: state.moveTarget.x, y: state.moveTarget.y, sequence: ++state.pathSequence });
   });
-  canvas.addEventListener('contextmenu', event => {
-    event.preventDefault();
-    state.moveTarget = null;
+  canvas.addEventListener('pointerdown', event => {
+    if (event.button !== 2) return;
+    state.pointer = { down: true, dragged: false, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY };
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (!state.pointer.down) return;
+    const totalDistance = Math.hypot(event.clientX - state.pointer.startX, event.clientY - state.pointer.startY);
+    if (totalDistance > 4) state.pointer.dragged = true;
+    if (state.pointer.dragged) {
+      const screenX = event.clientX - state.pointer.lastX;
+      const screenY = event.clientY - state.pointer.lastY;
+      const worldY = -screenY / (state.scale * state.pitch);
+      const worldX = (screenX / state.scale) - (worldY * state.shear);
+      state.camera.x -= worldX;
+      state.camera.y -= worldY;
+      state.followCamera = false;
+      actionMenu.hidden = true;
+    }
+    state.pointer.lastX = event.clientX;
+    state.pointer.lastY = event.clientY;
+  });
+  canvas.addEventListener('pointerup', event => {
+    if (event.button !== 2 || !state.pointer.down) return;
+    if (!state.pointer.dragged) {
+      actionMenu.style.left = `${Math.min(event.clientX, innerWidth - 210)}px`;
+      actionMenu.style.top = `${Math.min(event.clientY, innerHeight - 90)}px`;
+      actionMenu.hidden = false;
+    }
+    state.pointer.down = false;
+  });
+  canvas.addEventListener('pointercancel', () => { state.pointer.down = false; });
+  canvas.addEventListener('contextmenu', event => event.preventDefault());
+  centerButton.addEventListener('click', () => {
+    state.followCamera = true;
+    const me = state.players.get(state.playerId);
+    if (me) state.camera = { x: me.position.x, y: me.position.y };
+    actionMenu.hidden = true;
   });
 
   setInterval(() => {
     let x = (state.keys.has('d') || state.keys.has('arrowright') ? 1 : 0) - (state.keys.has('a') || state.keys.has('arrowleft') ? 1 : 0);
     let y = (state.keys.has('w') || state.keys.has('arrowup') ? 1 : 0) - (state.keys.has('s') || state.keys.has('arrowdown') ? 1 : 0);
     if (x || y) {
+      state.path = [];
       state.moveTarget = null;
-    } else if (state.moveTarget) {
+    } else if (state.path.length) {
       const me = state.players.get(state.playerId);
       if (me) {
-        const dx = state.moveTarget.x - me.position.x;
-        const dy = state.moveTarget.y - me.position.y;
+        const waypoint = state.path[0];
+        const dx = waypoint.x - me.position.x;
+        const dy = waypoint.y - me.position.y;
         const distance = Math.hypot(dx, dy);
-        if (distance <= .4) {
-          state.moveTarget = null;
+        if (distance <= .35) {
+          state.path.shift();
+          if (!state.path.length) state.moveTarget = null;
         } else {
           x = dx / distance;
           y = dy / distance;

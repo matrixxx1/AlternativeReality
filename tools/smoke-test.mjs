@@ -47,6 +47,12 @@ try {
   if (seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative player did not move east.');
 
   first.socket.send(JSON.stringify({
+    type: 'pathRequest', x: seenByA.player.position.x + 2, y: seenByA.player.position.y, sequence: 2
+  }));
+  const path = await first.waitFor(message => message.type === 'pathResult' && message.sequence === 2);
+  if (!path.waypoints?.length) throw new Error('Server did not return a walkable path.');
+
+  first.socket.send(JSON.stringify({
     type: 'placeObject', objectType: 'must-be-rejected',
     x: seenByA.player.position.x + 1, y: seenByA.player.position.y, rotationDegrees: 0
   }));
@@ -58,6 +64,7 @@ try {
     ok: true,
     protocol: welcomeA.protocolVersion,
     movementSynchronized: true,
+    serverPathfinding: true,
     authoritativePosition: seenByA.player.position,
     objectPlacementRejected: rejection.message
   }, null, 2));

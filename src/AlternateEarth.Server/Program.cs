@@ -26,6 +26,12 @@ builder.Services.AddHttpClient("elevation", client =>
     client.Timeout = TimeSpan.FromSeconds(15);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("AlternateEarth/0.1 (+https://github.com/matrixxx1/AlternativeReality)");
 });
+builder.Services.AddHttpClient("weather", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Weather:Url"] ?? "https://api.open-meteo.com/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("AlternateEarth/0.2 (+https://github.com/matrixxx1/AlternativeReality)");
+});
 builder.Services.AddSingleton<IGeographicProvider>(services =>
 {
     var factory = services.GetRequiredService<IHttpClientFactory>();
@@ -35,8 +41,11 @@ builder.Services.AddSingleton<IGeographicProvider>(services =>
     return new OverpassGeographicProvider(factory.CreateClient("overpass"), Path.Combine(dataDirectory, "geo-cache"), elevation);
 });
 builder.Services.AddSingleton<DeterministicWorldGenerator>();
+builder.Services.AddSingleton<IWeatherProvider>(services =>
+    new OpenMeteoWeatherProvider(services.GetRequiredService<IHttpClientFactory>().CreateClient("weather")));
 builder.Services.AddSingleton<RealityWorld>();
 builder.Services.AddSingleton<RealitySocketHub>();
+builder.Services.AddHostedService<WeatherRefreshService>();
 
 var app = builder.Build();
 var sourceClientDirectory = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "../AlternateEarth.Client2D"));
@@ -66,6 +75,7 @@ app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
     geographicProvider = state.GeographicProvider
 }));
 app.MapGet("/api/world", (RealityWorld state) => Results.Ok(state.CreateSnapshot()));
+app.MapGet("/api/weather", (RealityWorld state) => Results.Ok(state.Weather));
 app.Map("/ws", async (HttpContext context, RealitySocketHub hub) => await hub.AcceptAsync(context));
 app.MapFallbackToFile("index.html");
 

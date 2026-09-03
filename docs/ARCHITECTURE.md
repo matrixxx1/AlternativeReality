@@ -78,7 +78,7 @@ Player buildings will be stored as foundations and logical pieces—wall segment
 
 ## Authority and synchronization
 
-The server bounds movement speed and position and broadcasts accepted movement. Object placement and removal are currently rejected by the server because this milestone is exploration-only; the dormant implementation remains behind `ObjectPlacementEnabled` for a later construction milestone. A client cannot assign inventory, damage, ownership, or arbitrary final position. Client physics may predict and animate but must reconcile to server updates.
+The server bounds movement by real meter-per-second rates for each canonical terrain, samples elevation, rejects solid-object intersections, and broadcasts accepted movement. Its spatial index handles building polygons, tree radii, fence lines, vehicles, structures, and shallow/deep water. Click-to-walk runs bounded A* with terrain costs and line-of-sight smoothing; deep water is excluded, while direct entry causes an authoritative drowning/reset event. Object placement and removal are currently rejected because this milestone is exploration-only; the dormant implementation remains behind `ObjectPlacementEnabled` for a later construction milestone.
 
 Character records are scoped by `RealityId`; cross-reality transfer is intentionally absent. Single-player is the same server executable bound locally with a private configuration. Changing visibility later does not require world conversion.
 
@@ -89,6 +89,10 @@ The browser client uses a 3/4 oblique camera, visual ground tiles, and depth-sor
 `IGeographicProvider.GetAreaAsync` returns a canonical `GeographicDataset`, and `IElevationProvider` returns meter samples. The current adapters query OpenStreetMap through Overpass with endpoint failover and SRTM90m elevation through OpenTopoData. Raw and converted results are cached before play, so normal movement generates no public map API traffic.
 
 Provider data remains descriptive—road way, building polygon, water feature, elevation sample. `DeterministicWorldGenerator` performs the game conversion and adds seed-driven resource entities. Future providers can read regional PBF extracts, GeoPackage files, government elevation rasters, or offline packs without changing server or client code.
+
+Road metadata produces separate canonical road and sidewalk traversal bands. Land use and natural polygons become grass, forest, sand, mud, or pavement. Every building receives a deterministic logical door facing the nearest available sidewalk, falling back to a road. Closed water polygons use a three-meter shallow shoreline band and a deep interior.
+
+`IWeatherProvider` keeps weather acquisition separate from simulation. The current Open-Meteo adapter samples the reality location, stores one canonical `WeatherState`, refreshes it every ten minutes, and broadcasts changes. Clients render rain, snow, cloud, or night effects without becoming authoritative for weather.
 
 ## Deterministic generation and delta persistence
 
@@ -107,4 +111,4 @@ Generated resource IDs and positions are stable for the same inputs. Untouched b
 
 ## Near-term implementation order
 
-The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic generation, an authoritative server, persistent characters, browser exploration, and two-client movement synchronization. Next: chunk-specific snapshots, collision, richer terrain presentation, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.
+The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, authoritative collision/pathfinding, live weather, persistent characters, browser exploration, and two-client movement synchronization. Next: chunk-specific snapshots, animation polish, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.

@@ -7,16 +7,19 @@ namespace AlternateEarth.Server;
 public sealed class RealityWorld
 {
     private readonly DeterministicWorldGenerator _generator;
+    private readonly IWeatherProvider _weatherProvider;
     private readonly SqliteRealityStore _store;
     private readonly ConcurrentDictionary<string, CanonicalEntity> _realityEntities = new();
     private readonly ConcurrentDictionary<string, PlayerState> _players = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastMovement = new();
     private GeographicDataset? _geographic;
+    private WorldNavigation? _navigation;
 
-    public RealityWorld(RealityConfiguration configuration, DeterministicWorldGenerator generator, SqliteRealityStore store)
+    public RealityWorld(RealityConfiguration configuration, DeterministicWorldGenerator generator, IWeatherProvider weatherProvider, SqliteRealityStore store)
     {
         Configuration = configuration;
         _generator = generator;
+        _weatherProvider = weatherProvider;
         _store = store;
     }
 
@@ -25,6 +28,7 @@ public sealed class RealityWorld
     public int BaseEntityCount => _geographic?.Features.Count ?? 0;
     public int RealityEntityCount => _realityEntities.Count;
     public string GeographicProvider => _geographic?.Provider ?? "not loaded";
+    public WeatherState Weather { get; private set; } = WeatherState.Unavailable;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -32,6 +36,24 @@ public sealed class RealityWorld
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
         {
             _realityEntities[entity.Id] = entity;
+        }
+        _navigation = new WorldNavigation(
+            Configuration.Area.Bounds,
+            _geographic.Features.Concat(_realityEntities.Values).ToArray(),
+            _geographic.Elevation);
+        await RefreshWeatherAsync(cancellationToken);
+    }
+
+    public async Task<bool> RefreshWeatherAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Weather = await _weatherProvider.GetCurrentAsync(Configuration.Area.Center, cancellationToken);
+            return true;
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
         }
     }
 
@@ -41,9 +63,13 @@ public sealed class RealityWorld
         var name = SanitizeName(requestedName);
         var existing = await _store.LoadCharacterAsync(Configuration.Id, characterId, cancellationToken);
         var center = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
-        var player = existing is null
-            ? new PlayerState(characterId, name, center)
-            : existing with { Name = name, Version = existing.Version + 1 };
+        var navigation = Navigation;
+        var position = existing?.Position ?? navigation.FindNearestWalkable(center);
+        if (navigation.IsBlocked(position.X, position.Y) || navigation.TerrainAt(position.X, position.Y) == TerrainType.DeepWater)
+            position = navigation.FindNearestWalkable(center);
+        position = position with { Z = navigation.ElevationAt(position.X, position.Y) };
+        var terrain = navigation.TerrainAt(position.X, position.Y);
+        var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1, terrain, 0);
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
@@ -56,7 +82,7 @@ public sealed class RealityWorld
         _lastMovement.TryRemove(characterId, out _);
     }
 
-    public async Task<PlayerState?> MoveAsync(string characterId, MoveRequest request, CancellationToken cancellationToken = default)
+    public async Task<MovementOutcome?> MoveAsync(string characterId, MoveRequest request, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
         var length = Math.Sqrt((request.X * request.X) + (request.Y * request.Y));
@@ -65,19 +91,56 @@ public sealed class RealityWorld
         var now = DateTimeOffset.UtcNow;
         var previous = _lastMovement.AddOrUpdate(characterId, now, (_, old) => now);
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
-        const double metersPerSecond = 7.0;
+        var navigation = Navigation;
+        var currentTerrain = navigation.TerrainAt(player.Position.X, player.Position.Y);
+        var metersPerSecond = navigation.SpeedFor(currentTerrain);
+        var requested = Configuration.Area.Bounds.Clamp(player.Position with
+        {
+            X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
+            Y = player.Position.Y + (directionY * metersPerSecond * elapsed * Configuration.GameSpeed)
+        });
+        var next = requested;
+        var blocked = !navigation.CanTraverse(player.Position, requested);
+        if (blocked)
+        {
+            var slideX = requested with { Y = player.Position.Y };
+            var slideY = requested with { X = player.Position.X };
+            if (navigation.CanTraverse(player.Position, slideX)) next = slideX;
+            else if (navigation.CanTraverse(player.Position, slideY)) next = slideY;
+            else next = player.Position;
+        }
+        var nextTerrain = navigation.TerrainAt(next.X, next.Y);
+        if (nextTerrain == TerrainType.DeepWater)
+        {
+            var spawn = navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
+            var reset = player with
+            {
+                Position = spawn,
+                Terrain = navigation.TerrainAt(spawn.X, spawn.Y),
+                SpeedMetersPerSecond = 0,
+                Version = player.Version + 1
+            };
+            _players[characterId] = reset;
+            await _store.SaveCharacterAsync(Configuration.Id, reset, cancellationToken);
+            return new MovementOutcome(reset, true, false, true);
+        }
+        var distance = player.Position.Distance2D(next);
         var updated = player with
         {
-            Position = Configuration.Area.Bounds.Clamp(player.Position with
-            {
-                X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
-                Y = player.Position.Y + (directionY * metersPerSecond * elapsed * Configuration.GameSpeed)
-            }),
+            Position = next with { Z = navigation.ElevationAt(next.X, next.Y) },
+            Terrain = nextTerrain,
+            SpeedMetersPerSecond = distance > .001 ? distance / elapsed : 0,
             Version = player.Version + 1
         };
         _players[characterId] = updated;
         await _store.SaveCharacterAsync(Configuration.Id, updated, cancellationToken);
-        return updated;
+        return new MovementOutcome(updated, distance > .001, blocked && distance <= .001, false);
+    }
+
+    public NavigationResult FindPath(string characterId, PathRequest request)
+    {
+        if (!_players.TryGetValue(characterId, out var player)) return new(false, Array.Empty<WorldPosition>(), "Unknown player.");
+        return Navigation.FindPath(player.Position, request.X, request.Y);
     }
 
     public async Task<CanonicalEntity> PlaceObjectAsync(string characterId, PlaceObjectRequest request, CancellationToken cancellationToken = default)
@@ -122,7 +185,10 @@ public sealed class RealityWorld
         _geographic?.Features ?? Array.Empty<CanonicalEntity>(),
         _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
         _players.Values.OrderBy(player => player.Id).ToArray(),
-        _geographic?.Elevation ?? Array.Empty<ElevationSample>());
+        _geographic?.Elevation ?? Array.Empty<ElevationSample>(),
+        Weather);
+
+    private WorldNavigation Navigation => _navigation ?? throw new InvalidOperationException("World navigation is not initialized.");
 
     private static string SanitizeName(string value)
     {
@@ -130,3 +196,5 @@ public sealed class RealityWorld
         return string.IsNullOrWhiteSpace(cleaned) ? "Explorer" : cleaned[..Math.Min(cleaned.Length, 24)];
     }
 }
+
+public sealed record MovementOutcome(PlayerState Player, bool Moved, bool Blocked, bool Drowned);

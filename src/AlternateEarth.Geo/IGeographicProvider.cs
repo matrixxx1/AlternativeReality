@@ -15,3 +15,8 @@ public interface IElevationProvider
         int samplesPerAxis,
         CancellationToken cancellationToken = default);
 }
+
+public interface IWeatherProvider
+{
+    Task<WeatherState> GetCurrentAsync(GeoCoordinate coordinate, CancellationToken cancellationToken = default);
+}

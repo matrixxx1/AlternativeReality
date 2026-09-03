@@ -2,7 +2,7 @@
 
 A renderer-neutral, self-hosted multiplayer world derived from real geography. One authoritative reality server drives every client: the current browser-based top-down client and, later, a browser-based WebGL 3D client.
 
-The first vertical slice is runnable now. It imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington; samples elevation; renders roads, building footprints, water, trees, and players in an angled, tile-styled 2D view; supports keyboard and click-to-walk exploration; synchronizes movement over WebSockets; and persists character positions in SQLite. Object modification is disabled during this exploration milestone.
+The playable vertical slice imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington; samples elevation; and renders terrain, roads, sidewalks, buildings, doors, water, trees, fences, vehicles, and players in an angled tile-styled 2D view. The authoritative server applies terrain-dependent real-world walking speeds, collision, route finding, elevation, deep-water drowning, live geographic weather, multiplayer synchronization, and SQLite character persistence. Object modification remains disabled during this exploration milestone.
 
 ## Chosen stack
 
@@ -30,7 +30,10 @@ For access from other devices on the same network, run `tools/open-lan-port.ps1`
 - Move with WASD or the arrow keys.
 - Left-click anywhere in the world to walk toward that location.
 - Use WASD or an arrow key to take direct control and cancel click-to-walk.
+- Right-drag to pan the camera; a stationary right-click opens the action window.
 - Use the mouse wheel to zoom.
+
+Paved surfaces use a representative 3.5 mph walking speed, forest uses 2 mph, sand uses 1 mph, and mud, grass, and shallow water have their own canonical rates. Click-to-walk asks the server for a route around solid geometry. Deep water is deliberately excluded from routes; manually entering it drowns and resets the character to a safe starting point.
 
 The reality configuration—including center, size, name, seed, and player limit—is in `src/AlternateEarth.Server/appsettings.json`. Runtime state is written under `data/` and is intentionally not committed.
 
@@ -41,8 +44,10 @@ dotnet test AlternateEarth.sln
 node tools/smoke-test.mjs
 ```
 
-The smoke test opens two real WebSocket clients, moves client A, confirms both receive the same authoritative position, and verifies that the server rejects object placement while exploration-only mode is active.
+The smoke test opens two real WebSocket clients, moves client A, confirms both receive the same authoritative position, requests a server-computed walking path, and verifies that the server rejects object placement while exploration-only mode is active.
 
 ## Geographic attribution
 
 Map features are © OpenStreetMap contributors and used under the [Open Database License](https://www.openstreetmap.org/copyright). Elevation is requested from an OpenTopoData SRTM90m endpoint and cached locally.
+
+Current weather is supplied by [Open-Meteo](https://open-meteo.com/) and refreshed by the reality server every ten minutes.

@@ -69,8 +69,21 @@ public sealed class RealitySocketHub
                 switch (type)
                 {
                     case "moveRequest":
-                        var moved = await _world.MoveAsync(characterId, root.Deserialize<MoveRequest>(SharedJson.Options)!, cancellationToken);
-                        if (moved is not null) await BroadcastAsync(new { type = "playerMoved", player = moved }, null, cancellationToken);
+                        var movement = await _world.MoveAsync(characterId, root.Deserialize<MoveRequest>(SharedJson.Options)!, cancellationToken);
+                        if (movement is not null)
+                        {
+                            if (movement.Moved || movement.Drowned) await BroadcastAsync(new { type = "playerMoved", player = movement.Player }, null, cancellationToken);
+                            if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", message = "Something is blocking the way." }, cancellationToken);
+                            if (movement.Drowned) await connection.SendAsync(new { type = "playerDied", reason = "You entered deep water and drowned. You have returned to the starting point." }, cancellationToken);
+                        }
+                        break;
+                    case "pathRequest":
+                        var pathRequest = root.Deserialize<PathRequest>(SharedJson.Options)!;
+                        var path = _world.FindPath(characterId, pathRequest);
+                        if (path.Success)
+                            await connection.SendAsync(new { type = "pathResult", sequence = pathRequest.Sequence, waypoints = path.Waypoints }, cancellationToken);
+                        else
+                            await connection.SendAsync(new { type = "pathUnavailable", sequence = pathRequest.Sequence, message = path.Message }, cancellationToken);
                         break;
                     case "placeObject":
                         var created = await _world.PlaceObjectAsync(characterId, root.Deserialize<PlaceObjectRequest>(SharedJson.Options)!, cancellationToken);
@@ -110,6 +123,9 @@ public sealed class RealitySocketHub
             });
         await Task.WhenAll(sends);
     }
+
+    public Task BroadcastWeatherAsync(CancellationToken cancellationToken = default) =>
+        BroadcastAsync(new { type = "weatherChanged", weather = _world.Weather }, null, cancellationToken);
 
     private static string NormalizeCharacterId(string? value) =>
         Guid.TryParse(value, out var parsed) ? parsed.ToString("N") : Guid.NewGuid().ToString("N");

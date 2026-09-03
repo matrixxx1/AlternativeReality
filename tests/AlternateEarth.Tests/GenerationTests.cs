@@ -31,4 +31,21 @@ public sealed class GenerationTests
 
         Assert.NotEqual(first[0].Position, second[0].Position);
     }
+
+    [Fact]
+    public void EveryBuildingGetsDoorFacingSidewalkWhenAvailable()
+    {
+        var region = Reality.Area.Region;
+        var building = new CanonicalEntity("building", EntityKind.Building, new WorldPosition(region, 5, 5),
+            new GeometryPoint[] { new(0, 0), new(10, 0), new(10, 10), new(0, 10), new(0, 0) },
+            new Dictionary<string, string>());
+        var sidewalk = new CanonicalEntity("sidewalk", EntityKind.Sidewalk, new WorldPosition(region, 5, -5),
+            new GeometryPoint[] { new(-20, -5), new(20, -5) }, new Dictionary<string, string>());
+
+        var door = Assert.Single(DeterministicWorldGenerator.GenerateDoors(new[] { building, sidewalk }));
+
+        Assert.Equal("building", door.Properties["buildingId"]);
+        Assert.Equal("sidewalk", door.Properties["approach"]);
+        Assert.Equal(EntityKind.Door, door.Kind);
+    }
 }
