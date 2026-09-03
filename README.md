@@ -53,7 +53,7 @@ A brand-new account receives a base assignment but begins at a deterministic ran
 
 The browser starts at a close 26-pixels-per-meter view and can zoom further in to 40 pixels per meter. Zooming out still activates the lighter rendering levels for performance.
 
-Real street names are drawn over the stylized road network when OpenStreetMap supplies them. Moving the camera into a new geographic cell shows a loading message; the newly generated terrain arrives under fog of war and is revealed around the player during exploration. Snapshots identify exact loaded cells, so diagonal exploration cannot clear fog over an ungenerated hole inside the world's aggregate bounds. Generated maps and raw geographic caches stay local to each reality server under `data/`.
+Real street names are drawn over the stylized road network when OpenStreetMap supplies them. Moving the camera into a new geographic cell shades that exact world area and draws a pulsing boundary with repeated **LOADING MAP** signs and an elapsed-time counter; click-to-travel waits until generation completes. The newly generated terrain then arrives under fog of war and is revealed around the player during exploration. Snapshots identify exact loaded cells, so diagonal exploration cannot clear fog over an ungenerated hole inside the world's aggregate bounds. Generated maps and raw geographic caches stay local to each reality server under `data/`.
 
 The reality configuration—including center, size, name, seed, and player limit—is in `src/AlternateEarth.Server/appsettings.json`. Runtime state is written under `data/` and is intentionally not committed.
 

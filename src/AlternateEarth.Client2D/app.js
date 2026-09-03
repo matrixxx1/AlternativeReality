@@ -20,7 +20,7 @@
     chat: [], speech: new Map(), chatVisible: false, privateState: null, dungeon: null, relationships: new Map(), chests: new Map(), loot: new Map(), seenChests: new Set(),
     camera: { x: 0, y: 0 }, scale: 26, pitch: .69, shear: .14, follow: true,
     keys: new Set(), path: [], target: null, pathSequence: 0, lastInput: 0, lastBlocked: 0,
-    pointer: { down: false, dragged: false, button: null, startX: 0, startY: 0, x: 0, y: 0 }, suppressClick: false, actionPoint: null, actionActor: null, actionDoor:null, pendingDoor: null, pendingChest: null, pendingGpsTeleport: null, frame: 0, projectiles: [], outdoorFog: new Set(), areaLoading: false, godTogglePending: null, rebuildPending:false
+    pointer: { down: false, dragged: false, button: null, startX: 0, startY: 0, x: 0, y: 0 }, suppressClick: false, actionPoint: null, actionActor: null, actionDoor:null, pendingDoor: null, pendingChest: null, pendingGpsTeleport: null, frame: 0, projectiles: [], outdoorFog: new Set(), areaLoading: false, loadingArea:null, loadingStarted:0, godTogglePending: null, rebuildPending:false
   };
 
   function clientId() {
@@ -37,7 +37,7 @@
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.socket = new WebSocket(`${scheme}//${location.host}/ws?characterId=${encodeURIComponent(storedId)}&name=${encodeURIComponent(playerName)}`);
     state.socket.addEventListener('open', () => setStatus('Connected — synchronizing world', true));
-    state.socket.addEventListener('close', () => { setStatus('Disconnected — retrying', false); setTimeout(connect, 1500); });
+    state.socket.addEventListener('close', () => { state.areaLoading=false;state.loadingArea=null;state.loadingStarted=0;setStatus('Disconnected — retrying', false); setTimeout(connect, 1500); });
     state.socket.addEventListener('message', event => handle(JSON.parse(event.data)));
   }
   async function bootstrap(){try{const setupResponse=await fetch('/api/reality/setup');const setup=await setupResponse.json();if(setup.required){ui.accountSetup.hidden=true;ui.realitySetup.hidden=false;return;}ui.realitySetup.hidden=true;const response=await fetch('/api/account/me');if(response.ok){ui.accountSetup.hidden=true;connect();}else ui.accountSetup.hidden=false;}catch{ui.accountSetup.hidden=false;ui.accountError.textContent='The local reality server is unavailable.';}}
@@ -99,7 +99,7 @@
       case 'dungeonEntered': updatePlayer(message.player); state.path=[];state.target=null;applyPrivate(message.privateState);state.follow=true;showToast('Entered dungeon — unexplored rooms are hidden by fog.');break;
       case 'dungeonExited': {updatePlayer(message.player);applySnapshot(message.snapshot);applyPrivate(message.privateState);state.dungeon=null;state.follow=true;const gpsTarget=state.pendingGpsTeleport;state.pendingGpsTeleport=null;if(gpsTarget){showToast('Loading a safe GPS landing point…');send({type:'teleport',x:gpsTarget.x,y:gpsTarget.y,godMode:true});}else showToast('Returned to the world.');break;}
       case 'dungeonUpdated': state.dungeon=message.dungeon;break;
-      case 'worldExpanded': { const previous=loadedAreas();applySnapshot(message.snapshot);if(message.expanded!==false)markNewAreaFog(previous,loadedAreas(message.snapshot));state.areaLoading=false;showToast(message.expanded===false?'Area already loaded.':'New area ready — explore to reveal it.');break; }
+      case 'worldExpanded': { const previous=loadedAreas();applySnapshot(message.snapshot);if(message.expanded!==false)markNewAreaFog(previous,loadedAreas(message.snapshot));state.areaLoading=false;state.loadingArea=null;state.loadingStarted=0;showToast(message.expanded===false?'Area already loaded.':'New area ready — explore to reveal it.');break; }
       case 'tradeQuote': openTrade(message.quote); break;
       case 'tradeCompleted': updatePlayer(message.player);applyPrivate({...state.privateState,inventory:message.inventory,relationships:[...(state.privateState?.relationships||[]).filter(x=>x.actorId!==message.relationship.actorId),message.relationship]});ui.tradeWindow.hidden=true;showToast('Trade completed.');break;
       case 'chestOpened': case 'lootCollected': applyPrivate(message.privateState);showToast(message.message);break;
@@ -112,7 +112,7 @@
       case 'worldRebuilt': applySnapshot(message.snapshot);applyPrivate(message.privateState);state.path=[];state.target=null;state.dungeon=message.privateState?.dungeon||null;state.follow=true;state.rebuildPending=false;ui.rebuild.textContent='Reset & rebuild reality';syncGodControls(state.players.get(state.playerId));showToast('The entire reality was reset and rebuilt. You returned to your base.');break;
       case 'objectCreated': state.reality.set(message.entity.id, message.entity); break;
       case 'objectRemoved': state.reality.delete(message.entityId); break;
-      case 'error': state.areaLoading=false;if(state.rebuildPending){state.rebuildPending=false;ui.rebuild.textContent='Reset & rebuild reality';syncGodControls(state.players.get(state.playerId));}showToast(message.message); break;
+      case 'error': state.areaLoading=false;state.loadingArea=null;state.loadingStarted=0;if(state.rebuildPending){state.rebuildPending=false;ui.rebuild.textContent='Reset & rebuild reality';syncGodControls(state.players.get(state.playerId));}showToast(message.message); break;
     }
   }
   function updatePlayer(player, moving = false) {
@@ -154,6 +154,8 @@
   function loadedAreas(snapshot=state.snapshot){if(!snapshot)return[];return snapshot.loadedAreas?.length?snapshot.loadedAreas:[snapshot.bounds];}
   function areaKey(area){return`${area.minimumX.toFixed(2)},${area.minimumY.toFixed(2)},${area.maximumX.toFixed(2)},${area.maximumY.toFixed(2)}`;}
   function pointInLoadedArea(point){return loadedAreas().some(area=>point.x>=area.minimumX&&point.x<=area.maximumX&&point.y>=area.minimumY&&point.y<=area.maximumY);}
+  function areaForPoint(point){const base=state.snapshot?.reality?.area?.bounds||loadedAreas()[0];const size=Number(state.snapshot?.reality?.area?.sizeMeters||2000);if(!base)return null;const x=Math.floor((point.x-base.minimumX)/size),y=Math.floor((point.y-base.minimumY)/size);return{minimumX:base.minimumX+x*size,minimumY:base.minimumY+y*size,maximumX:base.minimumX+(x+1)*size,maximumY:base.minimumY+(y+1)*size};}
+  function beginAreaLoading(point){state.areaLoading=true;state.loadingArea=areaForPoint(point);state.loadingStarted=performance.now();showToast('Loading and generating the bordered map area…');}
   function markNewAreaFog(previous,next){
     const existing=new Set(previous.map(areaKey));
     for(const area of next){if(existing.has(areaKey(area)))continue;const minX=Math.floor(area.minimumX/fogCellSize),maxX=Math.ceil(area.maximumX/fogCellSize),minY=Math.floor(area.minimumY/fogCellSize),maxY=Math.ceil(area.maximumY/fogCellSize);for(let x=minX;x<maxX;x++)for(let y=minY;y<maxY;y++){const cx=(x+.5)*fogCellSize,cy=(y+.5)*fogCellSize;if(cx>=area.minimumX&&cx<=area.maximumX&&cy>=area.minimumY&&cy<=area.maximumY)state.outdoorFog.add(fogKey(x,y));}}
@@ -163,6 +165,12 @@
     const px=Math.floor(me.position.x/fogCellSize),py=Math.floor(me.position.y/fogCellSize);for(let x=px-1;x<=px+1;x++)for(let y=py-1;y<=py+1;y++)state.outdoorFog.delete(fogKey(x,y));
     const minX=Math.floor(view.minX/fogCellSize),maxX=Math.ceil(view.maxX/fogCellSize),minY=Math.floor(view.minY/fogCellSize),maxY=Math.ceil(view.maxY/fogCellSize);ctx.save();ctx.fillStyle='rgba(14,20,25,.88)';
     for(let x=minX;x<maxX;x++)for(let y=minY;y<maxY;y++){if(!state.outdoorFog.has(fogKey(x,y)))continue;const corners=[toScreen({x:x*fogCellSize,y:y*fogCellSize}),toScreen({x:(x+1)*fogCellSize,y:y*fogCellSize}),toScreen({x:(x+1)*fogCellSize,y:(y+1)*fogCellSize}),toScreen({x:x*fogCellSize,y:(y+1)*fogCellSize})];ctx.beginPath();ctx.moveTo(corners[0].x,corners[0].y);for(const p of corners.slice(1))ctx.lineTo(p.x,p.y);ctx.closePath();ctx.fill();}
+    ctx.restore();
+  }
+  function drawLoadingBoundary(now){
+    const area=state.loadingArea;if(!state.areaLoading||!area)return;const corners=[{x:area.minimumX,y:area.minimumY},{x:area.maximumX,y:area.minimumY},{x:area.maximumX,y:area.maximumY},{x:area.minimumX,y:area.maximumY}],screen=corners.map(toScreen),pulse=.72+Math.sin(now/180)*.2,seconds=Math.max(0,Math.floor((now-state.loadingStarted)/1000)),label=`LOADING MAP · ${seconds}s`;
+    ctx.save();ctx.fillStyle='rgba(18,24,26,.36)';ctx.beginPath();ctx.moveTo(screen[0].x,screen[0].y);for(const point of screen.slice(1))ctx.lineTo(point.x,point.y);ctx.closePath();ctx.fill();ctx.strokeStyle=`rgba(255,211,92,${pulse})`;ctx.lineWidth=4;ctx.setLineDash([18,10]);ctx.stroke();ctx.setLineDash([]);
+    for(let edge=0;edge<4;edge++){const a=corners[edge],b=corners[(edge+1)%4],length=Math.hypot(b.x-a.x,b.y-a.y),steps=Math.max(1,Math.ceil(length/90));for(let step=0;step<=steps;step++){const amount=step/steps,p=toScreen({x:a.x+(b.x-a.x)*amount,y:a.y+(b.y-a.y)*amount});if(p.x<55||p.x>innerWidth-55||p.y<18||p.y>innerHeight-18)continue;const next=toScreen({x:a.x+(b.x-a.x)*Math.min(1,amount+.01),y:a.y+(b.y-a.y)*Math.min(1,amount+.01)}),angle=Math.atan2(next.y-p.y,next.x-p.x);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(angle);ctx.font='700 11px monospace';ctx.textAlign='center';ctx.textBaseline='middle';const width=ctx.measureText(label).width+14;ctx.fillStyle='rgba(25,25,19,.9)';ctx.fillRect(-width/2,-10,width,20);ctx.strokeStyle='#f4cf62';ctx.lineWidth=1;ctx.strokeRect(-width/2,-10,width,20);ctx.fillStyle='#fff0a3';ctx.fillText(label,0,1);ctx.restore();}}
     ctx.restore();
   }
   function boundsOf(entity) {
@@ -188,7 +196,7 @@
     const me = state.players.get(state.playerId);
     if (me && state.follow) { state.camera.x += (me.position.x-state.camera.x)*.14; state.camera.y += (me.position.y-state.camera.y)*.14; }
     const view = viewBounds(16), detail = lod();
-    if(me?.locationId==='outdoor'&&!state.areaLoading&&Date.now()-(state.lastAreaRequest||0)>1200&&!pointInLoadedArea(state.camera)){state.lastAreaRequest=Date.now();state.areaLoading=true;showToast('Loading and generating the next map area…');send({type:'requestArea',x:state.camera.x,y:state.camera.y});}
+    if(me?.locationId==='outdoor'&&!state.areaLoading&&Date.now()-(state.lastAreaRequest||0)>1200&&!pointInLoadedArea(state.camera)){state.lastAreaRequest=Date.now();beginAreaLoading(state.camera);send({type:'requestArea',x:state.camera.x,y:state.camera.y});}
     if (me?.locationId !== 'outdoor' && state.dungeon) {
       drawDungeon(state.dungeon,view,detail,now); drawProjectiles(now);drawLaser(me); drawSpeechBubbles(view); updateTelemetry(me);syncLightControls(me); return;
     }
@@ -203,7 +211,7 @@
     drawStreetNames(state.lists.road||[],view,detail);
     drawChestsAndLoot(view,now);
     drawProjectiles(now);
-    drawAtmosphere(me,detail,now);drawOutdoorFog(view,me);drawLaser(me);
+    drawAtmosphere(me,detail,now);drawOutdoorFog(view,me);drawLoadingBoundary(now);drawLaser(me);
     drawSpeechBubbles(view);
     updateTelemetry(me);syncLightControls(me);
   }
@@ -393,12 +401,12 @@
   const clock=value=>new Date(value).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
   function updateMode(mode){document.querySelectorAll('[data-mode]').forEach(button=>button.classList.toggle('active',button.dataset.mode.toLowerCase()===String(mode||'walk').toLowerCase()));}
 
-  function movementLoop(time){const me=state.players.get(state.playerId);if(me&&time-state.lastInput>28){if(state.pendingDoor&&Math.hypot(state.pendingDoor.position.x-me.position.x,state.pendingDoor.position.y-me.position.y)<5.5){send({type:'enterDungeon',doorId:state.pendingDoor.id});state.pendingDoor=null;stopTravel();}if(state.pendingChest&&Math.hypot(state.pendingChest.position.x-me.position.x,state.pendingChest.position.y-me.position.y)<3.7){send({type:'openChest',chestId:state.pendingChest.id});state.pendingChest=null;stopTravel();}let dx=0,dy=0;if(state.keys.has('w')||state.keys.has('arrowup'))dy+=1;if(state.keys.has('s')||state.keys.has('arrowdown'))dy-=1;if(state.keys.has('a')||state.keys.has('arrowleft'))dx-=1;if(state.keys.has('d')||state.keys.has('arrowright'))dx+=1;if(dx||dy){state.target=null;state.path=[];send({type:'moveRequest',x:dx,y:dy,sequence:++state.pathSequence});state.lastInput=time;}else if(state.target){while(state.path.length&&Math.hypot(state.path[0].x-me.position.x,state.path[0].y-me.position.y)<.45)state.path.shift();const waypoint=state.path[0]||state.target,tx=waypoint.x-me.position.x,ty=waypoint.y-me.position.y,d=Math.hypot(tx,ty);if(d<.4&&!state.path.length){state.target=null;}else if(d>.01){send({type:'moveRequest',x:tx/d,y:ty/d,sequence:state.pathSequence});state.lastInput=time;}}}requestAnimationFrame(movementLoop);}
+  function movementLoop(time){const me=state.players.get(state.playerId);if(me&&time-state.lastInput>28){if(state.pendingDoor&&Math.hypot(state.pendingDoor.position.x-me.position.x,state.pendingDoor.position.y-me.position.y)<5.5){send({type:'enterDungeon',doorId:state.pendingDoor.id});state.pendingDoor=null;stopTravel();}if(state.pendingChest&&Math.hypot(state.pendingChest.position.x-me.position.x,state.pendingChest.position.y-me.position.y)<3.7){send({type:'openChest',chestId:state.pendingChest.id});state.pendingChest=null;stopTravel();}let dx=0,dy=0;if(state.keys.has('w')||state.keys.has('arrowup'))dy+=1;if(state.keys.has('s')||state.keys.has('arrowdown'))dy-=1;if(state.keys.has('a')||state.keys.has('arrowleft'))dx-=1;if(state.keys.has('d')||state.keys.has('arrowright'))dx+=1;if(dx||dy){state.target=null;state.path=[];send({type:'moveRequest',x:dx,y:dy,sequence:++state.pathSequence});state.lastInput=time;}else if(state.target&&!state.areaLoading){while(state.path.length&&Math.hypot(state.path[0].x-me.position.x,state.path[0].y-me.position.y)<.45)state.path.shift();const waypoint=state.path[0]||state.target,tx=waypoint.x-me.position.x,ty=waypoint.y-me.position.y,d=Math.hypot(tx,ty);if(d<.4&&!state.path.length){state.target=null;}else if(d>.01){send({type:'moveRequest',x:tx/d,y:ty/d,sequence:state.pathSequence});state.lastInput=time;}}}requestAnimationFrame(movementLoop);}
 
   function actorsHere(){return state.dungeon?(state.dungeon.actors||[]):[...state.actors.values()];}
   function combatTargets(){const me=state.players.get(state.playerId),location=me?.locationId||'outdoor';return [...actorsHere(),...[...state.players.values()].filter(player=>player.id!==state.playerId&&(player.locationId||'outdoor')===location)].filter(target=>dynamicVisible(target.position));}
   function nearPoint(collection,world,meters=1.5){return collection.filter(item=>Math.hypot(item.position.x-world.x,item.position.y-world.y)<=meters).sort((a,b)=>Math.hypot(a.position.x-world.x,a.position.y-world.y)-Math.hypot(b.position.x-world.x,b.position.y-world.y))[0];}
-  function navigateTo(target){state.target={x:target.x,y:target.y};state.path=[];state.pathSequence++;send({type:'pathRequest',x:target.x,y:target.y,sequence:state.pathSequence});}
+  function navigateTo(target){state.target={x:target.x,y:target.y};state.path=[];state.pathSequence++;if(!pointInLoadedArea(target))beginAreaLoading(target);send({type:'pathRequest',x:target.x,y:target.y,sequence:state.pathSequence});}
 
   canvas.addEventListener('mousedown',event=>{if(event.button===0||event.button===2){state.pointer={down:true,dragged:false,button:event.button,startX:event.clientX,startY:event.clientY,x:event.clientX,y:event.clientY};ui.actionMenu.hidden=true;}});
   addEventListener('mousemove',event=>{const world=toWorld({x:event.clientX,y:event.clientY});const actor=nearPoint(combatTargets(),world,Math.max(1,14/state.scale));if(actor){const isPlayer=state.players.has(actor.id),rating=state.relationships.get(actor.id)??actor.friendRating??0;ui.tooltip.innerHTML=`<strong>${actor.name}</strong><br>Health: ${(actor.healthHearts??5).toFixed(1)} / ${(actor.maximumHealthHearts??5).toFixed(1)} ♥${isPlayer?'':`<br>Friend / foe: ${rating.toFixed(1)}${actor.isMerchant?'<br>Merchant':''}`}`;ui.tooltip.style.left=`${event.clientX+14}px`;ui.tooltip.style.top=`${event.clientY+14}px`;ui.tooltip.hidden=false;}else ui.tooltip.hidden=true;if(!state.pointer.down)return;const dx=event.clientX-state.pointer.x,dy=event.clientY-state.pointer.y;if(Math.hypot(event.clientX-state.pointer.startX,event.clientY-state.pointer.startY)>3)state.pointer.dragged=true;if(state.pointer.dragged){state.camera.x-=dx/state.scale;state.camera.y+=dy/(state.scale*state.pitch);state.camera.x+=dy/state.scale*state.shear/state.pitch;state.follow=false;}state.pointer.x=event.clientX;state.pointer.y=event.clientY;});
