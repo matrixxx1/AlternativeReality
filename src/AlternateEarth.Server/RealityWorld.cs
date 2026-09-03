@@ -47,6 +47,14 @@ public sealed partial class RealityWorld
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         if (IsInitialized) return;
+        foreach (var item in await _store.LoadItemConfigurationsAsync(Configuration.Id, cancellationToken))
+            if (_itemConfigurations.TryGetValue(item.ItemType, out var defaults))
+                _itemConfigurations[item.ItemType] = item with
+                {
+                    SpeedModifierMph = item.SpeedModifierMph ?? defaults.SpeedModifierMph,
+                    VisibilityModifierMeters = item.VisibilityModifierMeters ?? defaults.VisibilityModifierMeters
+                };
+        _movementConfiguration = await _store.LoadMovementConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultMovementConfiguration;
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
@@ -213,7 +221,7 @@ public sealed partial class RealityWorld
         var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(characterId, "magicHikingShoes") > 0);
         var wearingMagicRunningShoes = player.MagicRunningShoesOn && (player.GodMode || InventoryQuantity(characterId, "magicRunningShoes") > 0);
         var reducedStaminaDrain = wearingMagicHikingShoes || wearingMagicRunningShoes && WorldNavigation.MagicRunningShoesReduceStaminaOn(currentTerrain);
-        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction, wearingMagicHikingShoes, wearingMagicRunningShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var metersPerSecond = ConfiguredSpeedMetersPerSecond(player, currentTerrain, staminaFraction, wearingMagicHikingShoes, wearingMagicRunningShoes);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
             X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
@@ -333,7 +341,7 @@ public sealed partial class RealityWorld
             return (new(true, new[] { target }), false);
         }
         var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
-        return (Navigation.FindPath(player.Position, request.X, request.Y), expanded);
+        return (Navigation.FindPath(player.Position, request.X, request.Y, terrain => ConfiguredSpeedMetersPerSecond(player, terrain)), expanded);
     }
 
     public IReadOnlyList<ActorState> AdvanceActors(TimeSpan elapsed)
@@ -528,8 +536,8 @@ public sealed partial class RealityWorld
             {
                 var offers = BaseMerchantOffers(actor);
                 var offer = offers[_actorRandom.Next(offers.Length)];
-                var good = MerchantCatalog.First(item => item.Item == offer.ItemType);
-                return $"For sale! {good.Display} for ${offer.UnitPriceCents / 100.0:F2} today. Friends pay less!";
+                var good = _itemConfigurations[offer.ItemType];
+                return $"For sale! {good.DisplayName} for ${offer.UnitPriceCents / 100.0:F2} today. Friends pay less!";
             }
             var jokes = new[]
             {

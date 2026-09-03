@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v11
+# Renderer-neutral protocol v13
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state.
 
@@ -10,6 +10,8 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
 | `setTravelMode` | walk, run, skateboard, bike, dirt bike, motorcycle, or raft | validates terrain, equipment ownership, and motorized-vehicle fuel |
 | `setEquipment` | logical equipment slot and item, or null to unequip | validates ownership; the weapon slot supports a true empty state while fists remain permanently available |
+| `updateItemConfiguration` | item ID, damage, range, additive speed/visibility modifiers, minimum price, maximum price | requires authoritative God Mode, validates safe bounds, persists server-wide rules, and invalidates existing merchant quotes |
+| `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, and current location; dungeon session state is fresh on entry and discarded on exit |
 | `purchaseBase` | logical building door ID | validates proximity, account ownership, price, and wallet; changes the account-wide base |

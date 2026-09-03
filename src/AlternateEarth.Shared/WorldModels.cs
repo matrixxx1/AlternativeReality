@@ -108,6 +108,13 @@ public sealed record ActorState(
 
 public sealed record ItemStack(string ItemType, int Quantity);
 public sealed record InventoryState(string PlayerId, IReadOnlyList<ItemStack> Items);
+public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null);
+public sealed record MovementConfiguration(
+    double BaseSpeedMph,
+    double BaseVisibilityMeters,
+    IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph,
+    IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
+public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement);
 public sealed record MerchantOffer(string ItemType, int Quantity, long UnitPriceCents);
 public sealed record TradeQuote(string MerchantId, string MerchantName, double FriendRating, IReadOnlyList<MerchantOffer> Offers);
 public sealed record PurchaseLine(string ItemType, int Quantity);
@@ -131,7 +138,8 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<LootDropState>? Loot = null,
     BaseState? Base = null,
     long BasePurchasePriceCents = 35_000_000,
-    long GodModeBasePurchasePriceCents = 1);
+    long GodModeBasePurchasePriceCents = 1,
+    ServerConfigurationState? ServerConfiguration = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(

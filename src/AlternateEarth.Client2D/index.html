@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=18">
+  <link rel="stylesheet" href="styles.css?v=20">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -22,6 +22,7 @@
     <div><span>Speed</span><strong id="speedValue">0.0 mph</strong></div>
     <div><span>Distance</span><strong id="distanceValue">—</strong></div>
     <div><span>Camera</span><strong id="cameraValue">0 m</strong></div>
+    <div><span>Visible range</span><strong id="visibilityValue">100 m</strong></div>
     <div><span>Weather</span><strong id="weatherValue">Loading…</strong></div>
     <div><span>Sunrise / sunset</span><strong id="sunValue">—</strong></div>
     <div><span>Moon</span><strong id="moonValue">—</strong></div>
@@ -67,6 +68,7 @@
       <span class="gps-button-label">My location</span>
     </button>
     <button id="rebuildButton" type="button" disabled>Reset &amp; rebuild reality</button>
+    <button id="serverConfigButton" type="button" hidden>Server config</button>
   </section>
   <section class="panel inventory-panel">
     <div class="inventory-header"><strong>Inventory &amp; equipment</strong><button id="toggleInventoryButton" type="button">Hide</button></div>
@@ -117,6 +119,15 @@
     <div id="tradeOffers"></div>
     <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm purchase</button></div>
   </section>
+  <section id="serverConfigWindow" class="panel server-config-window" hidden>
+    <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
+    <p>Movement is additive: base speed + terrain + travel mode + every active item modifier. Dynamic characters and treasure are hidden beyond visible range; geographic scenery remains visible.</p>
+    <section class="movement-config">
+      <div class="movement-base"><label>Player base speed (mph)<input id="baseSpeedConfig" type="number" min="0.1" max="200" step="0.1"></label><label>Base visible range (m)<input id="baseVisibilityConfig" type="number" min="1" max="5000" step="1"></label><button id="saveMovementConfig" type="button">Save movement &amp; visibility</button></div>
+      <div class="modifier-groups"><div><strong>Terrain speed +/- mph</strong><div id="terrainSpeedConfig" class="modifier-grid"></div></div><div><strong>Travel mode speed +/- mph</strong><div id="travelSpeedConfig" class="modifier-grid"></div></div></div>
+    </section>
+    <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span></div><div id="serverConfigItems"></div></div>
+  </section>
   <div id="actorTooltip" class="actor-tooltip" hidden></div>
   <section id="accountSetup" class="account-setup">
     <form id="accountForm" class="panel account-card">
@@ -145,6 +156,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=34"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

@@ -110,6 +110,14 @@ public sealed class RealitySocketHub
                         var equipmentPlayer = await _world.SetEquipmentAsync(characterId, equipmentRequest.Slot, equipmentRequest.ItemType, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = equipmentPlayer }, null, cancellationToken);
                         break;
+                    case "updateItemConfiguration":
+                        var itemConfiguration = await _world.UpdateItemConfigurationAsync(characterId, root.Deserialize<UpdateItemConfigurationRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "itemConfigurationUpdated", item = itemConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "updateMovementConfiguration":
+                        var movementConfiguration = await _world.UpdateMovementConfigurationAsync(characterId, root.Deserialize<UpdateMovementConfigurationRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "movementConfigurationUpdated", movement = movementConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
                     case "enterDungeon":
                         var enter = root.Deserialize<EnterDungeonRequest>(SharedJson.Options)!;
                         var entered = await _world.EnterDungeonAsync(characterId, enter.DoorId, cancellationToken);

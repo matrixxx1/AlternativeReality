@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 11;
+    public const int Version = 13;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -30,6 +30,8 @@ public sealed record SetLightsRequest(bool FlashlightOn, bool LanternOn, bool La
 public sealed record SetMagicHikingShoesRequest(bool Enabled);
 public sealed record SetMagicRunningShoesRequest(bool Enabled);
 public sealed record SetEquipmentRequest(string Slot, string? ItemType);
+public sealed record UpdateItemConfigurationRequest(string ItemType, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, double SpeedModifierMph = 0, double VisibilityModifierMeters = 0);
+public sealed record UpdateMovementConfigurationRequest(double BaseSpeedMph, double BaseVisibilityMeters, IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph, IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);

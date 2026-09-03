@@ -212,10 +212,49 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var sword = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "sword"));
         Assert.True(sword.Event.Hit);
         Assert.Equal(5, sword.Event.Damage);
+        var configuredKnife = await world.UpdateItemConfigurationAsync(attacker.Id, new UpdateItemConfigurationRequest("knife", 4, 3, 1_500, 4_500, 1.25, 15));
+        Assert.Equal(4, configuredKnife.Damage);
+        Assert.Equal(3, configuredKnife.RangeMeters);
+        Assert.Equal(1.25, configuredKnife.SpeedModifierMph);
+        Assert.Equal(15, configuredKnife.VisibilityModifierMeters);
+        var persistedConfiguration = await store.LoadItemConfigurationsAsync(configuration.Id);
+        Assert.Contains(persistedConfiguration, item => item.ItemType == "knife" && item.Damage == 4 && item.MinimumPriceCents == 1_500 && item.SpeedModifierMph == 1.25 && item.VisibilityModifierMeters == 15);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateItemConfigurationAsync(target.Id, new UpdateItemConfigurationRequest("knife", 100, 100, 0, 0)));
         await world.SetEquipmentAsync(attacker.Id, "weapon", "knife");
         var knife = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "knife"));
         Assert.True(knife.Event.Hit);
-        Assert.Equal(2, knife.Event.Damage);
+        Assert.Equal(4, knife.Event.Damage);
+    }
+
+    [Fact]
+    public async Task MovementConfigurationUsesAdditiveModifiersAndPersists()
+    {
+        var configuration = new RealityConfiguration("movement-config", "Movement Config", 31, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "movement-config.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("speed-admin", "SpeedAdmin");
+        var other = await world.JoinAsync("speed-other", "SpeedOther");
+        await world.SetGodModeAsync(player.Id, true);
+
+        var terrain = Enum.GetValues<TerrainType>().ToDictionary(value => value, _ => 0d);
+        terrain[TerrainType.Grass] = -1;
+        var modes = Enum.GetValues<TravelMode>().ToDictionary(value => value, _ => 0d);
+        modes[TravelMode.Run] = 2;
+        var movement = await world.UpdateMovementConfigurationAsync(player.Id, new UpdateMovementConfigurationRequest(4, 120, terrain, modes));
+        await world.UpdateItemConfigurationAsync(player.Id, new UpdateItemConfigurationRequest("magicHikingShoes", 0, 0, 10_000, 40_000, 4, 25));
+
+        var synthetic = player with { GodMode = false, Water = 10, TravelMode = TravelMode.Run, MagicHikingShoesOn = true, Stamina = 5, MaximumStamina = 10 };
+        Assert.Equal(8, world.ConfiguredSpeedMetersPerSecond(synthetic, TerrainType.Grass) * 2.236936, 3);
+        var stacked = synthetic with { TravelMode = TravelMode.Bike };
+        Assert.Equal(17.5, world.ConfiguredSpeedMetersPerSecond(stacked, TerrainType.Grass) * 2.236936, 3);
+        Assert.Equal(120, movement.BaseVisibilityMeters);
+        var persisted = await store.LoadMovementConfigurationAsync(configuration.Id);
+        Assert.NotNull(persisted);
+        Assert.Equal(-1, persisted.TerrainSpeedModifiersMph[TerrainType.Grass]);
+        Assert.Equal(2, persisted.TravelModeSpeedModifiersMph[TravelMode.Run]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateMovementConfigurationAsync(other.Id, new UpdateMovementConfigurationRequest(4, 120, terrain, modes)));
     }
 
     private static CanonicalEntity Building(string id, RegionId region, double x, double y) =>

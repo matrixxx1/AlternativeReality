@@ -9,21 +9,37 @@ public sealed partial class RealityWorld
 {
     public const long BasePurchasePriceCents = 35_000_000;
     public const long GodModeBasePurchasePriceCents = 1;
-    private static readonly (string Item, string Display, int Min, int Max, bool Single)[] MerchantCatalog =
+    private static readonly ItemConfiguration[] DefaultItemConfigurations =
     {
-        ("rock", "a rock", 1, 100, false), ("ballBearing", "a ball bearing", 5, 200, false),
-        ("skateboard", "a skateboard", 20_000, 30_000, true), ("bike", "a bike", 40_000, 50_000, true),
-        ("dirtBike", "a dirt bike", 300_000, 500_000, true), ("motorcycle", "a motorcycle", 500_000, 1_000_000, true),
-        ("gallonOfGas", "a gallon of gas", 500, 1_000, false), ("inflatableRaft", "an inflatable raft", 45_000, 65_000, true),
-        ("flashlight", "a flashlight", 1_000, 5_000, true), ("lantern", "a lantern", 5_000, 10_000, true),
-        ("laser", "a laser", 20_000, 40_000, true), ("magicHikingShoes", "magic hiking shoes", 10_000, 40_000, true),
-        ("magicRunningShoes", "magic running shoes", 10_000, 40_000, true), ("hat", "a hat", 3_000, 7_500, true),
-        ("slingshot", "a slingshot", 5_000, 15_000, true), ("crossbow", "a crossbow", 30_000, 50_000, true),
-        ("arrow", "an arrow", 5, 500, false), ("pistol", "a pistol", 100_000, 300_000, true),
-        ("rifle", "a rifle", 300_000, 600_000, true), ("bullet", "a bullet", 25, 500, false),
-        ("knife", "a knife", 2_000, 4_000, true), ("sword", "a sword", 30_000, 50_000, true),
-        ("water", "water", 50, 200, false), ("food", "food", 200, 500, false)
+        new("fist","Fist","Permanent melee weapon; consumes no ammunition",.25,1.6,0,0,false,true),
+        new("rock","Rock","Thrown weapon and ammunition",1,25,1,100,true,false,"rock"), new("ballBearing","Ball bearing","Slingshot ammunition",0,0,5,200),
+        new("knife","Knife","Short melee weapon",2,1.6,2_000,4_000,true,true), new("sword","Sword","Extended melee weapon",5,2.3,30_000,50_000,true,true),
+        new("slingshot","Slingshot","Ranged weapon; consumes ball bearings",2,60,5_000,15_000,true,true,"ballBearing"),
+        new("crossbow","Crossbow","Ranged weapon; consumes arrows",3,100,30_000,50_000,true,true,"arrow"), new("arrow","Arrow","Crossbow ammunition",0,0,5,500),
+        new("pistol","Pistol","Ranged weapon; consumes bullets",5,50,100_000,300_000,true,true,"bullet"), new("rifle","Rifle","Long-range weapon; consumes bullets",7,200,300_000,600_000,true,true,"bullet"), new("bullet","Bullet","Pistol and rifle ammunition",0,0,25,500),
+        new("skateboard","Skateboard","Fast paved-surface travel",0,0,20_000,30_000,true,true,null,10.5), new("bike","Bike","Faster travel with mild off-road penalty",0,0,40_000,50_000,true,true,null,10.5),
+        new("dirtBike","Dirt bike","Motorized travel up to 40 mph",0,0,300_000,500_000,true,true,null,36.5), new("motorcycle","Motorcycle","Motorized travel up to 90 mph",0,0,500_000,1_000_000,true,true,null,86.5),
+        new("gallonOfGas","Gallon of gas","Refuels the selected motor vehicle",0,0,500,1_000), new("inflatableRaft","Inflatable raft","Safe travel through deep water",0,0,45_000,65_000,true,true,null,2.75),
+        new("flashlight","Flashlight","Directional light",0,0,1_000,5_000,true,true,null,0,50), new("lantern","Lantern","Circular area light",0,0,5_000,10_000,true,true,null,0,30), new("laser","Laser","Straight light beam until collision",0,0,20_000,40_000,true,true,null,0,150),
+        new("magicHikingShoes","Magic hiking shoes","Additive movement and stamina bonus",0,0,10_000,40_000,true,true,null,3.5), new("magicRunningShoes","Magic running shoes","Larger additive movement and conditional stamina bonus",0,0,10_000,40_000,true,true,null,7),
+        new("hat","Hat","Halves water drain while worn",0,0,3_000,7_500,true,true), new("water","Water","Restores water and 2 hearts; pauses drain for 5 minutes",0,0,50,200), new("food","Food","Restores stamina and 2 hearts; pauses drain for 5 minutes",0,0,200,500)
     };
+    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+    private static readonly MovementConfiguration DefaultMovementConfiguration = new(
+        3.5,
+        100,
+        new Dictionary<TerrainType, double>
+        {
+            [TerrainType.Grass] = -.75, [TerrainType.Forest] = -1.5, [TerrainType.Sand] = -2.5,
+            [TerrainType.Pavement] = 0, [TerrainType.Road] = 0, [TerrainType.Sidewalk] = 0,
+            [TerrainType.ShallowWater] = -3, [TerrainType.DeepWater] = -3.25, [TerrainType.Mud] = -2.75
+        },
+        new Dictionary<TravelMode, double>
+        {
+            [TravelMode.Walk] = 0, [TravelMode.Run] = 3.5, [TravelMode.Skateboard] = 0,
+            [TravelMode.Bike] = 0, [TravelMode.Raft] = 0, [TravelMode.DirtBike] = 0, [TravelMode.Motorcycle] = 0
+        });
+    private MovementConfiguration _movementConfiguration = DefaultMovementConfiguration;
     private static readonly string[] WeaponPowerOrder = ["rifle", "sword", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
     private const double DirtBikeTankGallons = 2;
     private const double MotorcycleTankGallons = 4;
@@ -55,7 +71,8 @@ public sealed partial class RealityWorld
             var door = _baseEntities.Values.FirstOrDefault(entity => entity.Kind == EntityKind.Door && entity.Properties.GetValueOrDefault("buildingId") == buildingId);
             if (door is not null) baseState = new BaseState(buildingId, door.Id, door.Position, player?.Name ?? "Explorer");
         }
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState);
+        var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration);
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration);
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
@@ -280,7 +297,7 @@ public sealed partial class RealityWorld
         var now = DateTimeOffset.UtcNow; var previous = _lastMovement.AddOrUpdate(player.Id, now, (_, old) => now); var elapsed = Math.Clamp((now - previous).TotalSeconds, .01, .15);
         var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicHikingShoes") > 0);
         var wearingMagicRunningShoes = player.MagicRunningShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicRunningShoes") > 0);
-        var speed = Navigation.SpeedFor(TerrainType.Pavement, player.TravelMode, player.Stamina / player.MaximumStamina, wearingMagicHikingShoes, wearingMagicRunningShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var speed = ConfiguredSpeedMetersPerSecond(player, TerrainType.Pavement, player.Stamina / player.MaximumStamina, wearingMagicHikingShoes, wearingMagicRunningShoes);
         var next = player.Position with { X = Math.Clamp(player.Position.X + dx * speed * elapsed, .5, dungeon.Width - .5), Y = Math.Clamp(player.Position.Y + dy * speed * elapsed, .5, dungeon.Height - .5), Z = 0 };
         var blocked = dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, next, wall)); if (blocked) next = player.Position;
         var distance = player.Position.Distance2D(next);
@@ -378,8 +395,8 @@ public sealed partial class RealityWorld
         var baseOffers = BaseMerchantOffers(merchant); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
         var offers = baseOffers.Select(offer =>
         {
-            var range = MerchantCatalog.First(item => item.Item == offer.ItemType);
-            return offer with { UnitPriceCents = (long)Math.Clamp(Math.Round(offer.UnitPriceCents * factor), range.Min, range.Max) };
+            var range = _itemConfigurations[offer.ItemType];
+            return offer with { UnitPriceCents = (long)Math.Clamp(Math.Round(offer.UnitPriceCents * factor), range.MinimumPriceCents, range.MaximumPriceCents) };
         }).ToArray();
         return new TradeQuote(merchant.Id, merchant.Name, friendship, offers);
     }
@@ -387,8 +404,8 @@ public sealed partial class RealityWorld
     private MerchantOffer[] BaseMerchantOffers(ActorState merchant)
     {
         var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}"));
-        var selected = MerchantCatalog.OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray();
-        return selected.Select(range => new MerchantOffer(range.Item, range.Single ? 1 : random.Next(3, 31), random.Next(range.Min, range.Max + 1))).ToArray();
+        var selected = _itemConfigurations.Values.Where(item=>item.ForSale).OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray();
+        return selected.Select(item => new MerchantOffer(item.ItemType, item.Single ? 1 : random.Next(3, 31), random.NextInt64(item.MinimumPriceCents, item.MaximumPriceCents + 1))).ToArray();
     }
 
     private static string DisplayItem(string itemType) => itemType switch
@@ -472,24 +489,83 @@ public sealed partial class RealityWorld
     {
         requestedWeapon = (requestedWeapon ?? "fist").ToLowerInvariant();
         if (requestedWeapon == "none") return "none";
-        var start = Array.IndexOf(WeaponPowerOrder, requestedWeapon);
-        if (start < 0) start = WeaponPowerOrder.Length - 1;
-        for (var i = start; i < WeaponPowerOrder.Length; i++) if (CanUseWeapon(playerId, WeaponPowerOrder[i], godMode)) return WeaponPowerOrder[i];
+        if (CanUseWeapon(playerId, requestedWeapon, godMode)) return requestedWeapon;
+        var currentDamage = _itemConfigurations.GetValueOrDefault(requestedWeapon)?.Damage ?? double.MaxValue;
+        var fallback = WeaponPowerOrder.Where(weapon => weapon != "fist" && CanUseWeapon(playerId, weapon, godMode) && _itemConfigurations[weapon].Damage < currentDamage)
+            .OrderByDescending(weapon => _itemConfigurations[weapon].Damage).ThenBy(weapon => Array.IndexOf(WeaponPowerOrder, weapon)).FirstOrDefault();
+        if (fallback is not null) return fallback;
         return "fist";
     }
 
-    private static (double Range, double Damage, string? Ammo) WeaponDefinition(string weapon) => weapon switch
+    private (double Range, double Damage, string? Ammo) WeaponDefinition(string weapon)
     {
-        "fist" => (1.6, .25, null),
-        "knife" => (1.6, 2, null),
-        "sword" => (2.3, 5, null),
-        "rock" => (25, 1, "rock"),
-        "slingshot" => (60, 2, "ballBearing"),
-        "crossbow" => (100, 3, "arrow"),
-        "pistol" => (50, 5, "bullet"),
-        "rifle" => (200, 7, "bullet"),
-        _ => throw new InvalidOperationException("Unknown weapon.")
-    };
+        if (!_itemConfigurations.TryGetValue(weapon, out var item) || !WeaponPowerOrder.Contains(weapon)) throw new InvalidOperationException("Unknown weapon.");
+        return (item.RangeMeters, item.Damage, item.AmmoType);
+    }
+
+    public double ConfiguredSpeedMetersPerSecond(PlayerState player, TerrainType terrain, double? staminaFraction = null, bool? magicHikingShoes = null, bool? magicRunningShoes = null)
+    {
+        var modeModifier = _movementConfiguration.TravelModeSpeedModifiersMph.GetValueOrDefault(player.TravelMode);
+        if (player.TravelMode == TravelMode.Run)
+            modeModifier *= Math.Clamp(staminaFraction ?? (player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina), 0, 1);
+        var mph = _movementConfiguration.BaseSpeedMph
+            + _movementConfiguration.TerrainSpeedModifiersMph.GetValueOrDefault(terrain)
+            + modeModifier;
+        foreach (var itemType in ActiveMovementItems(player, magicHikingShoes, magicRunningShoes))
+            if (_itemConfigurations.TryGetValue(itemType, out var item)) mph += item.SpeedModifierMph ?? 0;
+        mph = Math.Max(.1, mph);
+        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+    }
+
+    private static IEnumerable<string> ActiveMovementItems(PlayerState player, bool? magicHikingShoes = null, bool? magicRunningShoes = null)
+    {
+        var travelItem = player.TravelMode switch
+        {
+            TravelMode.Skateboard => "skateboard", TravelMode.Bike => "bike", TravelMode.Raft => "inflatableRaft",
+            TravelMode.DirtBike => "dirtBike", TravelMode.Motorcycle => "motorcycle", _ => null
+        };
+        if (travelItem is not null) yield return travelItem;
+        if (magicHikingShoes ?? player.MagicHikingShoesOn) yield return "magicHikingShoes";
+        if (magicRunningShoes ?? player.MagicRunningShoesOn) yield return "magicRunningShoes";
+        if (player.HatOn) yield return "hat";
+        if (player.FlashlightOn) yield return "flashlight";
+        if (player.LanternOn) yield return "lantern";
+        if (player.LaserOn) yield return "laser";
+        if (player.EquippedWeapon != "none") yield return player.EquippedWeapon;
+    }
+
+    public async Task<ItemConfiguration> UpdateItemConfigurationAsync(string playerId, UpdateItemConfigurationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to change server configuration.");
+        if (!_itemConfigurations.TryGetValue(request.ItemType, out var current)) throw new InvalidOperationException("Unknown inventory item.");
+        if (!double.IsFinite(request.Damage) || request.Damage is < 0 or > 100) throw new InvalidOperationException("Damage must be between 0 and 100 hearts.");
+        if (!double.IsFinite(request.RangeMeters) || request.RangeMeters is < 0 or > 2000) throw new InvalidOperationException("Range must be between 0 and 2,000 meters.");
+        if (!double.IsFinite(request.SpeedModifierMph) || request.SpeedModifierMph is < -200 or > 200) throw new InvalidOperationException("Speed modifier must be between -200 and +200 mph.");
+        if (!double.IsFinite(request.VisibilityModifierMeters) || request.VisibilityModifierMeters is < -5000 or > 5000) throw new InvalidOperationException("Visibility modifier must be between -5,000 and +5,000 meters.");
+        if (request.MinimumPriceCents < 0 || request.MaximumPriceCents < request.MinimumPriceCents || request.MaximumPriceCents > 100_000_000_000) throw new InvalidOperationException("Enter a valid minimum and maximum price.");
+        var updated = current with { Damage = request.Damage, RangeMeters = request.RangeMeters, MinimumPriceCents = request.MinimumPriceCents, MaximumPriceCents = request.MaximumPriceCents, SpeedModifierMph = request.SpeedModifierMph, VisibilityModifierMeters = request.VisibilityModifierMeters };
+        _itemConfigurations[current.ItemType] = updated; _tradeQuotes.Clear();
+        await _store.SaveItemConfigurationsAsync(Configuration.Id, _itemConfigurations.Values.OrderBy(item=>item.ItemType).ToArray(), cancellationToken);
+        return updated;
+    }
+
+    public async Task<MovementConfiguration> UpdateMovementConfigurationAsync(string playerId, UpdateMovementConfigurationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to change server configuration.");
+        if (!double.IsFinite(request.BaseSpeedMph) || request.BaseSpeedMph is < .1 or > 200) throw new InvalidOperationException("Base speed must be between 0.1 and 200 mph.");
+        if (!double.IsFinite(request.BaseVisibilityMeters) || request.BaseVisibilityMeters is < 1 or > 5000) throw new InvalidOperationException("Base visibility must be between 1 and 5,000 meters.");
+        var terrain = Enum.GetValues<TerrainType>().ToDictionary(value => value, value => ValidateSpeedModifier(request.TerrainSpeedModifiersMph.GetValueOrDefault(value)));
+        var travel = Enum.GetValues<TravelMode>().ToDictionary(value => value, value => ValidateSpeedModifier(request.TravelModeSpeedModifiersMph.GetValueOrDefault(value)));
+        _movementConfiguration = new MovementConfiguration(request.BaseSpeedMph, request.BaseVisibilityMeters, terrain, travel);
+        await _store.SaveMovementConfigurationAsync(Configuration.Id, _movementConfiguration, cancellationToken);
+        return _movementConfiguration;
+    }
+
+    private static double ValidateSpeedModifier(double value)
+    {
+        if (!double.IsFinite(value) || value is < -200 or > 200) throw new InvalidOperationException("Each speed modifier must be between -200 and +200 mph.");
+        return value;
+    }
 
     private void UpdateActorHealth(PlayerState player, ActorState actor, double health, bool died)
     {

@@ -172,7 +172,7 @@ public sealed class WorldNavigation
         return true;
     }
 
-    public NavigationResult FindPath(WorldPosition start, double targetX, double targetY)
+    public NavigationResult FindPath(WorldPosition start, double targetX, double targetY, Func<TerrainType, double>? speedForTerrain = null)
     {
         if (!_bounds.Contains(targetX, targetY)) return new(false, Array.Empty<WorldPosition>(), "That destination is outside this reality.");
         if (IsBlocked(targetX, targetY) || TerrainAt(targetX, targetY) == TerrainType.DeepWater) return new(false, Array.Empty<WorldPosition>(), "That destination is blocked or in deep water.");
@@ -217,7 +217,7 @@ public sealed class WorldNavigation
                 if (IsBlocked(nextPosition.X, nextPosition.Y) || TerrainAt(nextPosition.X, nextPosition.Y) == TerrainType.DeepWater) continue;
                 var currentPosition = Position(current);
                 if (!CanTraverse(currentPosition, nextPosition, true)) continue;
-                var terrainSpeed = SpeedFor(TerrainAt(nextPosition.X, nextPosition.Y));
+                var terrainSpeed = (speedForTerrain ?? SpeedFor)(TerrainAt(nextPosition.X, nextPosition.Y));
                 if (terrainSpeed <= 0) continue;
                 var stepDistance = direction.Item1 != 0 && direction.Item2 != 0 ? cell * Math.Sqrt(2) : cell;
                 var nextCost = costs[current] + (stepDistance * (6 / terrainSpeed));
@@ -372,5 +372,5 @@ public sealed class WorldNavigation
     }
 
     private static double Distance(double x1, double y1, double x2, double y2) => Math.Sqrt(Math.Pow(x1 - x2, 2) + Math.Pow(y1 - y2, 2));
-    private static double MilesPerHour(double value) => value * 0.44704;
+    public static double MilesPerHour(double value) => value * 0.44704;
 }

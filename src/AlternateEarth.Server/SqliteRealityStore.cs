@@ -346,6 +346,38 @@ public sealed class SqliteRealityStore
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ItemConfiguration>> LoadItemConfigurationsAsync(string realityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM ServerSettings WHERE Key=$key"; command.Parameters.AddWithValue("$key", $"item-configuration:{realityId}");
+        var json = (string?)await command.ExecuteScalarAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(json) ? Array.Empty<ItemConfiguration>() : JsonSerializer.Deserialize<ItemConfiguration[]>(json, SharedJson.Options) ?? Array.Empty<ItemConfiguration>();
+    }
+
+    public async Task SaveItemConfigurationsAsync(string realityId, IReadOnlyList<ItemConfiguration> items, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO ServerSettings (Key,Value) VALUES ($key,$value) ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value";
+        command.Parameters.AddWithValue("$key", $"item-configuration:{realityId}"); command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(items, SharedJson.Options));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<MovementConfiguration?> LoadMovementConfigurationAsync(string realityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM ServerSettings WHERE Key=$key"; command.Parameters.AddWithValue("$key", $"movement-configuration:{realityId}");
+        var json = (string?)await command.ExecuteScalarAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<MovementConfiguration>(json, SharedJson.Options);
+    }
+
+    public async Task SaveMovementConfigurationAsync(string realityId, MovementConfiguration configuration, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO ServerSettings (Key,Value) VALUES ($key,$value) ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value";
+        command.Parameters.AddWithValue("$key", $"movement-configuration:{realityId}"); command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(configuration, SharedJson.Options));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<RelationshipState>> LoadRelationshipsAsync(string realityId, string playerId, CancellationToken cancellationToken = default)
     {
         var result = new List<RelationshipState>(); await using var connection = await OpenAsync(cancellationToken);
