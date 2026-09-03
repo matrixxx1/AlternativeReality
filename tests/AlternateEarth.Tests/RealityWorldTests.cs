@@ -117,6 +117,13 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(2, diagonal.LoadedAreas!.Count);
         Assert.True(diagonal.Bounds.Contains(0, 500));
         Assert.DoesNotContain(diagonal.LoadedAreas, area => area.Contains(0, 500));
+        for (var index = 0; index < 12; index++)
+        {
+            var accountId = $"loaded-account-{index}"; var characterId = $"loaded-player-{index}"; var username = $"Load{index:00}";
+            await store.CreateAccountAsync(new AccountRecord(accountId, username, "hash", "salt", $"token-{index}", characterId), username);
+            var player = await world.JoinAsync(characterId, username, accountId);
+            Assert.Contains(diagonal.LoadedAreas, area => area.Contains(player.Position.X, player.Position.Y));
+        }
 
         Assert.True(await world.LoadAreaAsync(0, 500));
         var filled = world.CreateSnapshot();
@@ -145,7 +152,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await world.SetGodModeAsync(player.Id, false);
 
         var insufficient = await Assert.ThrowsAsync<InvalidOperationException>(() => world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(targetDoor.Id)));
-        Assert.Contains("$350,000.00", insufficient.Message);
+        var expectedPrice = RealityWorld.CalculateBuildingPriceCents(targetBuilding);
+        Assert.Contains($"${expectedPrice / 100m:N2}", insufficient.Message);
         var before = await world.SetGodModeAsync(player.Id, true);
         var purchased = await world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(targetDoor.Id));
 
@@ -348,6 +356,98 @@ public sealed class RealityWorldTests : IAsyncLifetime
 
         Assert.NotNull(moved);
         Assert.InRange(moved.Player.Position.Distance2D(player.Position), 0, .050001);
+    }
+
+    [Fact]
+    public void BuildingPriceStartsAtThreeHundredFiftyThousandAndGrowsExponentially()
+    {
+        var region = new RegionId(45, -123);
+        var tiny = Building("tiny", region, 0, 0);
+        var large = new CanonicalEntity("large", EntityKind.Building, new WorldPosition(region, 0, 0),
+            new GeometryPoint[] { new(-20, -10), new(20, -10), new(20, 10), new(-20, 10), new(-20, -10) }, new Dictionary<string, string>());
+
+        Assert.True(RealityWorld.CalculateBuildingPriceCents(tiny) >= 35_000_000);
+        Assert.True(RealityWorld.CalculateBuildingPriceCents(large) > RealityWorld.CalculateBuildingPriceCents(tiny));
+    }
+
+    [Fact]
+    public async Task HomeUsesBuildingDimensionsAndFurniturePersistsInHomeOnlyStorage()
+    {
+        var configuration = new RealityConfiguration("home-furniture", "Home Furniture", 47, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var building = new CanonicalEntity("large-home", EntityKind.Building, new WorldPosition(region, 30, 30),
+            new GeometryPoint[] { new(15, 20), new(45, 20), new(45, 40), new(15, 40), new(15, 20) }, new Dictionary<string, string>());
+        var store = new SqliteRealityStore(Path.Combine(_directory, "home-furniture.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("home-account", "HomeUser", "hash", "salt", "token", "home-player"), "HomeUser");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("home-player", "HomeUser", "home-account");
+        await world.SetGodModeAsync(player.Id, true);
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+
+        Assert.True(entered.Dungeon.IsHome);
+        Assert.Equal(30, entered.Dungeon.Width, 3);
+        Assert.Equal(20, entered.Dungeon.Height, 3);
+        Assert.True(entered.Dungeon.Walls[0].DoorEnd - entered.Dungeon.Walls[0].DoorStart >= 3.5);
+        Assert.Equal(0.65, entered.Dungeon.Exit.Y, 3);
+        Assert.All(entered.Dungeon.Walls.Skip(4), wall => Assert.True(wall.DoorStart >= 0 && wall.DoorEnd > wall.DoorStart));
+        Assert.Contains(entered.Dungeon.Furnishings!, item => item.Properties["objectType"] == "wardrobe");
+        var chair = entered.Dungeon.Furnishings!.First(item => item.Properties["objectType"] == "diningChair");
+        var originalPosition = chair.Position;
+        var rotated = await world.RotateFurnitureAsync(player.Id, new RotateFurnitureRequest(chair.Id));
+        Assert.Equal("90", rotated.Furnishings!.Single(item => item.Id == chair.Id).Properties["rotationDegrees"]);
+        await world.StoreFurnitureAsync(player.Id, new StoreFurnitureRequest(chair.Id));
+        Assert.Contains(world.GetPrivateState(player.Id).HomeStorage!, item => item.Id == chair.Id);
+        await world.PlaceFurnitureAsync(player.Id, new PlaceFurnitureRequest(chair.Id, originalPosition.X, originalPosition.Y, 90));
+        Assert.DoesNotContain(world.GetPrivateState(player.Id).HomeStorage!, item => item.Id == chair.Id);
+        await world.StoreFurnitureAsync(player.Id, new StoreFurnitureRequest(chair.Id));
+
+        await world.ExitDungeonAsync(player.Id);
+        Assert.Null(world.GetPrivateState(player.Id).HomeStorage);
+        await world.EnterDungeonAsync(player.Id, door.Id);
+        Assert.Contains(world.GetPrivateState(player.Id).HomeStorage!, item => item.Id == chair.Id);
+        world.Leave(player.Id);
+        var reloadedWorld = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await reloadedWorld.InitializeAsync();
+        await reloadedWorld.JoinAsync("home-player", "HomeUser", "home-account");
+        Assert.Contains(reloadedWorld.GetPrivateState("home-player").HomeStorage!, item => item.Id == chair.Id);
+    }
+
+    [Fact]
+    public async Task FurnitureStoreOffersIllustratedVariantsAndPurchasesIntoHome()
+    {
+        var configuration = new RealityConfiguration("furniture-store", "Furniture Store", 48, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var building = Building("furniture-home", region, 20, 20);
+        var storePoi = new CanonicalEntity("furniture-shop", EntityKind.PointOfInterest, new WorldPosition(region, 45, 45), Array.Empty<GeometryPoint>(),
+            new Dictionary<string, string> { ["name"] = "Cozy Rooms", ["merchantCategory"] = "furniture" });
+        var store = new SqliteRealityStore(Path.Combine(_directory, "furniture-store.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("shop-account", "Shopper", "hash", "salt", "token", "shop-player"), "Shopper");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building, storePoi)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("shop-player", "Shopper", "shop-account");
+        await world.SetGodModeAsync(player.Id, true);
+        var merchant = world.CreateSnapshot().Actors!.Single(actor => actor.MerchantCategory == "furniture");
+        await world.TeleportAsync(player.Id, new TeleportRequest(merchant.Position.X, merchant.Position.Y, true));
+        var quote = world.RequestTrade(player.Id, merchant.Id);
+        var furniture = quote.Offers.Where(offer => offer.ItemType.StartsWith("furniture:", StringComparison.Ordinal)).OrderBy(offer => offer.UnitPriceCents).First();
+
+        Assert.NotNull(furniture.DisplayName);
+        Assert.NotNull(furniture.ImageKey);
+        Assert.True(furniture.Properties!.ContainsKey("color"));
+        Assert.True(furniture.Properties.ContainsKey("pattern"));
+        Assert.True(furniture.UnitPriceCents <= 50_000);
+        await world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine(furniture.ItemType, 1) }));
+
+        var baseDoor = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door && entity.Properties["buildingId"] == world.GetPrivateState(player.Id).Base!.BuildingId);
+        await world.TeleportAsync(player.Id, new TeleportRequest(baseDoor.Position.X, baseDoor.Position.Y, true));
+        await world.EnterDungeonAsync(player.Id, baseDoor.Id);
+        var privateState = world.GetPrivateState(player.Id);
+        Assert.Contains(privateState.Dungeon!.Furnishings!.Concat(privateState.HomeStorage!), item => item.Id.Contains(":", StringComparison.Ordinal) && item.Properties.GetValueOrDefault("builtIn") == "false");
     }
 
     private static CanonicalEntity Building(string id, RegionId region, double x, double y) =>

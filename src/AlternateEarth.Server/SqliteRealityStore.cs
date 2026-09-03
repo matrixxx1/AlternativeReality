@@ -94,6 +94,11 @@ public sealed class SqliteRealityStore
                 RegionLatitude INTEGER, RegionLongitude INTEGER, X REAL, Y REAL,
                 PRIMARY KEY (AccountId, RealityId)
             );
+            CREATE TABLE IF NOT EXISTS HomeFurniture (
+                AccountId TEXT NOT NULL, RealityId TEXT NOT NULL,
+                FurnitureJson TEXT NOT NULL, UpdatedUtc TEXT NOT NULL,
+                PRIMARY KEY (AccountId, RealityId)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
@@ -430,6 +435,24 @@ public sealed class SqliteRealityStore
         await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
         command.CommandText = "INSERT OR IGNORE INTO WorldMapDiscovery (RealityId,PlayerId,AreaKey,PurchasedUtc) VALUES ($r,$p,$a,$u)";
         command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId); command.Parameters.AddWithValue("$a", areaKey); command.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CanonicalEntity>> LoadHomeFurnitureAsync(string accountId, string realityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT FurnitureJson FROM HomeFurniture WHERE AccountId=$a AND RealityId=$r";
+        command.Parameters.AddWithValue("$a", accountId); command.Parameters.AddWithValue("$r", realityId);
+        var json = await command.ExecuteScalarAsync(cancellationToken) as string;
+        return string.IsNullOrWhiteSpace(json) ? Array.Empty<CanonicalEntity>() : JsonSerializer.Deserialize<CanonicalEntity[]>(json, SharedJson.Options) ?? Array.Empty<CanonicalEntity>();
+    }
+
+    public async Task SaveHomeFurnitureAsync(string accountId, string realityId, IReadOnlyList<CanonicalEntity> furniture, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO HomeFurniture (AccountId,RealityId,FurnitureJson,UpdatedUtc) VALUES ($a,$r,$j,$u) ON CONFLICT(AccountId,RealityId) DO UPDATE SET FurnitureJson=excluded.FurnitureJson,UpdatedUtc=excluded.UpdatedUtc";
+        command.Parameters.AddWithValue("$a", accountId); command.Parameters.AddWithValue("$r", realityId);
+        command.Parameters.AddWithValue("$j", JsonSerializer.Serialize(furniture, SharedJson.Options)); command.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

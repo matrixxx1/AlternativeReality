@@ -25,7 +25,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     public async Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            FormattableString.Invariant($"v3:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
+            FormattableString.Invariant($"v4:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_cacheDirectory, $"area-{cacheKey}.json");
         if (File.Exists(canonicalCachePath))
         {
@@ -170,7 +170,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             }
 
             var geometry = way.Nodes
-                .Where(nodes.ContainsKey)
+                .Where(nodeId => nodes.ContainsKey(nodeId) && RegionId.FromGeo(nodes[nodeId]) == area.Region)
                 .Select(nodeId => projection.Project(nodes[nodeId]))
                 .Where(position => area.Bounds.Contains(position.X, position.Y))
                 .Select(position => new GeometryPoint(position.X, position.Y, position.Z))
@@ -206,6 +206,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         foreach (var node in taggedNodes)
         {
             if (Classify(node.Tags) != EntityKind.PointOfInterest) continue;
+            if (RegionId.FromGeo(node.Coordinate) != area.Region) continue;
             var position = projection.Project(node.Coordinate);
             if (!area.Bounds.Contains(position.X, position.Y)) continue;
             var properties = node.Tags.Where(pair => KeepProperty(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -220,7 +221,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             foreach (var wayId in relation.Ways.Distinct())
             {
                 if (!waysById.TryGetValue(wayId, out var member)) continue;
-                var geometry = member.Nodes.Where(nodes.ContainsKey).Select(nodeId => projection.Project(nodes[nodeId]))
+                var geometry = member.Nodes.Where(nodeId => nodes.ContainsKey(nodeId) && RegionId.FromGeo(nodes[nodeId]) == area.Region).Select(nodeId => projection.Project(nodes[nodeId]))
                     .Where(position => area.Bounds.Contains(position.X, position.Y)).Select(position => new GeometryPoint(position.X, position.Y, position.Z)).ToArray();
                 if (geometry.Length < 2) continue;
                 var properties = relation.Tags.Where(pair => KeepProperty(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -253,6 +254,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     {
         if (tags.GetValueOrDefault("amenity") == "fuel") return "gas";
         if (!tags.TryGetValue("shop", out var shop)) return null;
+        if (shop is "furniture" or "interior_decoration" or "bed" or "carpet") return "furniture";
         if (shop is "clothes" or "fashion" or "shoes" or "outdoor") return "clothing";
         if (shop is "supermarket" or "grocery" or "bakery" or "butcher" or "greengrocer" or "deli") return "food";
         if (shop == "convenience") return "convenience";

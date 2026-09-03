@@ -12,7 +12,14 @@ async function connect(label) {
   const socket = new WebSocket(`${socketUrl}?session=${encodeURIComponent(setup.sessionToken)}`);
   const messages = [], waiters = [];
   socket.addEventListener('message', event => { const message = JSON.parse(event.data); messages.push(message);const messageIndex=messages.length-1; for (const waiter of [...waiters]) if(waiter.predicate(message,messageIndex)) { waiter.resolve(message); waiters.splice(waiters.indexOf(waiter), 1); } });
-  const waitFor = (predicate, timeoutMs = 10000, afterIndex = -1) => new Promise((resolve, reject) => { const existing = messages.find((message,index)=>index>afterIndex&&predicate(message,index)); if (existing) return resolve(existing); const waiter = { predicate:(message,index)=>index>afterIndex&&predicate(message,index), resolve }; waiters.push(waiter); setTimeout(() => { const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1); reject(new Error(`Timed out waiting for ${username}. Received: ${messages.map(message => message.type).join(', ')}`)); }, timeoutMs); });
+  const waitFor = (predicate, timeoutMs = 10000, afterIndex = -1) => new Promise((resolve, reject) => {
+    const existing = messages.find((message,index)=>index>afterIndex&&predicate(message,index));
+    if (existing) return resolve(existing);
+    let timer;
+    const waiter = { predicate:(message,index)=>index>afterIndex&&predicate(message,index), resolve:message=>{clearTimeout(timer);resolve(message);} };
+    waiters.push(waiter);
+    timer=setTimeout(() => { const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1); reject(new Error(`Timed out waiting for ${username}. Received: ${messages.map(message => message.type).join(', ')}`)); }, timeoutMs);
+  });
   return { socket, waitFor, messageCount:()=>messages.length, username, sessionToken: setup.sessionToken };
 }
 
@@ -20,7 +27,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 15) throw new Error(`Expected protocol 15, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 16) throw new Error(`Expected protocol 16, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
@@ -32,7 +39,9 @@ try {
   if (seenByA.player.position.x !== seenByB.player.position.x || seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative movement did not synchronize.');
   if (seenByA.player.stamina >= playerA.stamina) throw new Error('Running did not drain stamina.');
   let path = null;
-  const pathOffsets = [[8, 0], [-8, 0], [0, 8], [0, -8]];
+  const playerArea=welcomeA.snapshot.loadedAreas.find(area=>playerA.position.x>=area.minimumX&&playerA.position.x<=area.maximumX&&playerA.position.y>=area.minimumY&&playerA.position.y<=area.maximumY);
+  if(!playerArea)throw new Error(`The starting player (${playerA.position.x}, ${playerA.position.y}) was not inside a loaded area: ${JSON.stringify(welcomeA.snapshot.loadedAreas)}.`);
+  const pathOffsets = [[8, 0], [-8, 0], [0, 8], [0, -8]].filter(([offsetX,offsetY])=>playerA.position.x+offsetX>=playerArea.minimumX&&playerA.position.x+offsetX<=playerArea.maximumX&&playerA.position.y+offsetY>=playerArea.minimumY&&playerA.position.y+offsetY<=playerArea.maximumY);
   for (let index = 0; index < pathOffsets.length && !path; index++) {
     const sequence = 20 + index, [offsetX, offsetY] = pathOffsets[index];
     first.socket.send(JSON.stringify({ type: 'pathRequest', x: seenByA.player.position.x + offsetX, y: seenByA.player.position.y + offsetY, sequence }));
@@ -97,12 +106,17 @@ try {
   await first.waitFor(message=>message.type==='playerTeleported'&&message.player.id===welcomeA.playerId&&Math.hypot(message.player.position.x-homeBase.position.x,message.player.position.y-homeBase.position.y)<100);
   first.socket.send(JSON.stringify({type:'enterDungeon',doorId:homeBase.doorId}));
   const home=await first.waitFor(message=>message.type==='dungeonEntered'&&message.dungeon?.isHome);
-  if((home.dungeon.actors||[]).length||!home.dungeon.furnishings?.some(item=>item.properties?.objectType==='bed'))throw new Error('Private base was not generated as a safe furnished home.');
-  first.socket.send(JSON.stringify({type:'exitDungeon'}));await first.waitFor(message=>message.type==='dungeonExited');
+  if((home.dungeon.actors||[]).length||!home.dungeon.furnishings?.some(item=>item.properties?.objectType==='bed')||!home.dungeon.furnishings?.some(item=>item.properties?.objectType==='wardrobe'))throw new Error('Private base was not generated as a safe furnished home.');
+  const chair=home.dungeon.furnishings.find(item=>item.properties?.objectType==='diningChair');
+  if(!chair)throw new Error('Home did not include movable starter furniture.');
+  let after=first.messageCount()-1;first.socket.send(JSON.stringify({type:'rotateFurniture',furnitureId:chair.id}));const rotated=await first.waitFor(message=>message.type==='homeUpdated'&&message.dungeon?.furnishings?.some(item=>item.id===chair.id&&item.properties?.rotationDegrees==='90'),10000,after);
+  after=first.messageCount()-1;first.socket.send(JSON.stringify({type:'storeFurniture',furnitureId:chair.id}));const stored=await first.waitFor(message=>message.type==='homeUpdated'&&message.privateState?.homeStorage?.some(item=>item.id===chair.id),10000,after);
+  after=first.messageCount()-1;first.socket.send(JSON.stringify({type:'placeFurniture',furnitureId:chair.id,x:chair.position.x,y:chair.position.y,rotationDegrees:90}));await first.waitFor(message=>message.type==='homeUpdated'&&!message.privateState?.homeStorage?.some(item=>item.id===chair.id),10000,after);
+  first.socket.send(JSON.stringify({type:'exitDungeon'}));const outdoors=await first.waitFor(message=>message.type==='dungeonExited');if(outdoors.privateState?.homeStorage!=null)throw new Error('Home storage leaked outside Home.');
   first.socket.send(JSON.stringify({ type: 'say', message: 'Hello from the smoke test' }));
   const [chatA, chatB] = await Promise.all([first.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId), second.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId)]);
   if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== first.username) throw new Error('Chat did not synchronize.');
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
-  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, oneCentGodModeBasePurchase:true, safeFurnishedHome:true, actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true, equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, oneCentGodModeBasePurchase:true, safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true, equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
 } finally { first.socket.close(); second.socket.close(); }

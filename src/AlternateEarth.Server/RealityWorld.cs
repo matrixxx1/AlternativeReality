@@ -144,6 +144,7 @@ public sealed partial class RealityWorld
             }
             _baseBuildings[accountId] = baseBuilding;
             var baseEntity = _baseEntities[baseBuilding];
+            await EnsureHomeFurnitureAsync(accountId, baseEntity, cancellationToken);
             var homeId = $"home:{accountId}:{baseBuilding}";
             var home = _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, baseEntity));
             SetBaseReturnPosition(playerId, baseBuilding);
@@ -154,15 +155,19 @@ public sealed partial class RealityWorld
 
     private WorldPosition RandomOutdoorSpawn(string characterId)
     {
-        var bounds = _loadedBounds ?? Configuration.Area.Bounds;
+        var loadedAreas = _loadedAreas.Values.ToArray();
+        if (loadedAreas.Length == 0) loadedAreas = [Configuration.Area.Bounds];
         var random = new Random(StableInt($"spawn:{Configuration.Seed}:{characterId}"));
         for (var attempt = 0; attempt < 48; attempt++)
         {
+            var bounds = loadedAreas[random.Next(loadedAreas.Length)];
+            var marginX = Math.Min(12, Math.Max(0, (bounds.MaximumX - bounds.MinimumX) / 4));
+            var marginY = Math.Min(12, Math.Max(0, (bounds.MaximumY - bounds.MinimumY) / 4));
             var candidate = new WorldPosition(Configuration.Area.Region,
-                bounds.MinimumX + 12 + random.NextDouble() * Math.Max(1, bounds.MaximumX - bounds.MinimumX - 24),
-                bounds.MinimumY + 12 + random.NextDouble() * Math.Max(1, bounds.MaximumY - bounds.MinimumY - 24));
+                bounds.MinimumX + marginX + random.NextDouble() * Math.Max(1, bounds.MaximumX - bounds.MinimumX - marginX * 2),
+                bounds.MinimumY + marginY + random.NextDouble() * Math.Max(1, bounds.MaximumY - bounds.MinimumY - marginY * 2));
             var safe = Navigation.FindNearestWalkable(candidate);
-            if (!Navigation.IsBlocked(safe.X, safe.Y) && Navigation.TerrainAt(safe.X, safe.Y) != TerrainType.DeepWater) return safe;
+            if (loadedAreas.Any(area => area.Contains(safe.X, safe.Y)) && !Navigation.IsBlocked(safe.X, safe.Y) && Navigation.TerrainAt(safe.X, safe.Y) != TerrainType.DeepWater) return safe;
         }
         return Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
     }
@@ -558,8 +563,8 @@ public sealed partial class RealityWorld
             {
                 var offers = BaseMerchantOffers(actor);
                 var offer = offers[_actorRandom.Next(offers.Length)];
-                var good = _itemConfigurations[offer.ItemType];
-                return $"For sale! {good.DisplayName} for ${offer.UnitPriceCents / 100.0:F2} today. Friends pay less!";
+                var displayName = offer.DisplayName ?? (_itemConfigurations.TryGetValue(offer.ItemType, out var good) ? good.DisplayName : offer.ItemType);
+                return $"For sale! {displayName} for ${offer.UnitPriceCents / 100.0:F2} today. Friends pay less!";
             }
             var jokes = new[]
             {

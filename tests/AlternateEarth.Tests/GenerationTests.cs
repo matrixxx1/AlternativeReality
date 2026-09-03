@@ -97,4 +97,36 @@ public sealed class GenerationTests
         Assert.Equal("gas", merchant.Properties["merchantCategory"]);
         Assert.Contains("Test Fuel", merchant.Properties["name"]);
     }
+
+    [Fact]
+    public async Task OverpassImporterIgnoresRelationNodesOutsideProjectionRegion()
+    {
+        const string response = """
+            {"elements":[
+              {"type":"node","id":1,"lat":45.5000,"lon":-122.5000},
+              {"type":"node","id":2,"lat":46.1000,"lon":-122.5000},
+              {"type":"node","id":3,"lat":45.5002,"lon":-122.5002},
+              {"type":"way","id":10,"nodes":[1,2,3],"tags":{"highway":"residential","name":"Safe Road"}}
+            ]}
+            """;
+        var directory = Path.Combine(Path.GetTempPath(), $"alternative-reality-overpass-{Guid.NewGuid():N}");
+        try
+        {
+            using var client = new HttpClient(new StaticJsonHandler(response)) { BaseAddress = new Uri("https://example.test/") };
+            var provider = new OverpassGeographicProvider(client, directory, new FlatElevationProvider());
+
+            var dataset = await provider.GetAreaAsync(new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+
+            var road = Assert.Single(dataset.Features);
+            Assert.Equal(EntityKind.Road, road.Kind);
+            Assert.Equal(2, road.Geometry.Count);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    private sealed class StaticJsonHandler(string json) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+    }
 }

@@ -56,6 +56,8 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, string> _playerAccounts = new();
     private readonly ConcurrentDictionary<string, string> _baseBuildings = new();
     private readonly ConcurrentDictionary<(string Player, string Area), byte> _revealedWorldAreas = new();
+    private readonly ConcurrentDictionary<string, List<CanonicalEntity>> _homeFurniture = new();
+    private readonly SemaphoreSlim _homeFurnitureLock = new(1, 1);
 
     public PlayerPrivateState GetPrivateState(string playerId)
     {
@@ -71,11 +73,18 @@ public sealed partial class RealityWorld
         if (_playerAccounts.TryGetValue(playerId, out var accountId) && _baseBuildings.TryGetValue(accountId, out var buildingId) && _baseEntities.TryGetValue(buildingId, out var building))
         {
             var door = _baseEntities.Values.FirstOrDefault(entity => entity.Kind == EntityKind.Door && entity.Properties.GetValueOrDefault("buildingId") == buildingId);
-            if (door is not null) baseState = new BaseState(buildingId, door.Id, door.Position, player?.Name ?? "Explorer");
+            if (door is not null)
+            {
+                var squareFeet = BuildingSquareFeet(building);
+                baseState = new BaseState(buildingId, door.Id, door.Position, player?.Name ?? "Explorer", squareFeet, CalculateBuildingPriceCents(building));
+            }
         }
         var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration);
         var revealedAreas = _revealedWorldAreas.Keys.Where(key => key.Player == playerId).Select(key => key.Area).OrderBy(key => key).ToArray();
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas);
+        IReadOnlyList<CanonicalEntity>? homeStorage = null;
+        if (dungeon?.IsHome == true && _playerAccounts.TryGetValue(playerId, out var homeAccount) && _homeFurniture.TryGetValue(homeAccount, out var furniture))
+            homeStorage = furniture.Where(IsStoredFurniture).ToArray();
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage);
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
@@ -267,7 +276,7 @@ public sealed partial class RealityWorld
         var buildingId = door.Properties.GetValueOrDefault("buildingId") ?? throw new InvalidOperationException("The door has no building.");
         var building = _baseEntities.GetValueOrDefault(buildingId) ?? throw new InvalidOperationException("That building is unavailable.");
         if (_baseBuildings.GetValueOrDefault(accountId) == buildingId) throw new InvalidOperationException("This building is already your base.");
-        var price = player.GodMode ? GodModeBasePurchasePriceCents : BasePurchasePriceCents;
+        var price = player.GodMode ? GodModeBasePurchasePriceCents : CalculateBuildingPriceCents(building);
         if (player.WalletCents < price) throw new InvalidOperationException($"This base costs ${price / 100m:N2}; you do not have enough money.");
 
         await _basePurchaseLock.WaitAsync(cancellationToken);
@@ -276,6 +285,7 @@ public sealed partial class RealityWorld
             var owner = await _store.LoadBaseOwnerAsync(Configuration.Id, buildingId, cancellationToken);
             if (owner is not null && owner != accountId) throw new InvalidOperationException("That building is already another player's base.");
             await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, buildingId, building.Position, cancellationToken);
+            await MoveFurnitureToNewBaseAsync(accountId, building, cancellationToken);
             _baseBuildings[accountId] = buildingId;
             var homeId = $"home:{accountId}:{buildingId}";
             _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
@@ -309,7 +319,9 @@ public sealed partial class RealityWorld
         var maximumStep = request.MaximumDistanceMeters is > 0 and < double.MaxValue ? request.MaximumDistanceMeters.Value : double.MaxValue;
         var step = Math.Min(speed * elapsed, maximumStep);
         var next = player.Position with { X = Math.Clamp(player.Position.X + dx * step, .5, dungeon.Width - .5), Y = Math.Clamp(player.Position.Y + dy * step, .5, dungeon.Height - .5), Z = 0 };
-        var blocked = dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, next, wall)); if (blocked) next = player.Position;
+        var blocked = dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, next, wall)) ||
+            (dungeon.Furnishings?.Any(item => item.Properties.GetValueOrDefault("objectType") != "rug" && FurnitureContains(item, next, .32)) ?? false);
+        if (blocked) next = player.Position;
         var distance = player.Position.Distance2D(next);
         var dirtBikeGas = player.DirtBikeGasGallons;
         var motorcycleGas = player.MotorcycleGasGallons;
@@ -365,13 +377,7 @@ public sealed partial class RealityWorld
     }
 
     private DungeonState GenerateHome(string id, CanonicalEntity building)
-    {
-        var width=Math.Clamp(building.Geometry.Max(p=>p.X)-building.Geometry.Min(p=>p.X),12,60);var height=Math.Clamp(building.Geometry.Max(p=>p.Y)-building.Geometry.Min(p=>p.Y),12,60);var region=building.Position.Region;
-        var walls=new[]{new DungeonWall(0,0,width,0),new DungeonWall(width,0,width,height),new DungeonWall(width,height,0,height),new DungeonWall(0,height,0,0)};
-        CanonicalEntity Furnishing(string key,string type,double x,double y)=>new($"{id}:{key}",EntityKind.PlayerStructure,new WorldPosition(region,x,y),Array.Empty<GeometryPoint>(),new Dictionary<string,string>{{"objectType",type}});
-        var furnishings=new[]{Furnishing("fireplace","fireplace",width*.5,height-1.2),Furnishing("bed","bed",2.2,height-2.5),Furnishing("table","table",width*.58,height*.48),Furnishing("chair1","chair",width*.58-1.4,height*.48),Furnishing("chair2","chair",width*.58+1.4,height*.48)};
-        return new DungeonState(id,building.Id,width,height,new[]{new DungeonRoom(0,0,width,height)},walls,new WorldPosition(region,2,2),Array.Empty<ActorState>(),Array.Empty<TreasureChestState>(),Array.Empty<string>(),true,furnishings);
-    }
+        => BuildHome(id, building);
 
     public async Task<PlayerState> RestAtBedAsync(string playerId,string bedId,CancellationToken cancellationToken=default)
     {
@@ -403,6 +409,10 @@ public sealed partial class RealityWorld
                 _revealedWorldAreas[(playerId, areaKey)] = 0;
                 await _store.SaveWorldMapDiscoveryAsync(Configuration.Id, playerId, areaKey, cancellationToken);
             }
+            else if (FurnitureCatalog.TryParse(line.ItemType, out _, out _, out _))
+            {
+                for (var count = 0; count < line.Quantity; count++) await AddPurchasedFurnitureAsync(playerId, line.ItemType, cancellationToken);
+            }
             else AddInventory(playerId, line.ItemType, line.Quantity);
         }
         var updated = player with { WalletCents = player.WalletCents - total, Version = player.Version + 1 };
@@ -417,6 +427,8 @@ public sealed partial class RealityWorld
         var baseOffers = BaseMerchantOffers(merchant, playerId); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
         var offers = baseOffers.Select(offer =>
         {
+            if (FurnitureCatalog.TryParse(offer.ItemType, out var furniture, out _, out _))
+                return offer with { UnitPriceCents = (long)Math.Clamp(Math.Round(offer.UnitPriceCents * factor), furniture.MinimumPriceCents, furniture.MaximumPriceCents) };
             var range = _itemConfigurations[offer.ItemType];
             return offer with { UnitPriceCents = (long)Math.Clamp(Math.Round(offer.UnitPriceCents * factor), range.MinimumPriceCents, range.MaximumPriceCents) };
         }).ToArray();
@@ -426,6 +438,16 @@ public sealed partial class RealityWorld
     private MerchantOffer[] BaseMerchantOffers(ActorState merchant, string? playerId = null)
     {
         var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}"));
+        if (merchant.MerchantCategory == "furniture")
+        {
+            var furnitureOffers = FurnitureCatalog.All.OrderBy(_ => random.Next()).Take(random.Next(10, 19)).Select(item => FurnitureCatalog.CreateOffer(item, random)).ToList();
+            if (playerId is not null && merchant.LocationId == "outdoor" && !_revealedWorldAreas.ContainsKey((playerId, AreaKeyFor(merchant.Position.X, merchant.Position.Y))))
+            {
+                var map = _itemConfigurations["areaMap"];
+                furnitureOffers.Add(new MerchantOffer(map.ItemType, 1, random.NextInt64(map.MinimumPriceCents, map.MaximumPriceCents + 1), map.DisplayName, "map", new Dictionary<string, string> { ["description"] = map.Effect }));
+            }
+            return furnitureOffers.ToArray();
+        }
         var allowed = merchant.MerchantCategory switch
         {
             "gas" => new HashSet<string>(["gallonOfGas"], StringComparer.OrdinalIgnoreCase),
@@ -437,7 +459,7 @@ public sealed partial class RealityWorld
         var pool = _itemConfigurations.Values.Where(item => item.ForSale && item.ItemType != "areaMap" && (allowed is null || allowed.Contains(item.ItemType))).ToArray();
         var selected = pool.OrderBy(_ => random.Next()).Take(Math.Min(pool.Length, allowed is null ? random.Next(3, 7) : Math.Max(1, pool.Length))).ToList();
         if (playerId is not null && merchant.LocationId == "outdoor" && !_revealedWorldAreas.ContainsKey((playerId, AreaKeyFor(merchant.Position.X, merchant.Position.Y)))) selected.Add(_itemConfigurations["areaMap"]);
-        return selected.Select(item => new MerchantOffer(item.ItemType, item.Single ? 1 : random.Next(3, 31), random.NextInt64(item.MinimumPriceCents, item.MaximumPriceCents + 1))).ToArray();
+        return selected.Select(item => new MerchantOffer(item.ItemType, item.Single ? 1 : random.Next(3, 31), random.NextInt64(item.MinimumPriceCents, item.MaximumPriceCents + 1), item.DisplayName, item.ItemType, new Dictionary<string, string> { ["description"] = item.Effect })).ToArray();
     }
 
     private static string DisplayItem(string itemType) => itemType switch

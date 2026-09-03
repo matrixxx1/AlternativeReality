@@ -120,7 +120,13 @@ public sealed record MovementConfiguration(
     IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph,
     IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement);
-public sealed record MerchantOffer(string ItemType, int Quantity, long UnitPriceCents);
+public sealed record MerchantOffer(
+    string ItemType,
+    int Quantity,
+    long UnitPriceCents,
+    string? DisplayName = null,
+    string? ImageKey = null,
+    IReadOnlyDictionary<string, string>? Properties = null);
 public sealed record TradeQuote(string MerchantId, string MerchantName, double FriendRating, IReadOnlyList<MerchantOffer> Offers);
 public sealed record PurchaseLine(string ItemType, int Quantity);
 public sealed record RelationshipState(string PlayerId, string ActorId, double FriendRating);
@@ -134,7 +140,13 @@ public sealed record DungeonState(
     WorldPosition Exit, IReadOnlyList<ActorState> Actors,
     IReadOnlyList<TreasureChestState> Chests, IReadOnlyList<string> RevealedCells,
     bool IsHome = false, IReadOnlyList<CanonicalEntity>? Furnishings = null);
-public sealed record BaseState(string BuildingId, string DoorId, WorldPosition Position, string OwnerName);
+public sealed record BaseState(
+    string BuildingId,
+    string DoorId,
+    WorldPosition Position,
+    string OwnerName,
+    double SquareFeet = 0,
+    long PurchasePriceCents = 35_000_000);
 public sealed record PlayerPrivateState(
     InventoryState Inventory,
     DungeonState? Dungeon,
@@ -145,7 +157,8 @@ public sealed record PlayerPrivateState(
     long BasePurchasePriceCents = 35_000_000,
     long GodModeBasePurchasePriceCents = 1,
     ServerConfigurationState? ServerConfiguration = null,
-    IReadOnlyList<string>? RevealedWorldAreas = null);
+    IReadOnlyList<string>? RevealedWorldAreas = null,
+    IReadOnlyList<CanonicalEntity>? HomeStorage = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(

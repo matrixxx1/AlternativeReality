@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v15
+# Renderer-neutral protocol v16
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -14,6 +14,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, and current location; dungeon session state is fresh on entry and discarded on exit |
+| `moveFurniture`, `placeFurniture`, `rotateFurniture`, `storeFurniture` | furniture instance and requested logical Home position/action | requires the owner's Home; validates walls, doors, exit clearance, other furniture, rotation, and storage rules before persisting |
 | `purchaseBase` | logical building door ID | validates proximity, account ownership, price, and wallet; changes the account-wide base |
 | `attack` | target ID plus the client's current weapon hint | ignores spoofed weapon strength and uses the server-persisted equipped weapon; validates ownership, ammo, range, accuracy, damage, death, fallback, and relationship changes |
 | `requestTrade`, `confirmTrade`, `consumeItem` | merchant/item intent | validates proximity, categorized store stock, wallet, effects, gasoline, and persistent current-block map discovery |
@@ -41,6 +42,7 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | `tradeQuote`, `tradeCompleted`, `basePurchased`, `combatEvent`, `chestOpened`, `lootCollected` | authoritative gameplay outcomes |
 | `worldExpanded` | merged snapshot after another local geographic cell loads |
 | `taskStatus` | names server work that may temporarily delay movement or rendering |
+| `homeUpdated` | authoritative Home furnishings and private Home-storage state after placement, movement, rotation, or storage |
 | `playerFell`, `playerDied` | authoritative damage, death, and safe respawn outcomes |
 | `worldRebuilt` | regenerated base snapshot and safe positions after a God Mode refresh |
 | `playerTeleported` | authoritative instant relocation visible to every connected client |

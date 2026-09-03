@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=21">
+  <link rel="stylesheet" href="styles.css?v=22">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -96,9 +96,14 @@
     </div>
   </section>
   <section id="characterPanel" class="panel character-panel" hidden>
-    <strong>Home character switcher</strong>
+    <div class="window-header"><strong>Wardrobe · Characters</strong><button id="closeCharactersButton" type="button">Close</button></div>
     <div id="characterList"></div>
     <form id="characterForm"><input id="characterName" minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" placeholder="New character" required><button type="submit">Add</button></form>
+  </section>
+  <section id="homeStoragePanel" class="panel home-storage" hidden>
+    <div class="window-header"><strong>Home storage</strong><span id="homeStorageCount">0 items</span></div>
+    <small>Stored furniture is available only inside your Home. Choose an item, then drag it onto an open floor position.</small>
+    <div id="homeStorageItems" class="home-storage-items"></div>
   </section>
   <section id="chatHistory" class="panel chat-history" hidden>
     <strong>Recent chat</strong>
@@ -115,6 +120,10 @@
     <button id="teleportButton" type="button" hidden>Teleport here</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
     <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
+    <button id="useFurnitureButton" type="button" hidden>Use item</button>
+    <button id="moveFurnitureButton" type="button" hidden>Move item</button>
+    <button id="rotateFurnitureButton" type="button" hidden>Rotate 90°</button>
+    <button id="storeFurnitureButton" type="button" hidden>Place in Home storage</button>
   </section>
   <section id="tradeWindow" class="panel trade-window" hidden>
     <h2 id="tradeTitle">Merchant</h2>
@@ -159,6 +168,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=39"></script>
+  <script src="app.js?v=40"></script>
 </body>
 </html>

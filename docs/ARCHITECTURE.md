@@ -94,6 +94,8 @@ Provider data remains descriptive—road way, building polygon/address, water fe
 
 Road metadata produces separate canonical road and sidewalk traversal bands. Land use and natural polygons become grass, forest, sand, mud, or pavement. Every building receives a deterministic logical door facing the nearest available sidewalk, falling back to a road. Closed water polygons use a three-meter shallow shoreline band and a deep interior.
 
+Home interiors derive their meter dimensions from the canonical building footprint. Logical furniture instances contain type, dimensions, color/material, pattern, rotation, position, and storage state; no sprite or mesh name is authoritative. The server owns placement/collision rules and SQLite persistence, while the browser draws both world furniture and matching catalog/inventory thumbnails. Furniture-store detection uses OpenStreetMap shop tags but falls back cleanly when that data is absent.
+
 `IWeatherProvider` keeps weather acquisition separate from simulation. The current Open-Meteo adapter samples the reality location, stores one canonical `WeatherState`, refreshes it hourly, and broadcasts changes. Sunrise, sunset, moon phase, and moon illumination drive client-side ambient presentation; clients render rain, snow, or darkness without becoming authoritative for weather.
 
 ## Deterministic generation and delta persistence

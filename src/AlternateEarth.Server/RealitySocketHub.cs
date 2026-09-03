@@ -141,6 +141,22 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "playerUpdated", player = rested }, null, cancellationToken);
                         await connection.SendAsync(new { type = "rested", player = rested, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "moveFurniture":
+                        var movedFurniture = await _world.MoveFurnitureAsync(characterId, root.Deserialize<MoveFurnitureRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "homeUpdated", dungeon = movedFurniture, privateState = _world.GetPrivateState(characterId), message = "Furniture moved." }, cancellationToken);
+                        break;
+                    case "placeFurniture":
+                        var placedFurniture = await _world.PlaceFurnitureAsync(characterId, root.Deserialize<PlaceFurnitureRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "homeUpdated", dungeon = placedFurniture, privateState = _world.GetPrivateState(characterId), message = "Furniture placed." }, cancellationToken);
+                        break;
+                    case "rotateFurniture":
+                        var rotatedFurniture = await _world.RotateFurnitureAsync(characterId, root.Deserialize<RotateFurnitureRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "homeUpdated", dungeon = rotatedFurniture, privateState = _world.GetPrivateState(characterId), message = "Furniture rotated 90 degrees." }, cancellationToken);
+                        break;
+                    case "storeFurniture":
+                        var storedFurniture = await _world.StoreFurnitureAsync(characterId, root.Deserialize<StoreFurnitureRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "homeUpdated", dungeon = storedFurniture, privateState = _world.GetPrivateState(characterId), message = "Furniture moved to Home storage." }, cancellationToken);
+                        break;
                     case "purchaseBase":
                         var basePurchase = await _world.PurchaseBaseAsync(characterId, root.Deserialize<PurchaseBaseRequest>(SharedJson.Options)!, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = basePurchase.Player }, null, cancellationToken);
@@ -237,7 +253,7 @@ public sealed class RealitySocketHub
                         break;
                 }
             }
-            catch (Exception exception) when (exception is InvalidOperationException or JsonException)
+            catch (Exception exception) when (exception is InvalidOperationException or JsonException or HttpRequestException)
             {
                 await connection.SendAsync(new { type = "error", message = exception.Message }, cancellationToken);
             }

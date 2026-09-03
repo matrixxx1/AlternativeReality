@@ -62,17 +62,20 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .carried-title { display:block; color:#fff0bd; font-size:13px; text-align:center; }
 .backpack small { display:block; min-height:30px; margin:7px 0; color:#e0c99e; line-height:1.25; text-align:center; }
 .inventory-items { margin-top: 8px; display: flex; flex-wrap: wrap; align-content:flex-start; gap: 5px; color: #e8e0bd; }
-.inventory-item { background: rgba(7,15,11,.62); border: 1px solid #a47b43; padding: 5px 7px; border-radius: 3px; }
+.inventory-item { display:flex; align-items:center; gap:6px; background: rgba(7,15,11,.62); border: 1px solid #a47b43; padding: 5px 7px; border-radius: 3px; }
+.item-art { width:42px; height:42px; flex:0 0 42px; image-rendering:pixelated; border:1px solid rgba(238,205,108,.35); border-radius:3px; background:#18241e; }
 .inventory-item.weapon-item { cursor:grab; border-color:#d4b45c; color:#fff1a7; }
 .inventory-item.weapon-item:active { cursor:grabbing; }
 .inventory-item button { border: 0; padding: 0; background: transparent; color: #9ce5f0; }
-.character-panel{left:14px;top:155px;width:285px;padding:10px;font-size:12px}.character-row{display:flex;align-items:center;gap:6px;margin-top:6px}.character-row span{flex:1}.character-row button{padding:4px 7px}.character-panel form{display:flex;gap:5px;margin-top:9px}.character-panel input{min-width:0;flex:1;color:#fff8d8;background:#14231c;border:1px solid #8d7138;padding:6px}
+.character-panel{z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);width:360px;padding:12px;font-size:12px}.window-header{display:flex;align-items:center;justify-content:space-between;gap:8px}.window-header button{padding:3px 7px}.character-row{display:flex;align-items:center;gap:6px;margin-top:6px}.character-row span{flex:1}.character-row button{padding:4px 7px}.character-panel form{display:flex;gap:5px;margin-top:9px}.character-panel input{min-width:0;flex:1;color:#fff8d8;background:#14231c;border:1px solid #8d7138;padding:6px}
+.home-storage{left:14px;top:155px;width:300px;max-height:calc(100vh - 270px);overflow:auto;padding:10px;font-size:12px}.home-storage small{display:block;margin:7px 0;color:#d7cfad;line-height:1.35}.home-storage-items{display:grid;grid-template-columns:1fr 1fr;gap:7px}.home-storage-item{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:7px;padding:6px;text-align:left;background:rgba(8,16,12,.66)}.home-storage-item span{font-size:10px;line-height:1.25}.home-storage-empty{grid-column:1/-1;color:#aaa98f;padding:10px;text-align:center}
 .action-menu { min-width: 180px; padding: 10px; font-size: 12px; }
 .action-menu div { color: #aeb9ab; margin-top: 7px; }
 .action-menu button { width: 100%; margin-top: 8px; }
-.trade-window { z-index: 8; left: 50%; top: 50%; transform: translate(-50%,-50%); width: min(520px,calc(100% - 30px)); padding: 15px; }
+.trade-window { z-index: 8; left: 50%; top: 50%; transform: translate(-50%,-50%); width: min(680px,calc(100% - 30px)); max-height:85vh; overflow:auto; padding: 15px; }
 .trade-window h2 { margin: 0 0 5px; }
-.trade-offer { display: grid; grid-template-columns: 1fr auto 75px; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.1); }
+.trade-offer { display: grid; grid-template-columns: 52px minmax(140px,1fr) auto 75px; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.1); }
+.trade-offer-name strong,.trade-offer-name small{display:block}.trade-offer-name small{margin-top:2px;color:#c7c3a8;font-size:10px;text-transform:capitalize}
 .trade-offer input { width: 70px; padding: 5px; color: #fff; background: #14231c; border: 1px solid #a98d4f; }
 .trade-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 .server-config-window { z-index:12; left:50%; top:50%; transform:translate(-50%,-50%); width:min(1180px,calc(100% - 30px)); max-height:85vh; overflow:auto; padding:16px; }
@@ -115,6 +118,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
   .chat-form { left: 8px; right: 8px; bottom: 8px; width: auto; min-width: 0; transform: none; }
   .chat-history { right: 8px; bottom: 130px; width: min(360px, calc(100% - 16px)); }
   .inventory-panel { display:block; left:8px; top:115px; width:min(340px,calc(100% - 16px)); max-height:55vh; }
+  .home-storage{left:8px;top:auto;bottom:130px;width:min(300px,calc(100% - 16px));max-height:35vh}
   .setup-coordinates { grid-template-columns:1fr; gap:0; }
 }
 @media (min-width:761px) and (max-width:1050px) { .inventory-panel { left:14px; top:135px; } }
