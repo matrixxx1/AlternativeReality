@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=18">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -66,12 +66,12 @@
       <span class="compass-icon" aria-hidden="true"><b>N</b><i></i></span>
       <span class="gps-button-label">My location</span>
     </button>
-    <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
+    <button id="rebuildButton" type="button" disabled>Reset &amp; rebuild reality</button>
   </section>
   <section class="panel inventory-panel">
     <div class="inventory-header"><strong>Inventory &amp; equipment</strong><button id="toggleInventoryButton" type="button">Hide</button></div>
-    <div id="inventoryContent">
-      <div class="equipment-doll" role="group" aria-label="Equipped clothing">
+    <div id="inventoryContent" class="equipment-layout">
+      <div class="equipment-doll" role="group" aria-label="Equipped clothing and weapon">
         <svg class="person-outline" viewBox="0 0 100 180" aria-hidden="true">
           <circle cx="50" cy="25" r="17"></circle>
           <path d="M35 48 L65 48 L75 105 L62 105 L68 165 M38 105 L32 165 M36 58 L14 108 M64 58 L86 108"></path>
@@ -81,9 +81,14 @@
         <button id="equipmentGloves" class="equipment-slot slot-gloves" type="button" disabled><span>Gloves</span><em>Empty</em></button>
         <button id="equipmentPants" class="equipment-slot slot-pants" type="button" disabled><span>Pants</span><em>Empty</em></button>
         <button id="equipmentShoes" class="equipment-slot slot-shoes" type="button"><span>Shoes</span><em>Empty</em></button>
+        <button id="equipmentWeapon" class="equipment-slot slot-weapon" type="button"><span>Weapon</span><em>Fist</em></button>
       </div>
-      <strong class="carried-title">Carried items</strong>
-      <div id="inventoryItems" class="inventory-items">Empty</div>
+      <div class="backpack" aria-label="Backpack">
+        <div class="backpack-handle" aria-hidden="true"></div>
+        <strong class="carried-title">Backpack</strong>
+        <small>Drag a weapon to the figure’s weapon slot.</small>
+        <div id="inventoryItems" class="inventory-items">Empty</div>
+      </div>
     </div>
   </section>
   <section id="characterPanel" class="panel character-panel" hidden>
@@ -103,9 +108,8 @@
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
-    <button id="throwButton" type="button" hidden>Throw rock</button>
-    <button id="shootButton" type="button" hidden>Shoot slingshot</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
+    <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
   </section>
   <section id="tradeWindow" class="panel trade-window" hidden>
     <h2 id="tradeTitle">Merchant</h2>
@@ -125,7 +129,22 @@
       <button type="submit">Enter reality</button>
     </form>
   </section>
+  <section id="realitySetup" class="account-setup" hidden>
+    <form id="realitySetupForm" class="panel account-card">
+      <div class="eyebrow">ALTERNATIVEREALITY // FIRST SERVER START</div>
+      <h2>Choose this reality's starting location</h2>
+      <p>This selects the real-world geography used when the server creates its world. It does not determine where new players spawn.</p>
+      <button id="useServerGpsButton" type="button">Use this device's location</button>
+      <div class="setup-divider">or enter coordinates</div>
+      <div class="setup-coordinates">
+        <label>Latitude <input id="realityLatitude" type="number" min="-85" max="85" step="any" required placeholder="45.6387"></label>
+        <label>Longitude <input id="realityLongitude" type="number" min="-180" max="180" step="any" required placeholder="-122.6615"></label>
+      </div>
+      <div id="realitySetupError" class="account-error"></div>
+      <button type="submit">Create reality here</button>
+    </form>
+  </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=29"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>

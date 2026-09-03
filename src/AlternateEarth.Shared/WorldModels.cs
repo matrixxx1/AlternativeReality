@@ -87,7 +87,8 @@ public sealed record PlayerState(
     bool MagicRunningShoesOn = false,
     bool HatOn = false,
     double DirtBikeGasGallons = 0,
-    double MotorcycleGasGallons = 0);
+    double MotorcycleGasGallons = 0,
+    string EquippedWeapon = "fist");
 
 public sealed record ActorState(
     string Id,
@@ -128,7 +129,9 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<RelationshipState> Relationships,
     IReadOnlyList<TreasureChestState>? Chests = null,
     IReadOnlyList<LootDropState>? Loot = null,
-    BaseState? Base = null);
+    BaseState? Base = null,
+    long BasePurchasePriceCents = 35_000_000,
+    long GodModeBasePurchasePriceCents = 1);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(

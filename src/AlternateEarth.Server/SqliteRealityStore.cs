@@ -40,6 +40,7 @@ public sealed class SqliteRealityStore
                 FlashlightOn INTEGER NOT NULL DEFAULT 0, LanternOn INTEGER NOT NULL DEFAULT 0, LaserOn INTEGER NOT NULL DEFAULT 0,
                 MagicHikingShoesOn INTEGER NOT NULL DEFAULT 0, MagicRunningShoesOn INTEGER NOT NULL DEFAULT 0, HatOn INTEGER NOT NULL DEFAULT 0,
                 DirtBikeGasGallons REAL NOT NULL DEFAULT 0, MotorcycleGasGallons REAL NOT NULL DEFAULT 0,
+                EquippedWeapon TEXT NOT NULL DEFAULT 'fist',
                 Version INTEGER NOT NULL, UpdatedUtc TEXT NOT NULL,
                 FOREIGN KEY (RealityId) REFERENCES Reality(Id)
             );
@@ -86,6 +87,7 @@ public sealed class SqliteRealityStore
             );
             CREATE TABLE IF NOT EXISTS AccountBases (
                 AccountId TEXT NOT NULL, RealityId TEXT NOT NULL, BuildingId TEXT NOT NULL,
+                RegionLatitude INTEGER, RegionLongitude INTEGER, X REAL, Y REAL,
                 PRIMARY KEY (AccountId, RealityId)
             );
             """;
@@ -106,6 +108,11 @@ public sealed class SqliteRealityStore
         await EnsureColumnAsync(connection, "Characters", "HatOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "DirtBikeGasGallons", "REAL NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "MotorcycleGasGallons", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "EquippedWeapon", "TEXT NOT NULL DEFAULT 'fist'", cancellationToken);
+        await EnsureColumnAsync(connection, "AccountBases", "RegionLatitude", "INTEGER", cancellationToken);
+        await EnsureColumnAsync(connection, "AccountBases", "RegionLongitude", "INTEGER", cancellationToken);
+        await EnsureColumnAsync(connection, "AccountBases", "X", "REAL", cancellationToken);
+        await EnsureColumnAsync(connection, "AccountBases", "Y", "REAL", cancellationToken);
 
         command = connection.CreateCommand();
         command.CommandText = """
@@ -193,7 +200,7 @@ public sealed class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -207,7 +214,8 @@ public sealed class SqliteRealityStore
             FoodProtectedUntilUtc: ReadDate(reader, 13), WaterProtectedUntilUtc: ReadDate(reader, 14),
             LocationId: reader.GetString(15), FlashlightOn: reader.GetInt64(16)!=0, LanternOn: reader.GetInt64(17)!=0, LaserOn: reader.GetInt64(18)!=0,
             MagicHikingShoesOn: reader.GetInt64(19)!=0, MagicRunningShoesOn: reader.GetInt64(20)!=0, HatOn: reader.GetInt64(21)!=0,
-            DirtBikeGasGallons: Math.Clamp(reader.GetDouble(22), 0, 2), MotorcycleGasGallons: Math.Clamp(reader.GetDouble(23), 0, 4));
+            DirtBikeGasGallons: Math.Clamp(reader.GetDouble(22), 0, 2), MotorcycleGasGallons: Math.Clamp(reader.GetDouble(23), 0, 4),
+            EquippedWeapon: reader.IsDBNull(24) ? "fist" : reader.GetString(24));
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default)
@@ -215,8 +223,8 @@ public sealed class SqliteRealityStore
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
                 Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina, Water = excluded.Water,
                 WalletCents = excluded.WalletCents, GodMode = excluded.GodMode,
@@ -224,6 +232,7 @@ public sealed class SqliteRealityStore
                 LocationId = excluded.LocationId, FlashlightOn=excluded.FlashlightOn, LanternOn=excluded.LanternOn, LaserOn=excluded.LaserOn,
                 MagicHikingShoesOn=excluded.MagicHikingShoesOn, MagicRunningShoesOn=excluded.MagicRunningShoesOn, HatOn=excluded.HatOn,
                 DirtBikeGasGallons=excluded.DirtBikeGasGallons, MotorcycleGasGallons=excluded.MotorcycleGasGallons,
+                EquippedWeapon=excluded.EquippedWeapon,
                 Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
@@ -251,6 +260,7 @@ public sealed class SqliteRealityStore
         command.Parameters.AddWithValue("$hat", player.HatOn ? 1 : 0);
         command.Parameters.AddWithValue("$dirtBikeGas", player.DirtBikeGasGallons);
         command.Parameters.AddWithValue("$motorcycleGas", player.MotorcycleGasGallons);
+        command.Parameters.AddWithValue("$equippedWeapon", player.EquippedWeapon);
         command.Parameters.AddWithValue("$version", player.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -263,6 +273,46 @@ public sealed class SqliteRealityStore
         command.CommandText = "DELETE FROM RealityDeltas WHERE RealityId = $reality";
         command.Parameters.AddWithValue("$reality", realityId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task ClearTransientWorldStateAsync(string realityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        foreach (var statement in new[]
+                 {
+                     "DELETE FROM RealityDeltas WHERE RealityId=$reality",
+                     "DELETE FROM PlayerRelationships WHERE RealityId=$reality",
+                     "DELETE FROM DungeonDiscovery WHERE RealityId=$reality",
+                     "DELETE FROM OpenedChests WHERE RealityId=$reality"
+                 })
+        {
+            var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = statement;
+            command.Parameters.AddWithValue("$reality", realityId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task ResetDungeonStateAsync(string realityId, string playerId, string dungeonId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var discovery = connection.CreateCommand(); discovery.Transaction = (SqliteTransaction)transaction;
+        discovery.CommandText = "DELETE FROM DungeonDiscovery WHERE RealityId=$r AND PlayerId=$p AND DungeonId=$d";
+        discovery.Parameters.AddWithValue("$r", realityId); discovery.Parameters.AddWithValue("$p", playerId); discovery.Parameters.AddWithValue("$d", dungeonId);
+        await discovery.ExecuteNonQueryAsync(cancellationToken);
+        var relationships = connection.CreateCommand(); relationships.Transaction = (SqliteTransaction)transaction;
+        relationships.CommandText = "DELETE FROM PlayerRelationships WHERE RealityId=$r AND PlayerId=$p AND ActorId LIKE $prefix";
+        relationships.Parameters.AddWithValue("$r", realityId); relationships.Parameters.AddWithValue("$p", playerId); relationships.Parameters.AddWithValue("$prefix", dungeonId + ":%");
+        await relationships.ExecuteNonQueryAsync(cancellationToken);
+        var chests = connection.CreateCommand(); chests.Transaction = (SqliteTransaction)transaction;
+        chests.CommandText = "DELETE FROM OpenedChests WHERE RealityId=$r AND PlayerId=$p AND ChestId LIKE $prefix";
+        chests.Parameters.AddWithValue("$r", realityId); chests.Parameters.AddWithValue("$p", playerId); chests.Parameters.AddWithValue("$prefix", dungeonId + ":%");
+        await chests.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<InventoryState> LoadInventoryAsync(string playerId, CancellationToken cancellationToken = default)
@@ -366,10 +416,17 @@ public sealed class SqliteRealityStore
     public async Task DeleteAccountCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
     { await using var connection=await OpenAsync(cancellationToken);await using var transaction=await connection.BeginTransactionAsync(cancellationToken);foreach(var sql in new[]{"DELETE FROM Inventories WHERE OwnerId=$c","DELETE FROM PlayerRelationships WHERE PlayerId=$c","DELETE FROM DungeonDiscovery WHERE PlayerId=$c","DELETE FROM Characters WHERE Id=$c","DELETE FROM AccountCharacters WHERE Id=$c AND AccountId=$a"}){var command=connection.CreateCommand();command.Transaction=(SqliteTransaction)transaction;command.CommandText=sql;command.Parameters.AddWithValue("$c",characterId);command.Parameters.AddWithValue("$a",accountId);await command.ExecuteNonQueryAsync(cancellationToken);}await transaction.CommitAsync(cancellationToken); }
 
-    public async Task<string?> LoadBaseBuildingAsync(string accountId, string realityId, CancellationToken cancellationToken = default)
-    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT BuildingId FROM AccountBases WHERE AccountId=$a AND RealityId=$r";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);return (string?)await command.ExecuteScalarAsync(cancellationToken); }
-    public async Task SaveBaseBuildingAsync(string accountId,string realityId,string buildingId,CancellationToken cancellationToken=default)
-    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="INSERT INTO AccountBases (AccountId,RealityId,BuildingId) VALUES ($a,$r,$b) ON CONFLICT(AccountId,RealityId) DO UPDATE SET BuildingId=excluded.BuildingId";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$b",buildingId);await command.ExecuteNonQueryAsync(cancellationToken); }
+    public async Task<bool> IsFirstAccountCharacterAsync(string accountId,string characterId,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT Id=$c FROM AccountCharacters WHERE AccountId=$a ORDER BY CreatedUtc LIMIT 1";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$c",characterId);var result=await command.ExecuteScalarAsync(cancellationToken);return result is not null&&Convert.ToInt64(result)!=0; }
+
+    public async Task<BaseAssignment?> LoadBaseAssignmentAsync(string accountId, string realityId, CancellationToken cancellationToken = default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT BuildingId,RegionLatitude,RegionLongitude,X,Y FROM AccountBases WHERE AccountId=$a AND RealityId=$r";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);if(!await reader.ReadAsync(cancellationToken))return null;WorldPosition? position=reader.IsDBNull(1)||reader.IsDBNull(2)||reader.IsDBNull(3)||reader.IsDBNull(4)?null:new WorldPosition(new RegionId(reader.GetInt32(1),reader.GetInt32(2)),reader.GetDouble(3),reader.GetDouble(4));return new BaseAssignment(reader.GetString(0),position); }
+    public async Task<IReadOnlySet<string>> LoadAssignedBaseBuildingsAsync(string realityId,CancellationToken cancellationToken=default)
+    { var result=new HashSet<string>(StringComparer.Ordinal);await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT BuildingId FROM AccountBases WHERE RealityId=$r";command.Parameters.AddWithValue("$r",realityId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);while(await reader.ReadAsync(cancellationToken))result.Add(reader.GetString(0));return result; }
+    public async Task<string?> LoadBaseOwnerAsync(string realityId,string buildingId,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT AccountId FROM AccountBases WHERE RealityId=$r AND BuildingId=$b LIMIT 1";command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$b",buildingId);return (string?)await command.ExecuteScalarAsync(cancellationToken); }
+    public async Task SaveBaseBuildingAsync(string accountId,string realityId,string buildingId,WorldPosition position,CancellationToken cancellationToken=default)
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="INSERT INTO AccountBases (AccountId,RealityId,BuildingId,RegionLatitude,RegionLongitude,X,Y) VALUES ($a,$r,$b,$lat,$lon,$x,$y) ON CONFLICT(AccountId,RealityId) DO UPDATE SET BuildingId=excluded.BuildingId,RegionLatitude=excluded.RegionLatitude,RegionLongitude=excluded.RegionLongitude,X=excluded.X,Y=excluded.Y";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$b",buildingId);command.Parameters.AddWithValue("$lat",position.Region.LatitudeBand);command.Parameters.AddWithValue("$lon",position.Region.LongitudeBand);command.Parameters.AddWithValue("$x",position.X);command.Parameters.AddWithValue("$y",position.Y);await command.ExecuteNonQueryAsync(cancellationToken); }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken cancellationToken)
     {
@@ -398,3 +455,4 @@ public sealed class SqliteRealityStore
 
 public sealed record AccountRecord(string Id,string Username,string PasswordHash,string PasswordSalt,string SessionTokenHash,string ActiveCharacterId);
 public sealed record AccountCharacter(string Id,string Name);
+public sealed record BaseAssignment(string BuildingId,WorldPosition? Position);

@@ -133,6 +133,11 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "playerUpdated", player = rested }, null, cancellationToken);
                         await connection.SendAsync(new { type = "rested", player = rested, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "purchaseBase":
+                        var basePurchase = await _world.PurchaseBaseAsync(characterId, root.Deserialize<PurchaseBaseRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = basePurchase.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "basePurchased", player = basePurchase.Player, priceCents = basePurchase.PriceCents, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
                     case "requestTrade":
                         var tradeRequest = root.Deserialize<RequestTradeRequest>(SharedJson.Options)!;
                         await connection.SendAsync(new { type = "tradeQuote", quote = _world.RequestTrade(characterId, tradeRequest.MerchantId) }, cancellationToken);
@@ -146,6 +151,13 @@ public sealed class RealitySocketHub
                     case "attack":
                         var attack = await _world.AttackAsync(characterId, root.Deserialize<CombatRequest>(SharedJson.Options)!, cancellationToken);
                         await BroadcastAsync(new { type = "combatEvent", combat = attack.Event }, null, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = attack.Attacker }, null, cancellationToken);
+                        if (attack.TargetPlayer is not null)
+                        {
+                            await BroadcastAsync(new { type = "playerUpdated", player = attack.TargetPlayer }, null, cancellationToken);
+                            if (attack.Event.TargetDied && _clients.TryGetValue(attack.TargetPlayer.Id, out var defeatedConnection))
+                                await defeatedConnection.SendAsync(new { type = "playerDied", reason = attack.Event.Message, player = attack.TargetPlayer, privateState = _world.GetPrivateState(attack.TargetPlayer.Id) }, cancellationToken);
+                        }
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         if (attack.Dungeon is not null) await connection.SendAsync(new { type = "dungeonUpdated", dungeon = attack.Dungeon }, cancellationToken);
                         break;
@@ -168,7 +180,7 @@ public sealed class RealitySocketHub
                     case "rebuildArea":
                         var rebuildRequest = root.Deserialize<RebuildAreaRequest>(SharedJson.Options)!;
                         var rebuilt = await _world.RebuildAsync(characterId, rebuildRequest.GodMode, cancellationToken);
-                        await BroadcastAsync(new { type = "worldRebuilt", snapshot = rebuilt }, null, cancellationToken);
+                        await BroadcastWorldRebuiltAsync(rebuilt, cancellationToken);
                         break;
                     case "teleport":
                         var teleportRequest = root.Deserialize<TeleportRequest>(SharedJson.Options)!;
@@ -229,6 +241,16 @@ public sealed class RealitySocketHub
                 try { await pair.Value.SendAsync(message, cancellationToken); }
                 catch (Exception exception) when (exception is WebSocketException or OperationCanceledException) { }
             });
+        await Task.WhenAll(sends);
+    }
+
+    private async Task BroadcastWorldRebuiltAsync(WorldSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var sends = _clients.Select(async pair =>
+        {
+            try { await pair.Value.SendAsync(new { type = "worldRebuilt", snapshot, privateState = _world.GetPrivateState(pair.Key) }, cancellationToken); }
+            catch (Exception exception) when (exception is WebSocketException or OperationCanceledException) { }
+        });
         await Task.WhenAll(sends);
     }
 

@@ -7,6 +7,8 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
+    public const long BasePurchasePriceCents = 35_000_000;
+    public const long GodModeBasePurchasePriceCents = 1;
     private static readonly (string Item, string Display, int Min, int Max, bool Single)[] MerchantCatalog =
     {
         ("rock", "a rock", 1, 100, false), ("ballBearing", "a ball bearing", 5, 200, false),
@@ -16,8 +18,12 @@ public sealed partial class RealityWorld
         ("flashlight", "a flashlight", 1_000, 5_000, true), ("lantern", "a lantern", 5_000, 10_000, true),
         ("laser", "a laser", 20_000, 40_000, true), ("magicHikingShoes", "magic hiking shoes", 10_000, 40_000, true),
         ("magicRunningShoes", "magic running shoes", 10_000, 40_000, true), ("hat", "a hat", 3_000, 7_500, true),
+        ("slingshot", "a slingshot", 5_000, 15_000, true), ("crossbow", "a crossbow", 30_000, 50_000, true),
+        ("arrow", "an arrow", 5, 500, false), ("pistol", "a pistol", 100_000, 300_000, true),
+        ("rifle", "a rifle", 300_000, 600_000, true), ("bullet", "a bullet", 25, 500, false),
         ("water", "water", 50, 200, false), ("food", "food", 200, 500, false)
     };
+    private static readonly string[] WeaponPowerOrder = ["rifle", "pistol", "crossbow", "slingshot", "rock", "fist"];
     private const double DirtBikeTankGallons = 2;
     private const double MotorcycleTankGallons = 4;
     private readonly ConcurrentDictionary<string, Dictionary<string, int>> _inventories = new();
@@ -71,6 +77,7 @@ public sealed partial class RealityWorld
             MagicHikingShoesOn = hikingShoesOn,
             MagicRunningShoesOn = runningShoesOn,
             HatOn = enabled ? player.HatOn : player.HatOn && InventoryQuantity(playerId, "hat") > 0,
+            EquippedWeapon = enabled ? player.EquippedWeapon : BestUsableWeapon(playerId, player.EquippedWeapon, false),
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken); return updated;
@@ -112,6 +119,14 @@ public sealed partial class RealityWorld
             if (itemType is not null && itemType != "hat") throw new InvalidOperationException("That item cannot be worn as a hat.");
             if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, "hat") <= 0) throw new InvalidOperationException("You need a hat in your inventory.");
             updated = player with { HatOn = itemType == "hat", Version = player.Version + 1 };
+        }
+        else if (slot == "weapon")
+        {
+            itemType ??= "fist";
+            itemType = itemType.ToLowerInvariant();
+            if (!WeaponPowerOrder.Contains(itemType)) throw new InvalidOperationException("That item cannot be equipped as a weapon.");
+            if (!player.GodMode && !OwnsWeapon(playerId, itemType)) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your backpack.");
+            updated = player with { EquippedWeapon = itemType, Version = player.Version + 1 };
         }
         else throw new InvalidOperationException("That equipment slot is not available yet.");
         await SavePlayerAsync(updated, cancellationToken);
@@ -189,12 +204,14 @@ public sealed partial class RealityWorld
         var buildingId = door.Properties.GetValueOrDefault("buildingId") ?? throw new InvalidOperationException("The door has no building.");
         var building = _baseEntities.Values.First(entity => entity.Id == buildingId);
         var ownsBase = _playerAccounts.TryGetValue(playerId, out var accountId) && _baseBuildings.GetValueOrDefault(accountId) == buildingId;
-        var dungeonId = ownsBase ? $"home:{accountId}:{buildingId}" : $"dungeon:{buildingId}";
-        var dungeon = _dungeons.GetOrAdd(dungeonId, _ => ownsBase ? GenerateHome(dungeonId, building) : GenerateDungeon(dungeonId, building));
+        var dungeonId = ownsBase ? $"home:{accountId}:{buildingId}" : $"dungeon:{buildingId}:{playerId}";
+        await ResetDungeonSessionAsync(playerId, dungeonId, cancellationToken);
+        var dungeon = ownsBase ? GenerateHome(dungeonId, building) : GenerateDungeon(dungeonId, building);
+        _dungeons[dungeonId] = dungeon;
         foreach (var actor in dungeon.Actors)
-            _relationships.TryAdd((playerId, actor.Id), actor.FriendRating);
+            _relationships[(playerId, actor.Id)] = actor.FriendRating;
         _returnPositions[playerId] = player.Position;
-        var discovery = dungeon.IsHome ? new HashSet<string>() : await _store.LoadDiscoveryAsync(Configuration.Id, playerId, dungeonId, cancellationToken);
+        var discovery = new HashSet<string>();
         if (!dungeon.IsHome) { RevealDungeonCells(discovery, dungeon.Exit.X, dungeon.Exit.Y); foreach (var cell in discovery) await _store.SaveDiscoveryAsync(Configuration.Id, playerId, dungeonId, cell, cancellationToken); }
         var updated = player with { LocationId = dungeonId, Position = dungeon.Exit, Terrain = TerrainType.Pavement, TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
         await SavePlayerAsync(updated, cancellationToken); return (updated, dungeon with { RevealedCells = discovery.ToArray() });
@@ -203,9 +220,50 @@ public sealed partial class RealityWorld
     public async Task<PlayerState> ExitDungeonAsync(string playerId, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player) || player.LocationId == "outdoor") throw new InvalidOperationException("You are not inside a dungeon.");
+        var dungeonId = player.LocationId;
         var destination = _returnPositions.TryRemove(playerId, out var saved) ? saved : Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         var updated = player with { LocationId = "outdoor", Position = destination, Terrain = Navigation.TerrainAt(destination.X, destination.Y), SpeedMetersPerSecond = 0, Version = player.Version + 1 };
-        await SavePlayerAsync(updated, cancellationToken); return updated;
+        await SavePlayerAsync(updated, cancellationToken);
+        await ResetDungeonSessionAsync(playerId, dungeonId, cancellationToken);
+        return updated;
+    }
+
+    private async Task ResetDungeonSessionAsync(string playerId, string dungeonId, CancellationToken cancellationToken)
+    {
+        _dungeons.TryRemove(dungeonId, out _);
+        foreach (var relationship in _relationships.Keys.Where(key => key.Player == playerId && key.Actor.StartsWith(dungeonId + ":", StringComparison.Ordinal)).ToArray()) _relationships.TryRemove(relationship, out _);
+        foreach (var drop in _loot.Where(pair => pair.Value.LocationId == dungeonId).Select(pair => pair.Key).ToArray()) _loot.TryRemove(drop, out _);
+        foreach (var quote in _tradeQuotes.Keys.Where(key => key.Player == playerId && key.Merchant.StartsWith(dungeonId + ":", StringComparison.Ordinal)).ToArray()) _tradeQuotes.TryRemove(quote, out _);
+        await _store.ResetDungeonStateAsync(Configuration.Id, playerId, dungeonId, cancellationToken);
+    }
+
+    public async Task<(PlayerState Player, long PriceCents)> PurchaseBaseAsync(string playerId, PurchaseBaseRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("A base can only be purchased from outside its door.");
+        if (!_playerAccounts.TryGetValue(playerId, out var accountId)) throw new InvalidOperationException("An authenticated account is required to purchase a base.");
+        var door = _baseEntities.Values.FirstOrDefault(entity => entity.Id == request.DoorId && entity.Kind == EntityKind.Door) ?? throw new InvalidOperationException("That door does not exist.");
+        if (player.Position.Distance2D(door.Position) > 6) throw new InvalidOperationException("Move within 6 meters of the door before purchasing this base.");
+        var buildingId = door.Properties.GetValueOrDefault("buildingId") ?? throw new InvalidOperationException("The door has no building.");
+        var building = _baseEntities.GetValueOrDefault(buildingId) ?? throw new InvalidOperationException("That building is unavailable.");
+        if (_baseBuildings.GetValueOrDefault(accountId) == buildingId) throw new InvalidOperationException("This building is already your base.");
+        var price = player.GodMode ? GodModeBasePurchasePriceCents : BasePurchasePriceCents;
+        if (player.WalletCents < price) throw new InvalidOperationException($"This base costs ${price / 100m:N2}; you do not have enough money.");
+
+        await _basePurchaseLock.WaitAsync(cancellationToken);
+        try
+        {
+            var owner = await _store.LoadBaseOwnerAsync(Configuration.Id, buildingId, cancellationToken);
+            if (owner is not null && owner != accountId) throw new InvalidOperationException("That building is already another player's base.");
+            await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, buildingId, building.Position, cancellationToken);
+            _baseBuildings[accountId] = buildingId;
+            var homeId = $"home:{accountId}:{buildingId}";
+            _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
+            foreach (var linkedPlayer in _playerAccounts.Where(pair => pair.Value == accountId).Select(pair => pair.Key)) SetBaseReturnPosition(linkedPlayer, buildingId);
+            var updated = player with { WalletCents = player.WalletCents - price, Version = player.Version + 1 };
+            await SavePlayerAsync(updated, cancellationToken);
+            return (updated, price);
+        }
+        finally { _basePurchaseLock.Release(); }
     }
 
     private async Task<MovementOutcome> MoveInDungeonAsync(PlayerState player, MoveRequest request, CancellationToken cancellationToken)
@@ -338,22 +396,92 @@ public sealed partial class RealityWorld
         "magicRunningShoes" => "magic running shoes",
         "dirtBike" => "a dirt bike",
         "gallonOfGas" => "a gallon of gas",
+        "ballBearing" => "a ball bearing",
+        "fist" => "your fist",
+        "crossbow" => "a crossbow",
+        "pistol" => "a pistol",
+        "rifle" => "a rifle",
         _ => itemType
     };
 
-    public async Task<(CombatEvent Event, InventoryState Inventory, RelationshipState Relationship, DungeonState? Dungeon)> AttackAsync(string playerId, CombatRequest request, CancellationToken cancellationToken = default)
+    public async Task<CombatResult> AttackAsync(string playerId, CombatRequest request, CancellationToken cancellationToken = default)
     {
-        if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player."); var target = FindActor(playerId, request.TargetId) ?? throw new InvalidOperationException("Target not found.");
-        if (target.LocationId != player.LocationId) throw new InvalidOperationException("Target is not here."); var weapon = request.Weapon.ToLowerInvariant(); var range = weapon == "rock" ? 25 : weapon == "slingshot" ? 60 : throw new InvalidOperationException("Unknown weapon."); var ammo = weapon == "rock" ? "rock" : "ballBearing";
-        var distance = player.Position.Distance2D(target.Position); if (distance > range) throw new InvalidOperationException($"Target is beyond the {range}-meter range."); if (!player.GodMode && !RemoveInventory(playerId, ammo, 1)) throw new InvalidOperationException($"You need a {ammo}.");
-        var random = new Random(); var hit = random.NextDouble() < Math.Clamp(.95 - distance / (range * 1.25), .15, .95); var damage = hit ? (weapon == "rock" ? 1 : 2) : 0; var died = hit && target.HealthHearts - damage <= 0;
-        var relation = Relationship(playerId, target.Id) - 1; _relationships[(playerId, target.Id)] = relation; await _store.SaveRelationshipAsync(Configuration.Id, new(playerId, target.Id, relation), cancellationToken);
-        if (hit) UpdateActorHealth(player, target, Math.Max(0, target.HealthHearts - damage), died); if (!player.GodMode) await SaveInventoryAsync(playerId, cancellationToken);
-        var message = hit ? (died ? $"{target.Name} was defeated." : $"Hit {target.Name} for {damage:0} heart{(damage == 1 ? "" : "s")}.") : $"Missed {target.Name}.";
-        var combat = new CombatEvent(playerId, target.Id, weapon, player.Position, target.Position, hit, damage, died, message, hit ? Math.Max(0, target.HealthHearts - damage) : target.HealthHearts);
+        if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (request.TargetId == playerId) throw new InvalidOperationException("You cannot attack yourself.");
+        var actorTarget = FindActor(playerId, request.TargetId);
+        var playerTarget = actorTarget is null && _players.TryGetValue(request.TargetId, out var other) ? other : null;
+        if (actorTarget is null && playerTarget is null) throw new InvalidOperationException("Target not found.");
+        if (playerTarget is not null && !Configuration.PvpEnabled) throw new InvalidOperationException("Player-versus-player combat is disabled in this reality.");
+        var targetLocation = actorTarget?.LocationId ?? playerTarget!.LocationId;
+        if (targetLocation != player.LocationId) throw new InvalidOperationException("Target is not here.");
+        var targetPosition = actorTarget?.Position ?? playerTarget!.Position;
+        var targetName = actorTarget?.Name ?? playerTarget!.Name;
+        var targetHealth = actorTarget?.HealthHearts ?? playerTarget!.HealthHearts;
+        var weapon = BestUsableWeapon(playerId, player.EquippedWeapon, player.GodMode);
+        var (range, baseDamage, ammo) = WeaponDefinition(weapon);
+        var distance = player.Position.Distance2D(targetPosition);
+        if (distance > range) throw new InvalidOperationException($"{targetName} is beyond the {range:0.#}-meter range of your {DisplayItem(weapon)}.");
+        if (!player.GodMode && ammo is not null && !RemoveInventory(playerId, ammo, 1)) throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");
+        var hitChance = weapon == "fist" ? 1 : Math.Clamp(.97 - distance / (range * 1.25), .15, .97);
+        var hit = RandomNumberGenerator.GetInt32(1_000_000) < hitChance * 1_000_000;
+        var damage = hit ? baseDamage : 0;
+        var died = hit && !((playerTarget?.GodMode) ?? false) && targetHealth - damage <= 0;
+        RelationshipState? relationship = null;
+        if (actorTarget is not null)
+        {
+            var relation = Relationship(playerId, actorTarget.Id) - 1; _relationships[(playerId, actorTarget.Id)] = relation;
+            relationship = new(playerId, actorTarget.Id, relation);
+            await _store.SaveRelationshipAsync(Configuration.Id, relationship, cancellationToken);
+            if (hit) UpdateActorHealth(player, actorTarget, Math.Max(0, targetHealth - damage), died);
+        }
+        PlayerState? updatedTarget = null;
+        if (playerTarget is not null && hit)
+        {
+            var remaining = playerTarget.GodMode ? Math.Max(1, targetHealth - damage) : Math.Max(0, targetHealth - damage);
+            updatedTarget = died ? ResetPlayer(playerTarget with { HealthHearts = 0 }) : playerTarget with { HealthHearts = remaining, Version = playerTarget.Version + 1 };
+            await SavePlayerAsync(updatedTarget, cancellationToken);
+        }
+        if (!player.GodMode && ammo is not null) await SaveInventoryAsync(playerId, cancellationToken);
+        var nextWeapon = player.GodMode ? weapon : BestUsableWeapon(playerId, weapon, false);
+        var updatedAttacker = player.EquippedWeapon == nextWeapon ? player : player with { EquippedWeapon = nextWeapon, Version = player.Version + 1 };
+        if (!ReferenceEquals(updatedAttacker, player)) await SavePlayerAsync(updatedAttacker, cancellationToken);
+        var message = hit ? (died ? $"{targetName} was defeated." : $"Hit {targetName} for {damage:0.##} heart{(damage == 1 ? "" : "s")}.") : $"Missed {targetName}.";
+        if (nextWeapon != weapon) message += $" Switched to {DisplayItem(nextWeapon)}.";
+        var eventHealth = updatedTarget?.HealthHearts ?? (hit ? Math.Max(0, targetHealth - damage) : targetHealth);
+        var combat = new CombatEvent(playerId, request.TargetId, weapon, player.Position, targetPosition, hit, damage, died, message, eventHealth);
         var dungeon = player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var d) ? WithDiscovery(playerId, d) : null;
-        return (combat, new InventoryState(playerId, GetInventoryItems(playerId)), new RelationshipState(playerId, target.Id, relation), dungeon);
+        return new(combat, updatedAttacker, updatedTarget, new InventoryState(playerId, GetInventoryItems(playerId)), relationship, dungeon);
     }
+
+    private bool OwnsWeapon(string playerId, string weapon) => weapon == "fist" || InventoryQuantity(playerId, weapon) > 0;
+
+    private bool CanUseWeapon(string playerId, string weapon, bool godMode)
+    {
+        if (godMode) return WeaponPowerOrder.Contains(weapon);
+        if (!OwnsWeapon(playerId, weapon)) return false;
+        var ammo = WeaponDefinition(weapon).Ammo;
+        return ammo is null || InventoryQuantity(playerId, ammo) > 0;
+    }
+
+    private string BestUsableWeapon(string playerId, string requestedWeapon, bool godMode)
+    {
+        requestedWeapon = (requestedWeapon ?? "fist").ToLowerInvariant();
+        var start = Array.IndexOf(WeaponPowerOrder, requestedWeapon);
+        if (start < 0) start = WeaponPowerOrder.Length - 1;
+        for (var i = start; i < WeaponPowerOrder.Length; i++) if (CanUseWeapon(playerId, WeaponPowerOrder[i], godMode)) return WeaponPowerOrder[i];
+        return "fist";
+    }
+
+    private static (double Range, double Damage, string? Ammo) WeaponDefinition(string weapon) => weapon switch
+    {
+        "fist" => (1.6, .25, null),
+        "rock" => (25, 1, "rock"),
+        "slingshot" => (60, 2, "ballBearing"),
+        "crossbow" => (100, 3, "arrow"),
+        "pistol" => (50, 5, "bullet"),
+        "rifle" => (200, 7, "bullet"),
+        _ => throw new InvalidOperationException("Unknown weapon.")
+    };
 
     private void UpdateActorHealth(PlayerState player, ActorState actor, double health, bool died)
     {
@@ -478,3 +606,4 @@ public sealed partial class RealityWorld
 }
 
 public sealed record HostileTick(IReadOnlyList<ActorState> Actors, IReadOnlyList<PlayerState> Players, IReadOnlyList<CombatEvent> Combat);
+public sealed record CombatResult(CombatEvent Event, PlayerState Attacker, PlayerState? TargetPlayer, InventoryState Inventory, RelationshipState? Relationship, DungeonState? Dungeon);

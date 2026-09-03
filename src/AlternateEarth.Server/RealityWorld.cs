@@ -18,6 +18,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastChat = new();
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly SemaphoreSlim _areaLoadLock = new(1, 1);
+    private readonly SemaphoreSlim _basePurchaseLock = new(1, 1);
     private readonly Random _actorRandom;
     private GeographicDataset? _geographic;
     private readonly ConcurrentDictionary<string, CanonicalEntity> _baseEntities = new();
@@ -35,7 +36,8 @@ public sealed partial class RealityWorld
         _actorRandom = new Random(unchecked((int)configuration.Seed));
     }
 
-    public RealityConfiguration Configuration { get; }
+    public RealityConfiguration Configuration { get; private set; }
+    public bool IsInitialized { get; private set; }
     public int PlayerCount => _players.Count;
     public int BaseEntityCount => _baseEntities.Count + _actors.Count;
     public int RealityEntityCount => _realityEntities.Count;
@@ -44,11 +46,27 @@ public sealed partial class RealityWorld
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (IsInitialized) return;
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
         _loadedAreas["0:0"] = 1;
         await RefreshWeatherAsync(cancellationToken);
+        IsInitialized = true;
+    }
+
+    public async Task ConfigureInitialLocationAsync(GeoCoordinate center, CancellationToken cancellationToken = default)
+    {
+        if (center.Latitude is < -85 or > 85 || center.Longitude is < -180 or > 180) throw new InvalidOperationException("Enter valid latitude and longitude coordinates.");
+        await _rebuildLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (IsInitialized || !_players.IsEmpty) throw new InvalidOperationException("This reality has already been initialized.");
+            Configuration = Configuration with { Area = new GeographicArea(center, Configuration.Area.SizeMeters) };
+            await _store.InitializeAsync(Configuration, cancellationToken);
+            await InitializeAsync(cancellationToken);
+        }
+        finally { _rebuildLock.Release(); }
     }
 
     public async Task<bool> RefreshWeatherAsync(CancellationToken cancellationToken = default)
@@ -68,18 +86,20 @@ public sealed partial class RealityWorld
         var existing = await _store.LoadCharacterAsync(Configuration.Id, characterId, cancellationToken);
         var home = string.IsNullOrWhiteSpace(accountId) ? null : await EnsureHomeAsync(characterId, accountId, cancellationToken);
         var center = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
-        var location = home?.Id ?? "outdoor";
-        var position = home?.Exit ?? Navigation.FindNearestWalkable(center);
-        position = home is null ? position with { Z = Navigation.ElevationAt(position.X, position.Y) } : position with { Z = 0 };
+        var newAccountSpawn = existing is null && !string.IsNullOrWhiteSpace(accountId) && await _store.IsFirstAccountCharacterAsync(accountId, characterId, cancellationToken);
+        var startsAtHome = home is not null && !newAccountSpawn;
+        var location = startsAtHome ? home!.Id : "outdoor";
+        var position = startsAtHome ? home!.Exit : newAccountSpawn ? RandomOutdoorSpawn(characterId) : Navigation.FindNearestWalkable(center);
+        position = startsAtHome ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
-            home is not null ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, home is not null ? TravelMode.Walk : existing?.TravelMode ?? TravelMode.Walk,
+            startsAtHome ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, startsAtHome ? TravelMode.Walk : existing?.TravelMode ?? TravelMode.Walk,
             Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10,
             Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
             existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
             existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false,
             existing?.MagicHikingShoesOn ?? false, existing?.MagicRunningShoesOn ?? false, existing?.HatOn ?? false,
-            existing?.DirtBikeGasGallons ?? 0, existing?.MotorcycleGasGallons ?? 0);
+            existing?.DirtBikeGasGallons ?? 0, existing?.MotorcycleGasGallons ?? 0, existing?.EquippedWeapon ?? "fist");
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
@@ -95,20 +115,46 @@ public sealed partial class RealityWorld
     private async Task<DungeonState?> EnsureHomeAsync(string playerId, string accountId, CancellationToken cancellationToken)
     {
         _playerAccounts[playerId] = accountId;
-        var baseBuilding = await _store.LoadBaseBuildingAsync(accountId, Configuration.Id, cancellationToken);
-        if (baseBuilding is null || !_baseEntities.ContainsKey(baseBuilding))
+        await _basePurchaseLock.WaitAsync(cancellationToken);
+        try
         {
-            var buildings = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building).OrderBy(entity => entity.Id).ToArray();
-            if (buildings.Length == 0) return null;
-            baseBuilding = buildings[(StableInt(accountId) & int.MaxValue) % buildings.Length].Id;
-            await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, baseBuilding, cancellationToken);
+            var assignment = await _store.LoadBaseAssignmentAsync(accountId, Configuration.Id, cancellationToken);
+            if (assignment?.Position is { } assignedPosition && assignedPosition.Region == Configuration.Area.Region && !_baseEntities.ContainsKey(assignment.BuildingId))
+                await EnsureAreaLoadedAsync(assignedPosition.X, assignedPosition.Y, cancellationToken);
+            var baseBuilding = assignment?.BuildingId;
+            if (baseBuilding is null || !_baseEntities.ContainsKey(baseBuilding))
+            {
+                var buildings = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building).OrderBy(entity => entity.Id).ToArray();
+                if (buildings.Length == 0) return null;
+                var assigned = await _store.LoadAssignedBaseBuildingsAsync(Configuration.Id, cancellationToken);
+                var start = (StableInt(accountId) & int.MaxValue) % buildings.Length;
+                var building = Enumerable.Range(0, buildings.Length).Select(offset => buildings[(start + offset) % buildings.Length]).FirstOrDefault(candidate => !assigned.Contains(candidate.Id)) ?? buildings[start];
+                baseBuilding = building.Id;
+                await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, baseBuilding, building.Position, cancellationToken);
+            }
+            _baseBuildings[accountId] = baseBuilding;
+            var baseEntity = _baseEntities[baseBuilding];
+            var homeId = $"home:{accountId}:{baseBuilding}";
+            var home = _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, baseEntity));
+            SetBaseReturnPosition(playerId, baseBuilding);
+            return home;
         }
-        _baseBuildings[accountId] = baseBuilding;
-        var building = _baseEntities[baseBuilding];
-        var homeId = $"home:{accountId}:{baseBuilding}";
-        var home = _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
-        SetBaseReturnPosition(playerId, baseBuilding);
-        return home;
+        finally { _basePurchaseLock.Release(); }
+    }
+
+    private WorldPosition RandomOutdoorSpawn(string characterId)
+    {
+        var bounds = _loadedBounds ?? Configuration.Area.Bounds;
+        var random = new Random(StableInt($"spawn:{Configuration.Seed}:{characterId}"));
+        for (var attempt = 0; attempt < 48; attempt++)
+        {
+            var candidate = new WorldPosition(Configuration.Area.Region,
+                bounds.MinimumX + 12 + random.NextDouble() * Math.Max(1, bounds.MaximumX - bounds.MinimumX - 24),
+                bounds.MinimumY + 12 + random.NextDouble() * Math.Max(1, bounds.MaximumY - bounds.MinimumY - 24));
+            var safe = Navigation.FindNearestWalkable(candidate);
+            if (!Navigation.IsBlocked(safe.X, safe.Y) && Navigation.TerrainAt(safe.X, safe.Y) != TerrainType.DeepWater) return safe;
+        }
+        return Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
     }
 
     private DungeonState? HomeForPlayer(string playerId)
@@ -349,17 +395,16 @@ public sealed partial class RealityWorld
         await _rebuildLock.WaitAsync(cancellationToken);
         try
         {
-            await _store.ClearRealityDeltasAsync(Configuration.Id, cancellationToken);
+            await _store.ClearTransientWorldStateAsync(Configuration.Id, cancellationToken);
             _realityEntities.Clear();
-            _baseEntities.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _loadedBounds = null; _geographic = null;
+            _baseEntities.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
             ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
             _loadedAreas["0:0"] = 1;
+            _baseBuildings.Clear();
             foreach (var pair in _players.ToArray())
             {
-                var safe = Navigation.IsBlocked(pair.Value.Position.X, pair.Value.Position.Y) || Navigation.TerrainAt(pair.Value.Position.X, pair.Value.Position.Y) == TerrainType.DeepWater
-                    ? Navigation.FindNearestWalkable(pair.Value.Position)
-                    : pair.Value.Position with { Z = Navigation.ElevationAt(pair.Value.Position.X, pair.Value.Position.Y) };
-                await SavePlayerAsync(pair.Value with { Position = safe, Terrain = Navigation.TerrainAt(safe.X, safe.Y), SpeedMetersPerSecond = 0, Version = pair.Value.Version + 1 }, cancellationToken);
+                if (_playerAccounts.TryGetValue(pair.Key, out var accountId)) await EnsureHomeAsync(pair.Key, accountId, cancellationToken);
+                await SavePlayerAsync(ResetPlayer(pair.Value), cancellationToken);
             }
             return CreateSnapshot();
         }

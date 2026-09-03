@@ -11,22 +11,19 @@ async function connect(label) {
   if (!/Max-Age=/i.test(cookie) || !/Path=\//i.test(cookie)) throw new Error('Login cookie is not persistent and site-wide.');
   const socket = new WebSocket(`${socketUrl}?session=${encodeURIComponent(setup.sessionToken)}`);
   const messages = [], waiters = [];
-  socket.addEventListener('message', event => { const message = JSON.parse(event.data); messages.push(message); for (const waiter of [...waiters]) if (waiter.predicate(message)) { waiter.resolve(message); waiters.splice(waiters.indexOf(waiter), 1); } });
-  const waitFor = (predicate, timeoutMs = 10000) => new Promise((resolve, reject) => { const existing = messages.find(predicate); if (existing) return resolve(existing); const waiter = { predicate, resolve }; waiters.push(waiter); setTimeout(() => { const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1); reject(new Error(`Timed out waiting for ${username}. Received: ${messages.map(message => message.type).join(', ')}`)); }, timeoutMs); });
-  return { socket, waitFor, username, sessionToken: setup.sessionToken };
+  socket.addEventListener('message', event => { const message = JSON.parse(event.data); messages.push(message);const messageIndex=messages.length-1; for (const waiter of [...waiters]) if(waiter.predicate(message,messageIndex)) { waiter.resolve(message); waiters.splice(waiters.indexOf(waiter), 1); } });
+  const waitFor = (predicate, timeoutMs = 10000, afterIndex = -1) => new Promise((resolve, reject) => { const existing = messages.find((message,index)=>index>afterIndex&&predicate(message,index)); if (existing) return resolve(existing); const waiter = { predicate:(message,index)=>index>afterIndex&&predicate(message,index), resolve }; waiters.push(waiter); setTimeout(() => { const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1); reject(new Error(`Timed out waiting for ${username}. Received: ${messages.map(message => message.type).join(', ')}`)); }, timeoutMs); });
+  return { socket, waitFor, messageCount:()=>messages.length, username, sessionToken: setup.sessionToken };
 }
 
 const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]);
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 9) throw new Error(`Expected protocol 9, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 11) throw new Error(`Expected protocol 11, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
-  if (!playerA.locationId?.startsWith('home:') || !welcomeA.privateState?.dungeon?.isHome) throw new Error('Authenticated player did not start inside the private base.');
+  if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
   if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
-  first.socket.send(JSON.stringify({ type: 'exitDungeon' }));
-  const initialExit = await first.waitFor(message => message.type === 'dungeonExited' && message.player.id === welcomeA.playerId);
-  playerA = initialExit.player;
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
   const modeChanged = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.travelMode === 'run');
   first.socket.send(JSON.stringify({ type: 'moveRequest', x: 1, y: 0, sequence: 1 }));
@@ -52,6 +49,8 @@ try {
   await first.waitFor(message => message.type === 'error' && message.message.includes('running shoes'));
   first.socket.send(JSON.stringify({ type: 'setEquipment', slot: 'hat', itemType: 'hat' }));
   await first.waitFor(message => message.type === 'error' && message.message.includes('hat'));
+  first.socket.send(JSON.stringify({ type: 'setEquipment', slot: 'weapon', itemType: 'fist' }));
+  await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.equippedWeapon === 'fist');
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'dirtBike' }));
   await first.waitFor(message => message.type === 'error' && message.message.includes('dirt bike'));
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'motorcycle' }));
@@ -59,6 +58,10 @@ try {
   first.socket.send(JSON.stringify({ type: 'setGodMode', enabled: true }));
   const god = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.godMode);
   if (god.player.walletCents < 50000 || god.player.water < 10 || god.player.stamina < 10) throw new Error('God Mode resources were not enforced.');
+  first.socket.send(JSON.stringify({ type: 'setEquipment', slot: 'weapon', itemType: 'rifle' }));
+  const rifleEquipped=await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.equippedWeapon === 'rifle');
+  first.socket.send(JSON.stringify({ type: 'setEquipment', slot: 'weapon', itemType: 'fist' }));
+  await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.equippedWeapon === 'fist' && message.player.version>rifleEquipped.player.version);
   first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: true,laserOn:true }));
   await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.flashlightOn && message.player.lanternOn&&message.player.laserOn);
   first.socket.send(JSON.stringify({ type: 'setMagicHikingShoes', enabled: true }));
@@ -73,7 +76,22 @@ try {
   if (godRide.type === 'playerMoved' && godRide.player.dirtBikeGasGallons !== godDirtBike.player.dirtBikeGasGallons) throw new Error('God Mode consumed dirt-bike gas.');
   first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true }));
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
-  const homeBase=welcomeA.privateState.base;
+  const unavailableBuildings=new Set([welcomeA.privateState.base.buildingId,welcomeB.privateState.base.buildingId]);
+  const candidateDoors=welcomeA.snapshot.baseEntities.filter(entity=>entity.kind==='door'&&!unavailableBuildings.has(entity.properties?.buildingId));
+  let replacementDoor=null,basePurchase=null;
+  for(const door of candidateDoors.slice(0,30)){
+    let after=first.messageCount()-1;
+    first.socket.send(JSON.stringify({type:'teleport',x:door.position.x,y:door.position.y,godMode:true}));
+    await first.waitFor(message=>message.type==='playerTeleported'&&message.player.id===welcomeA.playerId&&Math.hypot(message.player.position.x-door.position.x,message.player.position.y-door.position.y)<100,10000,after);
+    after=first.messageCount()-1;
+    first.socket.send(JSON.stringify({type:'purchaseBase',doorId:door.id}));
+    const outcome=await first.waitFor(message=>message.type==='basePurchased'||message.type==='error',10000,after);
+    if(outcome.type==='basePurchased'){replacementDoor=door;basePurchase=outcome;break;}
+    if(!/already another player/i.test(outcome.message))throw new Error(`Unexpected base-purchase rejection: ${outcome.message}`);
+  }
+  if(!replacementDoor||!basePurchase)throw new Error('No unassigned building door was available for the base-purchase test.');
+  if(basePurchase.priceCents!==1||basePurchase.privateState?.base?.buildingId!==replacementDoor.properties.buildingId)throw new Error('God Mode base purchase did not cost one cent or persist the selected building.');
+  const homeBase=basePurchase.privateState.base;
   first.socket.send(JSON.stringify({type:'teleport',x:homeBase.position.x,y:homeBase.position.y,godMode:true}));
   await first.waitFor(message=>message.type==='playerTeleported'&&message.player.id===welcomeA.playerId&&Math.hypot(message.player.position.x-homeBase.position.x,message.player.position.y-homeBase.position.y)<100);
   first.socket.send(JSON.stringify({type:'enterDungeon',doorId:homeBase.doorId}));
@@ -85,5 +103,5 @@ try {
   if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== first.username) throw new Error('Chat did not synchronize.');
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
-  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, startsInsidePersistentBase: true, safeFurnishedHome:true, actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, oneCentGodModeBasePurchase:true, safeFurnishedHome:true, actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true, equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
 } finally { first.socket.close(); second.socket.close(); }

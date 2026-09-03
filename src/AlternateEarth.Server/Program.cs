@@ -10,10 +10,23 @@ var dataDirectory = Path.GetFullPath(Path.Combine(builder.Environment.ContentRoo
 Directory.CreateDirectory(dataDirectory);
 
 var reality = builder.Configuration.GetSection("Reality").Get<RealitySettings>() ?? new RealitySettings();
+var databasePath = Path.Combine(dataDirectory, "reality.db");
+var locationPath = Path.Combine(dataDirectory, "reality-location.json");
+var setupMarkerPath = Path.Combine(dataDirectory, ".reality-setup-required");
+var savedLocation = RealitySetupState.Load(locationPath);
+var setupRequired = savedLocation is null && (!File.Exists(databasePath) || File.Exists(setupMarkerPath));
+if (savedLocation is not null)
+{
+    reality.CenterLatitude = savedLocation.Latitude;
+    reality.CenterLongitude = savedLocation.Longitude;
+}
+if (setupRequired && !File.Exists(setupMarkerPath)) File.WriteAllText(setupMarkerPath, "Initial geographic setup is pending.");
 var configuration = reality.ToConfiguration();
+var realitySetup = new RealitySetupState(setupRequired, locationPath, setupMarkerPath);
 
 builder.Services.AddSingleton(configuration);
-builder.Services.AddSingleton(new SqliteRealityStore(Path.Combine(dataDirectory, "reality.db")));
+builder.Services.AddSingleton(realitySetup);
+builder.Services.AddSingleton(new SqliteRealityStore(databasePath));
 builder.Services.AddHttpClient("overpass", client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["Geo:OverpassUrl"] ?? "https://overpass-api.de/");
@@ -64,7 +77,27 @@ app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSecond
 var store = app.Services.GetRequiredService<SqliteRealityStore>();
 await store.InitializeAsync(configuration);
 var world = app.Services.GetRequiredService<RealityWorld>();
-await world.InitializeAsync();
+if (!realitySetup.Required) await world.InitializeAsync();
+
+app.MapGet("/api/reality/setup", (RealitySetupState setup, RealityWorld state) => Results.Ok(new
+{
+    required = setup.Required,
+    initialized = state.IsInitialized,
+    latitude = state.Configuration.Area.Center.Latitude,
+    longitude = state.Configuration.Area.Center.Longitude
+}));
+app.MapPost("/api/reality/setup", async (RealitySetupRequest request, RealitySetupState setup, RealityWorld state, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        if (!setup.Required) return Results.BadRequest(new { message = "This reality's starting location is already configured." });
+        var coordinate = new GeoCoordinate(request.Latitude, request.Longitude);
+        await state.ConfigureInitialLocationAsync(coordinate, cancellationToken);
+        await setup.CompleteAsync(coordinate, cancellationToken);
+        return Results.Ok(new { latitude = coordinate.Latitude, longitude = coordinate.Longitude, state.Configuration.Name });
+    }
+    catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+});
 
 app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
 {
@@ -83,10 +116,11 @@ app.MapGet("/api/account/me", async (HttpContext context, AccountService account
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
     return login is null ? Results.Unauthorized() : Results.Ok(new { login.AccountId, login.CharacterId, login.Username });
 });
-app.MapPost("/api/account/setup", async (HttpContext context, AccountService accounts, AccountRequest request) =>
+app.MapPost("/api/account/setup", async (HttpContext context, AccountService accounts, RealitySetupState setup, AccountRequest request) =>
 {
     try
     {
+        if (setup.Required) return Results.BadRequest(new { message = "Choose the server's starting location before creating an account." });
         var login = await accounts.SetupOrLoginAsync(request.Username, request.Password, context.RequestAborted);
         context.Response.Cookies.Append(AccountService.CookieName, login.SessionToken, new CookieOptions
         {
@@ -133,6 +167,7 @@ public sealed class RealitySettings
     public double CenterLongitude { get; set; } = -122.6615;
     public int SizeMeters { get; set; } = 2000;
     public int MaximumPlayers { get; set; } = 32;
+    public bool PvpEnabled { get; set; } = true;
     public bool ObjectPlacementEnabled { get; set; } = false;
 
     public RealityConfiguration ToConfiguration() => new(
@@ -141,5 +176,8 @@ public sealed class RealitySettings
         Seed,
         new GeographicArea(new GeoCoordinate(CenterLatitude, CenterLongitude), SizeMeters),
         MaximumPlayers: MaximumPlayers,
+        PvpEnabled: PvpEnabled,
         ObjectPlacementEnabled: ObjectPlacementEnabled);
 }
+
+public sealed record RealitySetupRequest(double Latitude, double Longitude);
