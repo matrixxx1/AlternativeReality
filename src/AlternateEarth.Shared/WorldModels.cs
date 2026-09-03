@@ -68,7 +68,8 @@ public sealed record RealityConfiguration(
     bool PermanentDeath = false,
     bool BuildingDestruction = true,
     bool FriendlyFire = false,
-    double GameSpeed = 1.0);
+    double GameSpeed = 1.0,
+    bool ObjectPlacementEnabled = false);
 
 public sealed record GeographicDataset(
     string Provider,

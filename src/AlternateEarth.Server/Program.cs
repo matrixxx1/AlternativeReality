@@ -80,11 +80,13 @@ public sealed class RealitySettings
     public double CenterLongitude { get; set; } = -122.6615;
     public int SizeMeters { get; set; } = 2000;
     public int MaximumPlayers { get; set; } = 32;
+    public bool ObjectPlacementEnabled { get; set; } = false;
 
     public RealityConfiguration ToConfiguration() => new(
         Id,
         Name,
         Seed,
         new GeographicArea(new GeoCoordinate(CenterLatitude, CenterLongitude), SizeMeters),
-        MaximumPlayers: MaximumPlayers);
+        MaximumPlayers: MaximumPlayers,
+        ObjectPlacementEnabled: ObjectPlacementEnabled);
 }

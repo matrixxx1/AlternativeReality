@@ -8,7 +8,8 @@
   const state = {
     socket: null, playerId: null, snapshot: null,
     base: [], reality: new Map(), players: new Map(), facings: new Map(), keys: new Set(),
-    camera: { x: 0, y: 0 }, scale: 10, sequence: 0, facing: 'south'
+    camera: { x: 0, y: 0 }, scale: 10, pitch: .7, shear: .12,
+    sequence: 0, facing: 'south', moveTarget: null
   };
 
   function createClientId() {
@@ -94,14 +95,19 @@
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
 
-  const toScreen = point => ({
-    x: innerWidth / 2 + (point.x - state.camera.x) * state.scale,
-    y: innerHeight / 2 - (point.y - state.camera.y) * state.scale
-  });
-  const toWorld = point => ({
-    x: state.camera.x + (point.x - innerWidth / 2) / state.scale,
-    y: state.camera.y - (point.y - innerHeight / 2) / state.scale
-  });
+  const toScreen = point => {
+    const dx = point.x - state.camera.x;
+    const dy = point.y - state.camera.y;
+    return {
+      x: innerWidth / 2 + ((dx + dy * state.shear) * state.scale),
+      y: innerHeight / 2 - (dy * state.scale * state.pitch) - ((point.z || 0) * state.scale * .55)
+    };
+  };
+  const toWorld = point => {
+    const dy = -(point.y - innerHeight / 2) / (state.scale * state.pitch);
+    const dx = (point.x - innerWidth / 2) / state.scale - (dy * state.shear);
+    return { x: state.camera.x + dx, y: state.camera.y + dy };
+  };
 
   function drawGeometry(entity, fill, stroke, width = 1, close = false) {
     if (!entity.geometry?.length) return;
@@ -128,13 +134,12 @@
       state.camera.x += (me.position.x - state.camera.x) * .12;
       state.camera.y += (me.position.y - state.camera.y) * .12;
     }
+    drawGroundTiles();
     drawChunkGrid();
     for (const entity of state.base) if (entity.kind === 'water') drawGeometry(entity, 'rgba(46,112,132,.82)', '#6da6ae', 1, true);
     for (const entity of state.base) if (entity.kind === 'road') drawRoad(entity);
-    for (const entity of state.base) if (entity.kind === 'building') drawGeometry(entity, '#6d5b4f', '#9f8871', 1, true);
-    for (const entity of state.base) if (entity.kind === 'tree') drawTree(entity);
-    for (const entity of state.reality.values()) drawStructure(entity);
-    for (const player of state.players.values()) drawPlayer(player, player.id === state.playerId);
+    drawMoveTarget();
+    drawRaisedObjects();
     drawCoordinates();
   }
 
@@ -143,17 +148,49 @@
     ctx.fillText('Resolving geographic reality…', innerWidth / 2, innerHeight / 2);
   }
 
+  function drawGroundTiles() {
+    const corners = [
+      toWorld({ x: 0, y: 0 }), toWorld({ x: innerWidth, y: 0 }),
+      toWorld({ x: 0, y: innerHeight }), toWorld({ x: innerWidth, y: innerHeight })
+    ];
+    const tileMeters = 4;
+    const minimumX = Math.floor(Math.min(...corners.map(point => point.x)) / tileMeters) * tileMeters;
+    const maximumX = Math.ceil(Math.max(...corners.map(point => point.x)) / tileMeters) * tileMeters;
+    const minimumY = Math.floor(Math.min(...corners.map(point => point.y)) / tileMeters) * tileMeters;
+    const maximumY = Math.ceil(Math.max(...corners.map(point => point.y)) / tileMeters) * tileMeters;
+    for (let y = minimumY; y < maximumY; y += tileMeters) {
+      for (let x = minimumX; x < maximumX; x += tileMeters) {
+        const points = [
+          toScreen({ x, y }), toScreen({ x: x + tileMeters, y }),
+          toScreen({ x: x + tileMeters, y: y + tileMeters }), toScreen({ x, y: y + tileMeters })
+        ];
+        const checker = (Math.floor(x / tileMeters) + Math.floor(y / tileMeters)) & 1;
+        ctx.fillStyle = checker ? '#20372e' : '#223a31';
+        ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+        for (let index = 1; index < points.length; index++) ctx.lineTo(points[index].x, points[index].y);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = 'rgba(179,202,176,.035)'; ctx.lineWidth = 1; ctx.stroke();
+      }
+    }
+  }
+
   function drawChunkGrid() {
     const size = 256;
-    const topLeft = toWorld({ x: 0, y: 0 });
-    const bottomRight = toWorld({ x: innerWidth, y: innerHeight });
+    const corners = [
+      toWorld({ x: 0, y: 0 }), toWorld({ x: innerWidth, y: 0 }),
+      toWorld({ x: 0, y: innerHeight }), toWorld({ x: innerWidth, y: innerHeight })
+    ];
+    const minimumX = Math.min(...corners.map(point => point.x));
+    const maximumX = Math.max(...corners.map(point => point.x));
+    const minimumY = Math.min(...corners.map(point => point.y));
+    const maximumY = Math.max(...corners.map(point => point.y));
     ctx.strokeStyle = 'rgba(214,225,205,.055)'; ctx.lineWidth = 1;
-    for (let x = Math.floor(topLeft.x / size) * size; x <= bottomRight.x; x += size) {
-      const a = toScreen({ x, y: topLeft.y }), b = toScreen({ x, y: bottomRight.y });
+    for (let x = Math.floor(minimumX / size) * size; x <= maximumX; x += size) {
+      const a = toScreen({ x, y: minimumY }), b = toScreen({ x, y: maximumY });
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
-    for (let y = Math.floor(bottomRight.y / size) * size; y <= topLeft.y; y += size) {
-      const a = toScreen({ x: topLeft.x, y }), b = toScreen({ x: bottomRight.x, y });
+    for (let y = Math.floor(minimumY / size) * size; y <= maximumY; y += size) {
+      const a = toScreen({ x: minimumX, y }), b = toScreen({ x: maximumX, y });
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
   }
@@ -166,19 +203,65 @@
     drawGeometry(entity, null, major ? '#d4c7a6' : '#a8a38e', Math.max(major ? 5 : 3, innerWidth));
   }
 
-  function drawTree(entity) {
-    const p = toScreen(entity.position);
-    const r = Math.max(2.5, state.scale * 1.15);
-    ctx.fillStyle = '#10251d'; ctx.beginPath(); ctx.arc(p.x + 1, p.y + 2, r + 1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = entity.properties?.species === 'oak' ? '#507b4e' : '#38664d'; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+  function drawBuilding(entity) {
+    if (!entity.geometry?.length) return;
+    const ground = entity.geometry.map(toScreen);
+    const centerY = ground.reduce((sum, point) => sum + point.y, 0) / ground.length;
+    const levels = Math.max(1, Number(entity.properties?.['building:levels'] || entity.properties?.levels || 1));
+    const height = Math.min(75, levels * 3 * state.scale * .55);
+    const roof = ground.map(point => ({ x: point.x, y: point.y - height }));
+
+    for (let index = 0; index < ground.length - 1; index++) {
+      const next = index + 1;
+      if ((ground[index].y + ground[next].y) / 2 < centerY) continue;
+      ctx.fillStyle = index % 2 ? '#59483e' : '#625044';
+      ctx.beginPath(); ctx.moveTo(roof[index].x, roof[index].y); ctx.lineTo(roof[next].x, roof[next].y);
+      ctx.lineTo(ground[next].x, ground[next].y); ctx.lineTo(ground[index].x, ground[index].y); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#332c27'; ctx.lineWidth = 1; ctx.stroke();
+    }
+
+    ctx.fillStyle = '#8a7462'; ctx.strokeStyle = '#b39a7e'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(roof[0].x, roof[0].y);
+    for (let index = 1; index < roof.length; index++) ctx.lineTo(roof[index].x, roof[index].y);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
   }
 
-  function drawStructure(entity) {
+  function drawRaisedObjects() {
+    const renderables = [];
+    for (const entity of state.base) {
+      if (entity.kind === 'building') {
+        const depth = Math.max(...entity.geometry.map(point => toScreen(point).y));
+        renderables.push({ depth, draw: () => drawBuilding(entity) });
+      } else if (entity.kind === 'tree') {
+        renderables.push({ depth: toScreen(entity.position).y, draw: () => drawTree(entity) });
+      }
+    }
+    for (const player of state.players.values()) {
+      renderables.push({ depth: toScreen(player.position).y, draw: () => drawPlayer(player, player.id === state.playerId) });
+    }
+    renderables.sort((left, right) => left.depth - right.depth);
+    for (const renderable of renderables) renderable.draw();
+  }
+
+  function drawTree(entity) {
     const p = toScreen(entity.position);
-    const radius = Math.max(5, state.scale * 1.5);
-    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate((Number(entity.properties?.rotationDegrees || 0) * Math.PI) / 180);
-    ctx.fillStyle = '#e4b95f'; ctx.strokeStyle = '#3f2f20'; ctx.lineWidth = 2;
-    ctx.fillRect(-radius, -radius, radius * 2, radius * 2); ctx.strokeRect(-radius, -radius, radius * 2, radius * 2); ctx.restore();
+    const r = Math.max(3, state.scale * 1.1);
+    ctx.fillStyle = 'rgba(3,10,8,.35)'; ctx.beginPath(); ctx.ellipse(p.x + r * .45, p.y + 2, r, r * .38, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5a3e27'; ctx.fillRect(p.x - 2, p.y - r * .5, 4, r * .8);
+    ctx.fillStyle = '#183b2b'; ctx.beginPath(); ctx.arc(p.x + 2, p.y - r * .9, r + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = entity.properties?.species === 'oak' ? '#507b4e' : '#3e7354'; ctx.beginPath(); ctx.arc(p.x, p.y - r, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(169,202,137,.32)'; ctx.beginPath(); ctx.arc(p.x - r * .3, p.y - r * 1.3, r * .38, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawMoveTarget() {
+    if (!state.moveTarget) return;
+    const p = toScreen(state.moveTarget);
+    const pulse = 5 + ((Math.sin(Date.now() / 150) + 1) * 2);
+    ctx.strokeStyle = 'rgba(243,214,128,.8)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(p.x, p.y, pulse, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#f3d680';
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - 4); ctx.lineTo(p.x + 4, p.y); ctx.lineTo(p.x, p.y + 4); ctx.lineTo(p.x - 4, p.y); ctx.closePath(); ctx.fill();
   }
 
   function drawPlayer(player, self) {
@@ -247,18 +330,32 @@
   addEventListener('blur', () => state.keys.clear());
   canvas.addEventListener('wheel', event => { event.preventDefault(); state.scale = Math.max(.5, Math.min(32, state.scale * (event.deltaY > 0 ? .88 : 1.14))); }, { passive: false });
   canvas.addEventListener('click', event => {
-    const point = toWorld({ x: event.clientX, y: event.clientY });
-    send({ type: 'placeObject', objectType: 'wooden-crate', x: point.x, y: point.y, rotationDegrees: 0 });
+    state.moveTarget = toWorld({ x: event.clientX, y: event.clientY });
   });
   canvas.addEventListener('contextmenu', event => {
-    event.preventDefault(); const point = toWorld({ x: event.clientX, y: event.clientY });
-    const nearest = [...state.reality.values()].map(entity => ({ entity, distance: Math.hypot(entity.position.x - point.x, entity.position.y - point.y) })).sort((a, b) => a.distance - b.distance)[0];
-    if (nearest && nearest.distance < 3) send({ type: 'removeObject', entityId: nearest.entity.id }); else showToast('No reality object at that point.');
+    event.preventDefault();
+    state.moveTarget = null;
   });
 
   setInterval(() => {
-    const x = (state.keys.has('d') || state.keys.has('arrowright') ? 1 : 0) - (state.keys.has('a') || state.keys.has('arrowleft') ? 1 : 0);
-    const y = (state.keys.has('w') || state.keys.has('arrowup') ? 1 : 0) - (state.keys.has('s') || state.keys.has('arrowdown') ? 1 : 0);
+    let x = (state.keys.has('d') || state.keys.has('arrowright') ? 1 : 0) - (state.keys.has('a') || state.keys.has('arrowleft') ? 1 : 0);
+    let y = (state.keys.has('w') || state.keys.has('arrowup') ? 1 : 0) - (state.keys.has('s') || state.keys.has('arrowdown') ? 1 : 0);
+    if (x || y) {
+      state.moveTarget = null;
+    } else if (state.moveTarget) {
+      const me = state.players.get(state.playerId);
+      if (me) {
+        const dx = state.moveTarget.x - me.position.x;
+        const dy = state.moveTarget.y - me.position.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance <= .4) {
+          state.moveTarget = null;
+        } else {
+          x = dx / distance;
+          y = dy / distance;
+        }
+      }
+    }
     if (x || y) {
       if (Math.abs(x) > Math.abs(y)) state.facing = x > 0 ? 'east' : 'west';
       else state.facing = y > 0 ? 'north' : 'south';

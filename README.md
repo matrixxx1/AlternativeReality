@@ -2,7 +2,7 @@
 
 A renderer-neutral, self-hosted multiplayer world derived from real geography. One authoritative reality server drives every client: the current browser-based top-down client and, later, a browser-based WebGL 3D client.
 
-The first vertical slice is runnable now. It imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington; samples elevation; renders roads, building footprints, water, trees, and players; accepts server-validated movement and object placement; broadcasts changes over WebSockets; and persists reality deltas and character positions in SQLite.
+The first vertical slice is runnable now. It imports and caches a 2 km × 2 km area of OpenStreetMap around downtown Vancouver, Washington; samples elevation; renders roads, building footprints, water, trees, and players in an angled, tile-styled 2D view; supports keyboard and click-to-walk exploration; synchronizes movement over WebSockets; and persists character positions in SQLite. Object modification is disabled during this exploration milestone.
 
 ## Chosen stack
 
@@ -28,8 +28,8 @@ Open [http://localhost:5080](http://localhost:5080) in two browser tabs. Give ea
 For access from other devices on the same network, run `tools/open-lan-port.ps1` once from an Administrator PowerShell. It creates an inbound TCP 5080 rule restricted to `LocalSubnet`. Other devices can then open `http://<server-lan-ip>:5080`.
 
 - Move with WASD or the arrow keys.
-- Left-click within the gold five-meter ring to place a crate.
-- Right-click a nearby player-created object to remove it.
+- Left-click anywhere in the world to walk toward that location.
+- Use WASD or an arrow key to take direct control and cancel click-to-walk.
 - Use the mouse wheel to zoom.
 
 The reality configuration—including center, size, name, seed, and player limit—is in `src/AlternateEarth.Server/appsettings.json`. Runtime state is written under `data/` and is intentionally not committed.
@@ -41,7 +41,7 @@ dotnet test AlternateEarth.sln
 node tools/smoke-test.mjs
 ```
 
-The smoke test opens two real WebSocket clients, places one object through client A, confirms both receive the same canonical entity, and checks the authoritative world snapshot. Restart the server and query `/api/world` to prove the SQLite delta reload path.
+The smoke test opens two real WebSocket clients, moves client A, confirms both receive the same authoritative position, and verifies that the server rejects object placement while exploration-only mode is active.
 
 ## Geographic attribution
 

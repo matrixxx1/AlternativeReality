@@ -7,12 +7,12 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Clients
 | Type | Logical payload | Server validation |
 |---|---|---|
 | `moveRequest` | direction `x`, `y`; client `sequence` | normalizes direction, bounds elapsed time/speed, clamps world bounds |
-| `placeObject` | logical `objectType`, `x`, `y`, `rotationDegrees` | five-meter reach, reality bounds, 0.5m snap, server ID/ownership |
-| `removeObject` | `entityId` | entity is a reality delta, five-meter reach, destruction setting |
+| `placeObject` | reserved logical `objectType`, `x`, `y`, `rotationDegrees` | currently rejected unless an administrator enables object placement |
+| `removeObject` | reserved `entityId` | currently rejected unless an administrator enables object placement |
 | `requestChunk` | chunk `x`, `y` | prototype returns the area snapshot; chunk filtering is next |
 | `ping` | none | no state mutation |
 
-Future gameplay follows the same command pattern: `InteractRequest`, `AttackRequest`, `PickupItem`, `CraftItem`, and `OpenContainer` contain intent and references, never final authoritative results.
+The exploration client currently sends only movement, chunk, and ping requests. Future gameplay follows the same command pattern: `InteractRequest`, `AttackRequest`, `PickupItem`, `CraftItem`, and `OpenContainer` contain intent and references, never final authoritative results.
 
 ## Server to client
 

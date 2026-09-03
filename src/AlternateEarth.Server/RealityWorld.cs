@@ -82,6 +82,7 @@ public sealed class RealityWorld
 
     public async Task<CanonicalEntity> PlaceObjectAsync(string characterId, PlaceObjectRequest request, CancellationToken cancellationToken = default)
     {
+        if (!Configuration.ObjectPlacementEnabled) throw new InvalidOperationException("Object placement is disabled in this exploration-only reality.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         var requestedPosition = new WorldPosition(player.Position.Region, request.X, request.Y, player.Position.Z);
         if (player.Position.Distance2D(requestedPosition) > 5.0) throw new InvalidOperationException("Objects must be placed within five meters of the character.");
@@ -105,6 +106,7 @@ public sealed class RealityWorld
 
     public async Task<CanonicalEntity> RemoveObjectAsync(string characterId, string entityId, CancellationToken cancellationToken = default)
     {
+        if (!Configuration.ObjectPlacementEnabled) throw new InvalidOperationException("Object modification is disabled in this exploration-only reality.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (!_realityEntities.TryGetValue(entityId, out var entity)) throw new InvalidOperationException("Object does not exist or is part of the immutable base geography.");
         if (player.Position.Distance2D(entity.Position) > 5.0) throw new InvalidOperationException("Objects must be removed from within five meters.");

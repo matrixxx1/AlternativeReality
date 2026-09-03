@@ -8,12 +8,13 @@
 }
 
 * { box-sizing: border-box; }
-html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #15211d; color: var(--ink); }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #15211d; color: var(--ink); font-family: Consolas, "Courier New", monospace; }
+body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1; background: radial-gradient(circle at center, transparent 52%, rgba(3,9,7,.28) 100%); box-shadow: inset 0 0 0 3px rgba(214,185,107,.08); }
 #world { display: block; width: 100%; height: 100%; cursor: crosshair; image-rendering: pixelated; }
-.panel { position: fixed; z-index: 2; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(12px); box-shadow: 0 12px 34px rgba(0,0,0,.24); }
-.title-panel { left: 20px; top: 20px; padding: 14px 18px 13px; min-width: min(410px, calc(100vw - 40px)); border-left: 3px solid var(--accent); }
+.panel { position: fixed; z-index: 2; background: #17241fed; border: 2px solid #9f8d5b; outline: 2px solid #29362f; box-shadow: 4px 4px 0 rgba(4,10,8,.5); }
+.title-panel { left: 18px; top: 18px; padding: 11px 14px 10px; min-width: min(410px, calc(100vw - 36px)); border-left-width: 5px; }
 .eyebrow { color: #a9b6a9; font-size: 10px; font-weight: 800; letter-spacing: .2em; }
-h1 { margin: 5px 0 7px; font-family: Georgia, serif; font-size: clamp(21px, 3vw, 30px); font-weight: 500; }
+h1 { margin: 5px 0 7px; font-size: clamp(19px, 3vw, 27px); font-weight: 700; letter-spacing: -.03em; text-shadow: 2px 2px 0 #080e0b; }
 .status-row { display: flex; align-items: center; gap: 8px; color: #b9c4bb; font-size: 12px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #b75b4d; box-shadow: 0 0 12px currentColor; }
 .dot.online { background: #76c78c; }
@@ -23,7 +24,6 @@ h1 { margin: 5px 0 7px; font-family: Georgia, serif; font-size: clamp(21px, 3vw,
 .swatch.road { background: #d8cfb2; }
 .swatch.building { background: #866e5b; height: 9px; }
 .swatch.water { background: #4c8794; height: 9px; }
-.swatch.structure { background: #e4b95f; height: 9px; }
 .help-panel { left: 20px; bottom: 20px; padding: 12px 14px; display: grid; gap: 6px; color: #b9c4bb; font-size: 12px; }
 kbd { border: 1px solid #56635b; border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; color: #ecf1e8; background: #26312c; font: inherit; font-size: 10px; }
 #toast { position: fixed; z-index: 3; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: #271e19; border: 1px solid #795746; color: #f2d5bd; padding: 9px 14px; opacity: 0; transition: .2s; pointer-events: none; }

@@ -38,24 +38,28 @@ try {
     second.waitFor(message => message.type === 'welcome')
   ]);
   const playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  const placement = {
-    type: 'placeObject', objectType: 'smoke-marker',
-    x: playerA.position.x + 1, y: playerA.position.y, rotationDegrees: 90
-  };
-  first.socket.send(JSON.stringify(placement));
+  first.socket.send(JSON.stringify({ type: 'moveRequest', x: 1, y: 0, sequence: 1 }));
   const [seenByA, seenByB] = await Promise.all([
-    first.waitFor(message => message.type === 'objectCreated'),
-    second.waitFor(message => message.type === 'objectCreated')
+    first.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId),
+    second.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId)
   ]);
-  if (seenByA.entity.id !== seenByB.entity.id) throw new Error('Clients received different canonical entity IDs.');
+  if (seenByA.player.position.x !== seenByB.player.position.x) throw new Error('Clients received different authoritative positions.');
+  if (seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative player did not move east.');
+
+  first.socket.send(JSON.stringify({
+    type: 'placeObject', objectType: 'must-be-rejected',
+    x: seenByA.player.position.x + 1, y: seenByA.player.position.y, rotationDegrees: 0
+  }));
+  const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
   const world = await fetch(`${baseUrl}/api/world`).then(response => response.json());
-  if (!world.realityEntities.some(entity => entity.id === seenByA.entity.id)) throw new Error('Placed object was not present in authoritative world snapshot.');
+  const authoritativePlayer = world.players.find(player => player.id === welcomeA.playerId);
+  if (!authoritativePlayer || authoritativePlayer.position.x !== seenByA.player.position.x) throw new Error('Live world snapshot did not match the movement event.');
   console.log(JSON.stringify({
     ok: true,
     protocol: welcomeA.protocolVersion,
-    playersSynchronized: welcomeB.snapshot.players.length >= 2,
-    entitySynchronized: seenByA.entity.id,
-    persistedInLiveSnapshot: true
+    movementSynchronized: true,
+    authoritativePosition: seenByA.player.position,
+    objectPlacementRejected: rejection.message
   }, null, 2));
 } finally {
   first.socket.close();

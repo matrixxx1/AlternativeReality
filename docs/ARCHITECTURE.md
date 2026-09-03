@@ -78,9 +78,11 @@ Player buildings will be stored as foundations and logical pieces—wall segment
 
 ## Authority and synchronization
 
-The server bounds movement speed and position, restricts placement/removal to five meters, snaps structures, owns IDs and versions, persists accepted changes, and then broadcasts them. A client cannot assign inventory, damage, ownership, or arbitrary final position. Client physics may predict and animate but must reconcile to server updates.
+The server bounds movement speed and position and broadcasts accepted movement. Object placement and removal are currently rejected by the server because this milestone is exploration-only; the dormant implementation remains behind `ObjectPlacementEnabled` for a later construction milestone. A client cannot assign inventory, damage, ownership, or arbitrary final position. Client physics may predict and animate but must reconcile to server updates.
 
 Character records are scoped by `RealityId`; cross-reality transfer is intentionally absent. Single-player is the same server executable bound locally with a private configuration. Changing visibility later does not require world conversion.
+
+The browser client uses a 3/4 oblique camera, visual ground tiles, and depth-sorted raised sprites/polygons. This is presentation only: tile boundaries do not constrain movement, collision, entities, or protocol coordinates.
 
 ## Geographic abstraction
 
@@ -105,4 +107,4 @@ Generated resource IDs and positions are stable for the same inputs. Untouched b
 
 ## Near-term implementation order
 
-The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic generation, authoritative server, SQLite deltas, 2D movement, two-client sync, placement, removal, and restart persistence. Next: chunk-specific snapshots, collision, harvesting/inventory, structured building pieces, authentication/admin controls, then a minimal browser WebGL 3D observer using the same protocol.
+The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic generation, an authoritative server, persistent characters, browser exploration, and two-client movement synchronization. Next: chunk-specific snapshots, collision, richer terrain presentation, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.
