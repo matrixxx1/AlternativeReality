@@ -42,7 +42,12 @@
       <button type="button" data-mode="bike">Bike</button>
       <button type="button" data-mode="raft">Raft</button>
     </div>
-    <div class="light-switches"><label><input id="flashlightToggle" type="checkbox"> Flashlight</label><label><input id="lanternToggle" type="checkbox"> Lantern</label><label><input id="laserToggle" type="checkbox"> Laser</label></div>
+    <div class="light-switches" role="group" aria-label="Lighting options">
+      <strong>Lighting</strong>
+      <label><input id="flashlightToggle" type="checkbox"> Flashlight</label>
+      <label><input id="lanternToggle" type="checkbox"> Lantern</label>
+      <label><input id="laserToggle" type="checkbox"> Laser</label>
+    </div>
   </section>
   <section class="panel help-panel">
     <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
