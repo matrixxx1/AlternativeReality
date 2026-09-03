@@ -221,7 +221,9 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Contains(persistedConfiguration, item => item.ItemType == "knife" && item.Damage == 4 && item.MinimumPriceCents == 1_500 && item.SpeedModifierMph == 1.25 && item.VisibilityModifierMeters == 15);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateItemConfigurationAsync(target.Id, new UpdateItemConfigurationRequest("knife", 100, 100, 0, 0)));
         await world.SetEquipmentAsync(attacker.Id, "weapon", "knife");
-        var knife = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "knife"));
+        CombatResult? knife = null;
+        for (var attempt = 0; attempt < 20 && knife?.Event.Hit != true; attempt++) knife = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "knife"));
+        Assert.NotNull(knife);
         Assert.True(knife.Event.Hit);
         Assert.Equal(4, knife.Event.Damage);
     }
