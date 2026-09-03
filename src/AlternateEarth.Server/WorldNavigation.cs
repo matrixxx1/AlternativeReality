@@ -59,9 +59,10 @@ public sealed class WorldNavigation
         _ => MilesPerHour(2.75)
     };
 
-    public double SpeedFor(TerrainType terrain, TravelMode mode, double staminaFraction = 1, bool magicHikingShoes = false)
+    public double SpeedFor(TerrainType terrain, TravelMode mode, double staminaFraction = 1, bool magicHikingShoes = false, bool magicRunningShoes = false)
     {
-        var hiking = magicHikingShoes && mode is TravelMode.Walk or TravelMode.Run;
+        var running = magicRunningShoes && mode is TravelMode.Walk or TravelMode.Run;
+        var hiking = !running && magicHikingShoes && mode is TravelMode.Walk or TravelMode.Run;
         var effectiveTerrain = hiking && terrain is TerrainType.Mud or TerrainType.Grass or TerrainType.ShallowWater
             ? TerrainType.Pavement
             : terrain;
@@ -76,19 +77,44 @@ public sealed class WorldNavigation
             TravelMode.Bike => SpeedFor(effectiveTerrain) * 2.6,
             TravelMode.Raft when effectiveTerrain is TerrainType.ShallowWater or TerrainType.DeepWater => MilesPerHour(3),
             TravelMode.Raft => MilesPerHour(.5),
+            TravelMode.DirtBike => effectiveTerrain switch
+            {
+                TerrainType.Road or TerrainType.Pavement => MilesPerHour(40),
+                TerrainType.Sidewalk => MilesPerHour(15),
+                TerrainType.Grass or TerrainType.Sand => MilesPerHour(30),
+                TerrainType.Forest or TerrainType.Mud => MilesPerHour(18),
+                TerrainType.ShallowWater => MilesPerHour(8),
+                _ => 0
+            },
+            TravelMode.Motorcycle => effectiveTerrain switch
+            {
+                TerrainType.Road or TerrainType.Pavement => MilesPerHour(90),
+                TerrainType.Sidewalk => MilesPerHour(20),
+                TerrainType.Grass or TerrainType.Sand => MilesPerHour(15),
+                TerrainType.Forest or TerrainType.Mud => MilesPerHour(8),
+                TerrainType.ShallowWater => MilesPerHour(3),
+                _ => 0
+            },
             _ => SpeedFor(effectiveTerrain)
         };
-        return hiking ? speed * 2 : speed;
+        return running ? speed * 3 : hiking ? speed * 2 : speed;
     }
 
-    public static double RunningStaminaDrain(double elapsedSeconds, bool magicHikingShoes) =>
-        .45 * Math.Max(0, elapsedSeconds) * (magicHikingShoes ? .5 : 1);
+    public static double RunningStaminaDrain(double elapsedSeconds, bool reducedByMagicShoes) =>
+        .45 * Math.Max(0, elapsedSeconds) * (reducedByMagicShoes ? .5 : 1);
+
+    public static bool MagicRunningShoesReduceStaminaOn(TerrainType terrain) =>
+        terrain is not TerrainType.Road and not TerrainType.Sidewalk;
+
+    public static double WaterDrain(double elapsedSeconds, bool wearingHat) =>
+        .01 * Math.Max(0, elapsedSeconds) * (wearingHat ? .5 : 1);
 
     public static bool SupportsTravelMode(TerrainType terrain, TravelMode mode) => mode switch
     {
         TravelMode.Skateboard => terrain is TerrainType.Road or TerrainType.Pavement or TerrainType.Sidewalk,
         TravelMode.Bike => terrain != TerrainType.DeepWater,
         TravelMode.Raft => terrain is TerrainType.ShallowWater or TerrainType.DeepWater,
+        TravelMode.DirtBike or TravelMode.Motorcycle => terrain != TerrainType.DeepWater,
         _ => true
     };
 

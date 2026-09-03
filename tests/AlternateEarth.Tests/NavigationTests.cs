@@ -32,6 +32,11 @@ public sealed class NavigationTests
         Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.Grass, TravelMode.Skateboard));
         Assert.True(WorldNavigation.SupportsTravelMode(TerrainType.Pavement, TravelMode.Skateboard));
         Assert.True(navigation.SpeedFor(TerrainType.Grass, TravelMode.Bike) > navigation.SpeedFor(TerrainType.Grass));
+        Assert.Equal(40.0, navigation.SpeedFor(TerrainType.Road, TravelMode.DirtBike) * 2.236936, 3);
+        Assert.Equal(90.0, navigation.SpeedFor(TerrainType.Road, TravelMode.Motorcycle) * 2.236936, 3);
+        Assert.True(navigation.SpeedFor(TerrainType.Grass, TravelMode.DirtBike) > navigation.SpeedFor(TerrainType.Grass, TravelMode.Motorcycle));
+        Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.DeepWater, TravelMode.DirtBike));
+        Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.DeepWater, TravelMode.Motorcycle));
         Assert.Equal(3.0, navigation.SpeedFor(TerrainType.DeepWater, TravelMode.Raft) * 2.236936, 3);
         Assert.True(WorldNavigation.SupportsTravelMode(TerrainType.DeepWater, TravelMode.Raft));
     }
@@ -48,6 +53,21 @@ public sealed class NavigationTests
         Assert.Equal(pavedWalkingSpeed * 4, navigation.SpeedFor(TerrainType.Grass, TravelMode.Run, 1, magicHikingShoes: true));
         Assert.Equal(WorldNavigation.RunningStaminaDrain(1, false) / 2, WorldNavigation.RunningStaminaDrain(1, true));
         Assert.Equal(navigation.SpeedFor(TerrainType.Grass, TravelMode.Bike), navigation.SpeedFor(TerrainType.Grass, TravelMode.Bike, magicHikingShoes: true));
+    }
+
+    [Fact]
+    public void MagicRunningShoesTripleWalkingAndRunningWithoutChangingTerrainRules()
+    {
+        var navigation = CreateNavigation();
+
+        Assert.Equal(navigation.SpeedFor(TerrainType.Road) * 3, navigation.SpeedFor(TerrainType.Road, TravelMode.Walk, magicRunningShoes: true));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Grass) * 6, navigation.SpeedFor(TerrainType.Grass, TravelMode.Run, 1, magicRunningShoes: true));
+        Assert.Equal(navigation.SpeedFor(TerrainType.Mud) * 3, navigation.SpeedFor(TerrainType.Mud, TravelMode.Walk, magicRunningShoes: true));
+        Assert.False(WorldNavigation.MagicRunningShoesReduceStaminaOn(TerrainType.Road));
+        Assert.False(WorldNavigation.MagicRunningShoesReduceStaminaOn(TerrainType.Sidewalk));
+        Assert.True(WorldNavigation.MagicRunningShoesReduceStaminaOn(TerrainType.Pavement));
+        Assert.True(WorldNavigation.MagicRunningShoesReduceStaminaOn(TerrainType.Grass));
+        Assert.Equal(WorldNavigation.WaterDrain(1, false) / 2, WorldNavigation.WaterDrain(1, true));
     }
 
     [Fact]

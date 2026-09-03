@@ -38,7 +38,8 @@ public sealed class SqliteRealityStore
                 Water REAL NOT NULL DEFAULT 10, WalletCents INTEGER NOT NULL DEFAULT 0, GodMode INTEGER NOT NULL DEFAULT 0,
                 FoodProtectedUntilUtc TEXT, WaterProtectedUntilUtc TEXT, LocationId TEXT NOT NULL DEFAULT 'outdoor',
                 FlashlightOn INTEGER NOT NULL DEFAULT 0, LanternOn INTEGER NOT NULL DEFAULT 0, LaserOn INTEGER NOT NULL DEFAULT 0,
-                MagicHikingShoesOn INTEGER NOT NULL DEFAULT 0,
+                MagicHikingShoesOn INTEGER NOT NULL DEFAULT 0, MagicRunningShoesOn INTEGER NOT NULL DEFAULT 0, HatOn INTEGER NOT NULL DEFAULT 0,
+                DirtBikeGasGallons REAL NOT NULL DEFAULT 0, MotorcycleGasGallons REAL NOT NULL DEFAULT 0,
                 Version INTEGER NOT NULL, UpdatedUtc TEXT NOT NULL,
                 FOREIGN KEY (RealityId) REFERENCES Reality(Id)
             );
@@ -101,6 +102,10 @@ public sealed class SqliteRealityStore
         await EnsureColumnAsync(connection, "Characters", "LanternOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "LaserOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "MagicHikingShoesOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "MagicRunningShoesOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "HatOn", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "DirtBikeGasGallons", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "MotorcycleGasGallons", "REAL NOT NULL DEFAULT 0", cancellationToken);
 
         command = connection.CreateCommand();
         command.CommandText = """
@@ -188,7 +193,7 @@ public sealed class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -201,7 +206,8 @@ public sealed class SqliteRealityStore
             WalletCents: reader.GetInt64(11), GodMode: reader.GetInt64(12) != 0,
             FoodProtectedUntilUtc: ReadDate(reader, 13), WaterProtectedUntilUtc: ReadDate(reader, 14),
             LocationId: reader.GetString(15), FlashlightOn: reader.GetInt64(16)!=0, LanternOn: reader.GetInt64(17)!=0, LaserOn: reader.GetInt64(18)!=0,
-            MagicHikingShoesOn: reader.GetInt64(19)!=0);
+            MagicHikingShoesOn: reader.GetInt64(19)!=0, MagicRunningShoesOn: reader.GetInt64(20)!=0, HatOn: reader.GetInt64(21)!=0,
+            DirtBikeGasGallons: Math.Clamp(reader.GetDouble(22), 0, 2), MotorcycleGasGallons: Math.Clamp(reader.GetDouble(23), 0, 4));
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default)
@@ -209,14 +215,15 @@ public sealed class SqliteRealityStore
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
                 Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina, Water = excluded.Water,
                 WalletCents = excluded.WalletCents, GodMode = excluded.GodMode,
                 FoodProtectedUntilUtc = excluded.FoodProtectedUntilUtc, WaterProtectedUntilUtc = excluded.WaterProtectedUntilUtc,
                 LocationId = excluded.LocationId, FlashlightOn=excluded.FlashlightOn, LanternOn=excluded.LanternOn, LaserOn=excluded.LaserOn,
-                MagicHikingShoesOn=excluded.MagicHikingShoesOn,
+                MagicHikingShoesOn=excluded.MagicHikingShoesOn, MagicRunningShoesOn=excluded.MagicRunningShoesOn, HatOn=excluded.HatOn,
+                DirtBikeGasGallons=excluded.DirtBikeGasGallons, MotorcycleGasGallons=excluded.MotorcycleGasGallons,
                 Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
@@ -240,6 +247,10 @@ public sealed class SqliteRealityStore
         command.Parameters.AddWithValue("$lantern",player.LanternOn?1:0);
         command.Parameters.AddWithValue("$laser",player.LaserOn?1:0);
         command.Parameters.AddWithValue("$magicHikingShoes", player.MagicHikingShoesOn ? 1 : 0);
+        command.Parameters.AddWithValue("$magicRunningShoes", player.MagicRunningShoesOn ? 1 : 0);
+        command.Parameters.AddWithValue("$hat", player.HatOn ? 1 : 0);
+        command.Parameters.AddWithValue("$dirtBikeGas", player.DirtBikeGasGallons);
+        command.Parameters.AddWithValue("$motorcycleGas", player.MotorcycleGasGallons);
         command.Parameters.AddWithValue("$version", player.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);

@@ -7,6 +7,19 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
+    private static readonly (string Item, string Display, int Min, int Max, bool Single)[] MerchantCatalog =
+    {
+        ("rock", "a rock", 1, 100, false), ("ballBearing", "a ball bearing", 5, 200, false),
+        ("skateboard", "a skateboard", 20_000, 30_000, true), ("bike", "a bike", 40_000, 50_000, true),
+        ("dirtBike", "a dirt bike", 300_000, 500_000, true), ("motorcycle", "a motorcycle", 500_000, 1_000_000, true),
+        ("gallonOfGas", "a gallon of gas", 500, 1_000, false), ("inflatableRaft", "an inflatable raft", 45_000, 65_000, true),
+        ("flashlight", "a flashlight", 1_000, 5_000, true), ("lantern", "a lantern", 5_000, 10_000, true),
+        ("laser", "a laser", 20_000, 40_000, true), ("magicHikingShoes", "magic hiking shoes", 10_000, 40_000, true),
+        ("magicRunningShoes", "magic running shoes", 10_000, 40_000, true), ("hat", "a hat", 3_000, 7_500, true),
+        ("water", "water", 50, 200, false), ("food", "food", 200, 500, false)
+    };
+    private const double DirtBikeTankGallons = 2;
+    private const double MotorcycleTankGallons = 4;
     private readonly ConcurrentDictionary<string, Dictionary<string, int>> _inventories = new();
     private readonly ConcurrentDictionary<(string Player, string Actor), double> _relationships = new();
     private readonly ConcurrentDictionary<string, DungeonState> _dungeons = new();
@@ -41,6 +54,9 @@ public sealed partial class RealityWorld
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        var hikingShoesOn = enabled ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(playerId, "magicHikingShoes") > 0;
+        var runningShoesOn = enabled ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(playerId, "magicRunningShoes") > 0;
+        if (hikingShoesOn && runningShoesOn) runningShoesOn = false;
         var updated = player with
         {
             GodMode = enabled,
@@ -48,24 +64,56 @@ public sealed partial class RealityWorld
             Water = enabled ? player.MaximumWater : player.Water,
             WalletCents = enabled ? Math.Max(50_000, player.WalletCents) : player.WalletCents,
             HealthHearts = enabled ? Math.Max(1, player.HealthHearts) : player.HealthHearts,
-            TravelMode = !enabled && player.TravelMode==TravelMode.Skateboard && InventoryQuantity(playerId,"skateboard")<=0 || !enabled && player.TravelMode==TravelMode.Bike && InventoryQuantity(playerId,"bike")<=0 || !enabled && player.TravelMode==TravelMode.Raft && InventoryQuantity(playerId,"inflatableRaft")<=0 ? TravelMode.Walk : player.TravelMode,
+            TravelMode = !enabled && TravelModeUnavailable(playerId, player) ? TravelMode.Walk : player.TravelMode,
             FlashlightOn = enabled ? player.FlashlightOn : player.FlashlightOn && InventoryQuantity(playerId,"flashlight")>0,
             LanternOn = enabled ? player.LanternOn : player.LanternOn && InventoryQuantity(playerId,"lantern")>0,
             LaserOn = enabled ? player.LaserOn : player.LaserOn && InventoryQuantity(playerId,"laser")>0,
-            MagicHikingShoesOn = enabled ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(playerId,"magicHikingShoes")>0,
+            MagicHikingShoesOn = hikingShoesOn,
+            MagicRunningShoesOn = runningShoesOn,
+            HatOn = enabled ? player.HatOn : player.HatOn && InventoryQuantity(playerId, "hat") > 0,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken); return updated;
     }
 
+    private bool TravelModeUnavailable(string playerId, PlayerState player) => player.TravelMode switch
+    {
+        TravelMode.Skateboard => InventoryQuantity(playerId, "skateboard") <= 0,
+        TravelMode.Bike => InventoryQuantity(playerId, "bike") <= 0,
+        TravelMode.Raft => InventoryQuantity(playerId, "inflatableRaft") <= 0,
+        TravelMode.DirtBike => InventoryQuantity(playerId, "dirtBike") <= 0 || player.DirtBikeGasGallons <= 0,
+        TravelMode.Motorcycle => InventoryQuantity(playerId, "motorcycle") <= 0 || player.MotorcycleGasGallons <= 0,
+        _ => false
+    };
+
     public async Task<PlayerState> SetLightsAsync(string playerId,bool flashlight,bool lantern,bool laser,CancellationToken cancellationToken=default)
     { if(!_players.TryGetValue(playerId,out var player))throw new InvalidOperationException("Unknown player.");if(!player.GodMode&&flashlight&&InventoryQuantity(playerId,"flashlight")<=0)throw new InvalidOperationException("You need a flashlight in your inventory.");if(!player.GodMode&&lantern&&InventoryQuantity(playerId,"lantern")<=0)throw new InvalidOperationException("You need a lantern in your inventory.");if(!player.GodMode&&laser&&InventoryQuantity(playerId,"laser")<=0)throw new InvalidOperationException("You need a laser in your inventory.");var updated=player with{FlashlightOn=flashlight,LanternOn=lantern,LaserOn=laser,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated; }
 
-    public async Task<PlayerState> SetMagicHikingShoesAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
+    public Task<PlayerState> SetMagicHikingShoesAsync(string playerId, bool enabled, CancellationToken cancellationToken = default) =>
+        SetEquipmentAsync(playerId, "shoes", enabled ? "magicHikingShoes" : null, cancellationToken);
+
+    public Task<PlayerState> SetMagicRunningShoesAsync(string playerId, bool enabled, CancellationToken cancellationToken = default) =>
+        SetEquipmentAsync(playerId, "shoes", enabled ? "magicRunningShoes" : null, cancellationToken);
+
+    public async Task<PlayerState> SetEquipmentAsync(string playerId, string slot, string? itemType, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
-        if (enabled && !player.GodMode && InventoryQuantity(playerId, "magicHikingShoes") <= 0) throw new InvalidOperationException("You need magic hiking shoes in your inventory.");
-        var updated = player with { MagicHikingShoesOn = enabled, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        slot = (slot ?? string.Empty).Trim().ToLowerInvariant();
+        itemType = string.IsNullOrWhiteSpace(itemType) ? null : itemType.Trim();
+        PlayerState updated;
+        if (slot == "shoes")
+        {
+            if (itemType is not null && itemType is not ("magicHikingShoes" or "magicRunningShoes")) throw new InvalidOperationException("That item cannot be worn as shoes.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
+            updated = player with { MagicHikingShoesOn = itemType == "magicHikingShoes", MagicRunningShoesOn = itemType == "magicRunningShoes", SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        }
+        else if (slot == "hat")
+        {
+            if (itemType is not null && itemType != "hat") throw new InvalidOperationException("That item cannot be worn as a hat.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, "hat") <= 0) throw new InvalidOperationException("You need a hat in your inventory.");
+            updated = player with { HatOn = itemType == "hat", Version = player.Version + 1 };
+        }
+        else throw new InvalidOperationException("That equipment slot is not available yet.");
         await SavePlayerAsync(updated, cancellationToken);
         return updated;
     }
@@ -92,7 +140,8 @@ public sealed partial class RealityWorld
             {
                 if (idle >= TimeSpan.FromSeconds(1) && player.Stamina < player.MaximumStamina)
                     updated = updated with { Stamina = Math.Min(player.MaximumStamina, player.Stamina + (.25 * elapsed.TotalSeconds)) };
-                if (!(player.WaterProtectedUntilUtc > now)) updated = updated with { Water = Math.Max(0, updated.Water - (.01 * elapsed.TotalSeconds)) };
+                var wearingHat = player.HatOn && InventoryQuantity(pair.Key, "hat") > 0;
+                if (!(player.WaterProtectedUntilUtc > now)) updated = updated with { Water = Math.Max(0, updated.Water - WorldNavigation.WaterDrain(elapsed.TotalSeconds, wearingHat)) };
                 if (idle >= TimeSpan.FromSeconds(30) && player.HealthHearts < player.MaximumHealthHearts &&
                     (!_lastIdleHeal.TryGetValue(pair.Key, out var lastHeal) || now - lastHeal >= TimeSpan.FromSeconds(30)))
                 {
@@ -112,12 +161,23 @@ public sealed partial class RealityWorld
     public async Task<PlayerState> ConsumeItemAsync(string playerId, string itemType, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
-        var normalized = itemType.Trim().ToLowerInvariant(); if (normalized is not ("food" or "water")) throw new InvalidOperationException("That item cannot be consumed.");
+        var normalized = itemType.Trim().ToLowerInvariant(); if (normalized is not ("food" or "water" or "gallonofgas")) throw new InvalidOperationException("That item cannot be consumed.");
+        if (normalized == "gallonofgas")
+        {
+            if (player.TravelMode is not (TravelMode.DirtBike or TravelMode.Motorcycle)) throw new InvalidOperationException("Select your dirt bike or motorcycle before adding gas.");
+            var current = FuelGallons(player);
+            var capacity = player.TravelMode == TravelMode.DirtBike ? DirtBikeTankGallons : MotorcycleTankGallons;
+            if (current >= capacity - .0001) throw new InvalidOperationException($"Your {VehicleName(player.TravelMode)} tank is already full.");
+        }
         if (!RemoveInventory(playerId, normalized, 1)) throw new InvalidOperationException($"You do not have any {normalized}.");
         var now = DateTimeOffset.UtcNow;
         var updated = normalized == "food"
             ? player with { Stamina = player.MaximumStamina, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), FoodProtectedUntilUtc = now.AddMinutes(5), Version = player.Version + 1 }
-            : player with { Water = player.MaximumWater, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), WaterProtectedUntilUtc = now.AddMinutes(5), Version = player.Version + 1 };
+            : normalized == "water"
+                ? player with { Water = player.MaximumWater, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), WaterProtectedUntilUtc = now.AddMinutes(5), Version = player.Version + 1 }
+                : player.TravelMode == TravelMode.DirtBike
+                    ? player with { DirtBikeGasGallons = Math.Min(DirtBikeTankGallons, player.DirtBikeGasGallons + 1), Version = player.Version + 1 }
+                    : player with { MotorcycleGasGallons = Math.Min(MotorcycleTankGallons, player.MotorcycleGasGallons + 1), Version = player.Version + 1 };
         await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken); return updated;
     }
 
@@ -151,14 +211,30 @@ public sealed partial class RealityWorld
     private async Task<MovementOutcome> MoveInDungeonAsync(PlayerState player, MoveRequest request, CancellationToken cancellationToken)
     {
         if (!_dungeons.TryGetValue(player.LocationId, out var dungeon)) return new(player, false, true, false, false, false, "Dungeon unavailable.");
+        if (!player.GodMode && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
+        {
+            var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+            await SavePlayerAsync(stopped, cancellationToken);
+            return new(stopped, false, true, false, false, false, $"Your {VehicleName(player.TravelMode)} is out of gas. Add gasoline before using it again.");
+        }
         var length = Math.Sqrt(request.X * request.X + request.Y * request.Y); var dx = length > 1 ? request.X / length : request.X; var dy = length > 1 ? request.Y / length : request.Y;
         var now = DateTimeOffset.UtcNow; var previous = _lastMovement.AddOrUpdate(player.Id, now, (_, old) => now); var elapsed = Math.Clamp((now - previous).TotalSeconds, .01, .15);
         var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicHikingShoes") > 0);
-        var speed = Navigation.SpeedFor(TerrainType.Pavement, player.TravelMode, player.Stamina / player.MaximumStamina, wearingMagicHikingShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var wearingMagicRunningShoes = player.MagicRunningShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicRunningShoes") > 0);
+        var speed = Navigation.SpeedFor(TerrainType.Pavement, player.TravelMode, player.Stamina / player.MaximumStamina, wearingMagicHikingShoes, wearingMagicRunningShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
         var next = player.Position with { X = Math.Clamp(player.Position.X + dx * speed * elapsed, .5, dungeon.Width - .5), Y = Math.Clamp(player.Position.Y + dy * speed * elapsed, .5, dungeon.Height - .5), Z = 0 };
         var blocked = dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, next, wall)); if (blocked) next = player.Position;
+        var distance = player.Position.Distance2D(next);
+        var dirtBikeGas = player.DirtBikeGasGallons;
+        var motorcycleGas = player.MotorcycleGasGallons;
+        if (!player.GodMode && distance > .001)
+        {
+            if (player.TravelMode == TravelMode.DirtBike) dirtBikeGas = FuelAfterTravel(dirtBikeGas, distance, DirtBikeMilesPerGallon);
+            if (player.TravelMode == TravelMode.Motorcycle) motorcycleGas = FuelAfterTravel(motorcycleGas, distance, MotorcycleMilesPerGallon);
+        }
         var updated = player with { Position = next, SpeedMetersPerSecond = blocked ? 0 : player.Position.Distance2D(next) / elapsed, Terrain = TerrainType.Pavement,
-            Stamina = player.TravelMode == TravelMode.Run && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, wearingMagicHikingShoes)) : player.Stamina, Version = player.Version + 1 };
+            Stamina = player.TravelMode == TravelMode.Run && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, wearingMagicHikingShoes || wearingMagicRunningShoes && WorldNavigation.MagicRunningShoesReduceStaminaOn(TerrainType.Pavement))) : player.Stamina,
+            DirtBikeGasGallons = dirtBikeGas, MotorcycleGasGallons = motorcycleGas, Version = player.Version + 1 };
         await RevealAsync(updated, dungeon, cancellationToken); await SavePlayerAsync(updated, cancellationToken); return new(updated, !blocked, blocked, false, false, false, null);
     }
 
@@ -240,11 +316,30 @@ public sealed partial class RealityWorld
 
     private TradeQuote GenerateTradeQuote(string playerId, ActorState merchant)
     {
-        var ranges = new (string Item, int Min, int Max)[] { ("rock",1,100),("ballBearing",5,200),("skateboard",20000,30000),("bike",40000,50000),("inflatableRaft",45000,65000),("flashlight",1000,5000),("lantern",5000,10000),("laser",20000,40000),("magicHikingShoes",10000,40000),("water",50,200),("food",200,500) };
-        var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}")); var selected = ranges.OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray(); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
-        var offers = selected.Select(range => new MerchantOffer(range.Item, range.Item is "bike" or "skateboard" or "inflatableRaft" or "flashlight" or "lantern" or "laser" or "magicHikingShoes" ? 1 : random.Next(3, 31), (long)Math.Clamp(Math.Round(random.Next(range.Min, range.Max + 1) * factor), range.Min, range.Max))).ToArray();
+        var baseOffers = BaseMerchantOffers(merchant); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
+        var offers = baseOffers.Select(offer =>
+        {
+            var range = MerchantCatalog.First(item => item.Item == offer.ItemType);
+            return offer with { UnitPriceCents = (long)Math.Clamp(Math.Round(offer.UnitPriceCents * factor), range.Min, range.Max) };
+        }).ToArray();
         return new TradeQuote(merchant.Id, merchant.Name, friendship, offers);
     }
+
+    private MerchantOffer[] BaseMerchantOffers(ActorState merchant)
+    {
+        var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}"));
+        var selected = MerchantCatalog.OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray();
+        return selected.Select(range => new MerchantOffer(range.Item, range.Single ? 1 : random.Next(3, 31), random.Next(range.Min, range.Max + 1))).ToArray();
+    }
+
+    private static string DisplayItem(string itemType) => itemType switch
+    {
+        "magicHikingShoes" => "magic hiking shoes",
+        "magicRunningShoes" => "magic running shoes",
+        "dirtBike" => "a dirt bike",
+        "gallonOfGas" => "a gallon of gas",
+        _ => itemType
+    };
 
     public async Task<(CombatEvent Event, InventoryState Inventory, RelationshipState Relationship, DungeonState? Dungeon)> AttackAsync(string playerId, CombatRequest request, CancellationToken cancellationToken = default)
     {

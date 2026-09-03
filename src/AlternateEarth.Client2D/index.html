@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -28,6 +28,7 @@
     <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
     <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
     <div class="water"><span>Water</span><strong id="waterValue">●●●●●●●●●●</strong></div>
+    <div><span>Gas</span><strong id="gasValue">—</strong></div>
     <div><span>Wallet</span><strong id="walletValue">$0.00</strong></div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
     <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
@@ -40,6 +41,8 @@
       <button type="button" data-mode="run">Run</button>
       <button type="button" data-mode="skateboard">Skateboard</button>
       <button type="button" data-mode="bike">Bike</button>
+      <button type="button" data-mode="dirtBike">Dirt bike</button>
+      <button type="button" data-mode="motorcycle">Motorcycle</button>
       <button type="button" data-mode="raft">Raft</button>
     </div>
     <div class="light-switches" role="group" aria-label="Lighting options">
@@ -47,10 +50,6 @@
       <label><input id="flashlightToggle" type="checkbox"> Flashlight</label>
       <label><input id="lanternToggle" type="checkbox"> Lantern</label>
       <label><input id="laserToggle" type="checkbox"> Laser</label>
-    </div>
-    <div class="equipment-switches" role="group" aria-label="Equipment options">
-      <strong>Gear</strong>
-      <label><input id="magicHikingShoesToggle" type="checkbox"> Magic hiking shoes</label>
     </div>
   </section>
   <section class="panel help-panel">
@@ -66,8 +65,22 @@
     <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
   </section>
   <section class="panel inventory-panel">
-    <strong>Inventory</strong>
-    <div id="inventoryItems" class="inventory-items">Empty</div>
+    <div class="inventory-header"><strong>Inventory &amp; equipment</strong><button id="toggleInventoryButton" type="button">Hide</button></div>
+    <div id="inventoryContent">
+      <div class="equipment-doll" role="group" aria-label="Equipped clothing">
+        <svg class="person-outline" viewBox="0 0 100 180" aria-hidden="true">
+          <circle cx="50" cy="25" r="17"></circle>
+          <path d="M35 48 L65 48 L75 105 L62 105 L68 165 M38 105 L32 165 M36 58 L14 108 M64 58 L86 108"></path>
+        </svg>
+        <button id="equipmentHat" class="equipment-slot slot-hat" type="button"><span>Hat</span><em>Empty</em></button>
+        <button id="equipmentShirt" class="equipment-slot slot-shirt" type="button" disabled><span>Shirt</span><em>Empty</em></button>
+        <button id="equipmentGloves" class="equipment-slot slot-gloves" type="button" disabled><span>Gloves</span><em>Empty</em></button>
+        <button id="equipmentPants" class="equipment-slot slot-pants" type="button" disabled><span>Pants</span><em>Empty</em></button>
+        <button id="equipmentShoes" class="equipment-slot slot-shoes" type="button"><span>Shoes</span><em>Empty</em></button>
+      </div>
+      <strong class="carried-title">Carried items</strong>
+      <div id="inventoryItems" class="inventory-items">Empty</div>
+    </div>
   </section>
   <section id="characterPanel" class="panel character-panel" hidden>
     <strong>Base character switcher</strong>
@@ -109,6 +122,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>

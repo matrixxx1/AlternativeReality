@@ -66,21 +66,21 @@ public sealed partial class RealityWorld
         if (_players.Count >= Configuration.MaximumPlayers) throw new InvalidOperationException("This reality is full.");
         var name = SanitizeName(requestedName);
         var existing = await _store.LoadCharacterAsync(Configuration.Id, characterId, cancellationToken);
+        var home = string.IsNullOrWhiteSpace(accountId) ? null : await EnsureHomeAsync(characterId, accountId, cancellationToken);
         var center = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
-        var location = existing?.LocationId ?? "outdoor";
-        var resumeInterior = location != "outdoor" && _dungeons.ContainsKey(location);
-        var position = resumeInterior ? existing!.Position : existing?.Position ?? Navigation.FindNearestWalkable(center);
-        if (!resumeInterior && (Navigation.IsBlocked(position.X, position.Y) || Navigation.TerrainAt(position.X, position.Y) == TerrainType.DeepWater)) position = Navigation.FindNearestWalkable(center);
-        position = resumeInterior ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
-        if (!resumeInterior) location = "outdoor";
+        var location = home?.Id ?? "outdoor";
+        var position = home?.Exit ?? Navigation.FindNearestWalkable(center);
+        position = home is null ? position with { Z = Navigation.ElevationAt(position.X, position.Y) } : position with { Z = 0 };
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
-            resumeInterior ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, existing?.TravelMode ?? TravelMode.Walk,
+            home is not null ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, home is not null ? TravelMode.Walk : existing?.TravelMode ?? TravelMode.Walk,
             Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10,
             Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
             existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
             existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false,
-            existing?.MagicHikingShoesOn ?? false);
+            existing?.MagicHikingShoesOn ?? false, existing?.MagicRunningShoesOn ?? false, existing?.HatOn ?? false,
+            existing?.DirtBikeGasGallons ?? 0, existing?.MotorcycleGasGallons ?? 0);
+        if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
@@ -88,23 +88,40 @@ public sealed partial class RealityWorld
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         foreach (var relationship in await _store.LoadRelationshipsAsync(Configuration.Id, characterId, cancellationToken))
             _relationships[(characterId, relationship.ActorId)] = relationship.FriendRating;
-        if (!string.IsNullOrWhiteSpace(accountId))
-        {
-            _playerAccounts[characterId] = accountId;
-            var baseBuilding = await _store.LoadBaseBuildingAsync(accountId, Configuration.Id, cancellationToken);
-            if (baseBuilding is null || !_baseEntities.ContainsKey(baseBuilding))
-            {
-                var buildings = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building).OrderBy(entity => entity.Id).ToArray();
-                if (buildings.Length > 0)
-                {
-                    baseBuilding = buildings[(StableInt(accountId) & int.MaxValue) % buildings.Length].Id;
-                    await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, baseBuilding, cancellationToken);
-                }
-            }
-            if (baseBuilding is not null) _baseBuildings[accountId] = baseBuilding;
-        }
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
         return player;
+    }
+
+    private async Task<DungeonState?> EnsureHomeAsync(string playerId, string accountId, CancellationToken cancellationToken)
+    {
+        _playerAccounts[playerId] = accountId;
+        var baseBuilding = await _store.LoadBaseBuildingAsync(accountId, Configuration.Id, cancellationToken);
+        if (baseBuilding is null || !_baseEntities.ContainsKey(baseBuilding))
+        {
+            var buildings = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building).OrderBy(entity => entity.Id).ToArray();
+            if (buildings.Length == 0) return null;
+            baseBuilding = buildings[(StableInt(accountId) & int.MaxValue) % buildings.Length].Id;
+            await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, baseBuilding, cancellationToken);
+        }
+        _baseBuildings[accountId] = baseBuilding;
+        var building = _baseEntities[baseBuilding];
+        var homeId = $"home:{accountId}:{baseBuilding}";
+        var home = _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
+        SetBaseReturnPosition(playerId, baseBuilding);
+        return home;
+    }
+
+    private DungeonState? HomeForPlayer(string playerId)
+    {
+        if (!_playerAccounts.TryGetValue(playerId, out var accountId) || !_baseBuildings.TryGetValue(accountId, out var buildingId) || !_baseEntities.TryGetValue(buildingId, out var building)) return null;
+        var homeId = $"home:{accountId}:{buildingId}";
+        return _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
+    }
+
+    private void SetBaseReturnPosition(string playerId, string buildingId)
+    {
+        var door = _baseEntities.Values.FirstOrDefault(entity => entity.Kind == EntityKind.Door && entity.Properties.GetValueOrDefault("buildingId") == buildingId);
+        if (door is not null) _returnPositions[playerId] = Navigation.FindNearestWalkable(door.Position);
     }
 
     public void Leave(string characterId)
@@ -140,9 +157,17 @@ public sealed partial class RealityWorld
         var previous = _lastMovement.AddOrUpdate(characterId, now, (_, old) => now);
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
         var currentTerrain = Navigation.TerrainAt(player.Position.X, player.Position.Y);
+        if (!player.GodMode && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
+        {
+            var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+            await SavePlayerAsync(stopped, cancellationToken);
+            return new(stopped, false, true, false, false, false, $"Your {VehicleName(player.TravelMode)} is out of gas. Add gasoline before using it again.");
+        }
         var staminaFraction = player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina;
         var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(characterId, "magicHikingShoes") > 0);
-        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction, wearingMagicHikingShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var wearingMagicRunningShoes = player.MagicRunningShoesOn && (player.GodMode || InventoryQuantity(characterId, "magicRunningShoes") > 0);
+        var reducedStaminaDrain = wearingMagicHikingShoes || wearingMagicRunningShoes && WorldNavigation.MagicRunningShoesReduceStaminaOn(currentTerrain);
+        var metersPerSecond = Navigation.SpeedFor(currentTerrain, player.TravelMode, staminaFraction, wearingMagicHikingShoes, wearingMagicRunningShoes) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
             X = player.Position.X + (directionX * metersPerSecond * elapsed * Configuration.GameSpeed),
@@ -182,11 +207,20 @@ public sealed partial class RealityWorld
         }
 
         var distance = player.Position.Distance2D(next);
+        var dirtBikeGas = player.DirtBikeGasGallons;
+        var motorcycleGas = player.MotorcycleGasGallons;
+        if (!player.GodMode && distance > .001)
+        {
+            if (player.TravelMode == TravelMode.DirtBike) dirtBikeGas = FuelAfterTravel(dirtBikeGas, distance, DirtBikeMilesPerGallon);
+            if (player.TravelMode == TravelMode.Motorcycle) motorcycleGas = FuelAfterTravel(motorcycleGas, distance, MotorcycleMilesPerGallon);
+        }
         var updated = player with
         {
             Position = next with { Z = Navigation.ElevationAt(next.X, next.Y) }, Terrain = nextTerrain,
             SpeedMetersPerSecond = distance > .001 ? distance / elapsed : 0,
-            Stamina = player.TravelMode == TravelMode.Run && distance > .001 && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, wearingMagicHikingShoes)) : player.Stamina,
+            Stamina = player.TravelMode == TravelMode.Run && distance > .001 && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, reducedStaminaDrain)) : player.Stamina,
+            DirtBikeGasGallons = dirtBikeGas,
+            MotorcycleGasGallons = motorcycleGas,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken);
@@ -198,6 +232,10 @@ public sealed partial class RealityWorld
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
         if (!player.GodMode && mode == TravelMode.Bike && InventoryQuantity(characterId, "bike") <= 0) throw new InvalidOperationException("You need a bike in your inventory.");
+        if (!player.GodMode && mode == TravelMode.DirtBike && InventoryQuantity(characterId, "dirtBike") <= 0) throw new InvalidOperationException("You need a dirt bike in your inventory.");
+        if (!player.GodMode && mode == TravelMode.Motorcycle && InventoryQuantity(characterId, "motorcycle") <= 0) throw new InvalidOperationException("You need a motorcycle in your inventory.");
+        if (!player.GodMode && mode == TravelMode.DirtBike && player.DirtBikeGasGallons <= 0) throw new InvalidOperationException("Your dirt bike is out of gas. Use a gallon of gas while the dirt bike is selected.");
+        if (!player.GodMode && mode == TravelMode.Motorcycle && player.MotorcycleGasGallons <= 0) throw new InvalidOperationException("Your motorcycle is out of gas. Use a gallon of gas while the motorcycle is selected.");
         if (mode == TravelMode.Raft)
         {
             if (!player.GodMode && InventoryQuantity(characterId, "inflatableRaft") <= 0) throw new InvalidOperationException("You need an inflatable raft.");
@@ -443,9 +481,10 @@ public sealed partial class RealityWorld
         {
             if (actor.IsMerchant)
             {
-                var goods = new[] { ("rocks", "$0.01-$1.00"), ("ball bearings", "$0.05-$2.00"), ("food", "$2-$5"), ("water", "$0.50-$2"), ("a flashlight", "$10-$50"), ("a lantern", "$50-$100"), ("a laser", "$200-$400"), ("magic hiking shoes", "$100-$400"), ("a skateboard", "$200-$300"), ("a bike", "$400-$500"), ("an inflatable raft", "$450-$650") };
-                var good = goods[_actorRandom.Next(goods.Length)];
-                return $"For sale! {good.Item1} for {good.Item2}.";
+                var offers = BaseMerchantOffers(actor);
+                var offer = offers[_actorRandom.Next(offers.Length)];
+                var good = MerchantCatalog.First(item => item.Item == offer.ItemType);
+                return $"For sale! {good.Display} for ${offer.UnitPriceCents / 100.0:F2} today. Friends pay less!";
             }
             var jokes = new[]
             {
@@ -477,8 +516,24 @@ public sealed partial class RealityWorld
         ? actor.Name
         : char.ToUpperInvariant(actor.Subtype[0]) + actor.Subtype[1..];
 
+    private const double MetersPerMile = 1609.344;
+    private const double DirtBikeMilesPerGallon = 50;
+    private const double MotorcycleMilesPerGallon = 45;
+    private static bool IsMotorized(TravelMode mode) => mode is TravelMode.DirtBike or TravelMode.Motorcycle;
+    private static double FuelGallons(PlayerState player) => player.TravelMode == TravelMode.DirtBike ? player.DirtBikeGasGallons : player.MotorcycleGasGallons;
+    private static double FuelAfterTravel(double gallons, double meters, double milesPerGallon) => Math.Max(0, gallons - meters / MetersPerMile / milesPerGallon);
+    private static string VehicleName(TravelMode mode) => mode == TravelMode.DirtBike ? "dirt bike" : "motorcycle";
+
     private PlayerState ResetPlayer(PlayerState player)
     {
+        var home = HomeForPlayer(player.Id);
+        if (home is not null)
+        {
+            SetBaseReturnPosition(player.Id, home.BuildingId);
+            return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
+                HealthHearts = 10, Stamina = 10, Water = 10, TravelMode = TravelMode.Walk, LocationId = home.Id,
+                FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, Version = player.Version + 1 };
+        }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
             HealthHearts = 10, Stamina = 10, Water = 10, TravelMode = TravelMode.Walk, LocationId = "outdoor",

@@ -88,7 +88,16 @@ app.MapPost("/api/account/setup", async (HttpContext context, AccountService acc
     try
     {
         var login = await accounts.SetupOrLoginAsync(request.Username, request.Password, context.RequestAborted);
-        context.Response.Cookies.Append(AccountService.CookieName, login.SessionToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, Secure = context.Request.IsHttps, MaxAge = TimeSpan.FromDays(365) });
+        context.Response.Cookies.Append(AccountService.CookieName, login.SessionToken, new CookieOptions
+        {
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Lax,
+            Secure = context.Request.IsHttps,
+            Path = "/",
+            MaxAge = TimeSpan.FromDays(365),
+            Expires = DateTimeOffset.UtcNow.AddDays(365)
+        });
         return Results.Ok(new { login.AccountId, login.CharacterId, login.Username, login.SessionToken });
     }
     catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }

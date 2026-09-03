@@ -76,7 +76,7 @@ public sealed class RealitySocketHub
                         if (movement is not null)
                         {
                             if (movement.Moved || movement.Drowned || movement.Fell || movement.Died) await BroadcastAsync(new { type = "playerMoved", player = movement.Player }, null, cancellationToken);
-                            if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", message = "Something is blocking the way." }, cancellationToken);
+                            if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", message = movement.Message ?? "Something is blocking the way." }, cancellationToken);
                             if (movement.Fell) await connection.SendAsync(new { type = "playerFell", message = movement.Message, player = movement.Player }, cancellationToken);
                             if (movement.Died) await connection.SendAsync(new { type = "playerDied", reason = movement.Message, player = movement.Player }, cancellationToken);
                             if (movement.Player.LocationId != "outdoor") await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
@@ -99,6 +99,16 @@ public sealed class RealitySocketHub
                         var shoesRequest = root.Deserialize<SetMagicHikingShoesRequest>(SharedJson.Options)!;
                         var shoesPlayer = await _world.SetMagicHikingShoesAsync(characterId, shoesRequest.Enabled, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = shoesPlayer }, null, cancellationToken);
+                        break;
+                    case "setMagicRunningShoes":
+                        var runningShoesRequest = root.Deserialize<SetMagicRunningShoesRequest>(SharedJson.Options)!;
+                        var runningShoesPlayer = await _world.SetMagicRunningShoesAsync(characterId, runningShoesRequest.Enabled, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = runningShoesPlayer }, null, cancellationToken);
+                        break;
+                    case "setEquipment":
+                        var equipmentRequest = root.Deserialize<SetEquipmentRequest>(SharedJson.Options)!;
+                        var equipmentPlayer = await _world.SetEquipmentAsync(characterId, equipmentRequest.Slot, equipmentRequest.ItemType, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = equipmentPlayer }, null, cancellationToken);
                         break;
                     case "enterDungeon":
                         var enter = root.Deserialize<EnterDungeonRequest>(SharedJson.Options)!;
@@ -191,7 +201,7 @@ public sealed class RealitySocketHub
                         await connection.SendAsync(new { type = "chunkSnapshot", snapshot = _world.CreateSnapshot() }, cancellationToken);
                         break;
                     case "requestArea":
-                        var requestedArea=root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;if(await _world.LoadAreaAsync(requestedArea.X,requestedArea.Y,cancellationToken))await connection.SendAsync(new{type="worldExpanded",snapshot=_world.CreateSnapshot()},cancellationToken);break;
+                        var requestedArea=root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;var areaExpanded=await _world.LoadAreaAsync(requestedArea.X,requestedArea.Y,cancellationToken);await connection.SendAsync(new{type="worldExpanded",expanded=areaExpanded,snapshot=_world.CreateSnapshot()},cancellationToken);break;
                     case "requestPrivateState":
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;

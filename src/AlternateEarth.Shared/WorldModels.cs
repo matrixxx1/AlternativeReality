@@ -31,7 +31,9 @@ public enum TravelMode
     Run,
     Skateboard,
     Bike,
-    Raft
+    Raft,
+    DirtBike,
+    Motorcycle
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -81,7 +83,11 @@ public sealed record PlayerState(
     bool FlashlightOn = false,
     bool LanternOn = false,
     bool LaserOn = false,
-    bool MagicHikingShoesOn = false);
+    bool MagicHikingShoesOn = false,
+    bool MagicRunningShoesOn = false,
+    bool HatOn = false,
+    double DirtBikeGasGallons = 0,
+    double MotorcycleGasGallons = 0);
 
 public sealed record ActorState(
     string Id,

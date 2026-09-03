@@ -32,16 +32,21 @@ For access from other devices on the same network, run `tools/open-lan-port.ps1`
 - Use WASD or an arrow key to take direct control and cancel click-to-walk.
 - Right-drag to pan the camera; a stationary right-click opens the action window.
 - Use the mouse wheel to zoom.
-- Choose Walk, Run, Skateboard, Bike, or Raft. Equipment must be bought before use; God Mode bypasses ownership checks. Running drains stamina, dehydration halves speed, skateboards fail off paved surfaces, bikes retain most of their speed off-road, and rafts make deep water safe.
+- Choose Walk, Run, Skateboard, Bike, Dirt bike, Motorcycle, or Raft. Equipment must be bought before use; God Mode bypasses ownership checks. Running drains stamina, dehydration halves speed, skateboards fail off paved surfaces, bikes retain most of their speed off-road, and rafts make deep water safe.
+- Dirt bikes cost $3,000–$5,000 and reach 40 mph; motorcycles reach 90 mph and currently cost $5,000–$10,000. Their separate 2- and 4-gallon tanks consume fuel by actual distance at representative 50 and 45 mpg. Merchants sell gallons for $5–$10 at one advertised randomized price. Empty motorized vehicles cannot move until refueled; God Mode bypasses both fuel checks and consumption.
 - God Mode supplies a 5× movement multiplier, full water/stamina, a $500 wallet floor, health protection/regeneration, equipment access, rebuilding, and teleporting.
 - Flashlight, lantern, and laser checkboxes control persistent equipment. A flashlight casts a facing cone, a lantern lights a circle, and the laser draws a straight beam to the first solid object. Each requires its purchased item unless God Mode is active; randomized merchants price lasers from $200–$400.
 - Magic hiking shoes are randomized merchant gear priced from $100–$400. Equipping them doubles walking and running speed, halves running stamina drain, and removes the normal mud, grass, and shallow-water speed penalties. God Mode can equip them without ownership.
+- Magic running shoes are randomized merchant gear priced from $100–$400. Equipping them triples walking and running speed and halves running stamina drain except on roads and sidewalks. Running and hiking shoes are mutually exclusive, so their bonuses cannot stack.
+- The inventory includes a paper-doll equipment view for shoes, pants, shirt, gloves, and hat. Hats cost $30–$75 and halve water drain while worn; clothing slots without available items remain visible for future gear.
 - Right-click an NPC to throw a rock, shoot a slingshot, or trade with merchants. Range and accuracy are server-authoritative; hostility can cause pursuit and attacks. Defeated actors leave temporary treasure.
 - Building doors lead to footprint-sized procedural dungeons with persistent fog of war, enemies, chests, treasure, and an exit. Each account also receives a permanent base building, shown only to its owner with a compass and flag. Its safe interior contains a fireplace and furniture; clicking the bed restores health, water, stamina, and both five-minute protections. Character management is available only inside the base.
 - Use the bottom chat box and **Say** button to speak. Nearby visible clients see a ten-second speech bubble over the character; **Show chat** opens a client-local history of the last ten messages said or seen, with username and time.
 - Wildlife and human NPCs use the same speech system. Birds squeak or call, cats meow, dogs bark, and residents tell random jokes on independently randomized schedules ranging from two to thirty minutes.
 
 Paved surfaces use a representative 3.5 mph walking speed, forest uses 2 mph, sand uses 1 mph, and mud, grass, and shallow water have their own canonical rates. Click-to-walk asks the server for a route around solid geometry. Deep water is deliberately excluded from routes; manually entering it drowns and resets the character to a safe starting point.
+
+Real street names are drawn over the stylized road network when OpenStreetMap supplies them. Moving the camera into a new geographic cell shows a loading message; the newly generated terrain arrives under fog of war and is revealed around the player during exploration. Generated maps and raw geographic caches stay local to each reality server under `data/`.
 
 The reality configuration—including center, size, name, seed, and player limit—is in `src/AlternateEarth.Server/appsettings.json`. Runtime state is written under `data/` and is intentionally not committed.
 

@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v7
+# Renderer-neutral protocol v9
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state.
 
@@ -8,11 +8,11 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 |---|---|---|
 | `moveRequest` | direction `x`, `y`; client `sequence` | normalizes direction, bounds elapsed time/speed, clamps world bounds |
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
-| `setTravelMode` | walk, run, skateboard, bike, or raft | validates terrain and equipment ownership |
-| `setGodMode`, `setLights`, `setMagicHikingShoes` | requested administrative, light, and equipped-shoes state | persists state; equipment checks are bypassed only while God Mode is active |
+| `setTravelMode` | walk, run, skateboard, bike, dirt bike, motorcycle, or raft | validates terrain, equipment ownership, and motorized-vehicle fuel |
+| `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, and current location |
 | `attack` | target ID and rock/slingshot weapon | validates ammo, range, accuracy, damage, death, and relationship change |
-| `requestTrade`, `confirmTrade`, `consumeItem` | merchant/item intent | validates proximity, inventory, stock, wallet, and effects |
+| `requestTrade`, `confirmTrade`, `consumeItem` | merchant/item intent | validates proximity, inventory, stock, wallet, effects, and adding purchased gasoline to the selected vehicle's tank |
 | `openChest`, `chestSeen`, `collectLoot` | world-object intent | validates visibility/proximity and authoritative rewards |
 | `requestArea` | local-meter camera location | streams and locally caches another geographic cell |
 | `rebuildArea` | `godMode` acknowledgement | requires a connected character and explicit God Mode; clears deltas, regenerates, safely repositions players |
@@ -45,5 +45,7 @@ The exploration client currently sends movement, path, chunk, and ping requests.
 | `pong` | liveness response |
 
 Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. They never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.
+
+Dirt-bike and motorcycle tanks are separate authoritative character fields. Movement consumes gas from distance traveled at 50 mpg and 45 mpg respectively; an empty tank blocks motorized movement. God Mode neither checks nor consumes gasoline.
 
 `pathResult` contains renderer-neutral meter waypoints. `pathUnavailable`, `movementBlocked`, `playerFell`, and `playerDied` explain authoritative navigation outcomes. `weatherChanged` carries the current condition, temperature, precipitation, wind, daylight state, sunrise, sunset, moon phase, observation time, and provider; clients independently decide how to present those facts.
