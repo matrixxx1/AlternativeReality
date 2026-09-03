@@ -224,4 +224,5 @@ public sealed record WorldSnapshot(
     IReadOnlyList<PlayerState> Players,
     IReadOnlyList<ElevationSample> Elevation,
     WeatherState? Weather = null,
-    IReadOnlyList<ActorState>? Actors = null);
+    IReadOnlyList<ActorState>? Actors = null,
+    IReadOnlyList<WorldBounds>? LoadedAreas = null);

@@ -1,6 +1,6 @@
-# Renderer-neutral protocol v13
+# Renderer-neutral protocol v14
 
-The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state.
+The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
 ## Client to server
 

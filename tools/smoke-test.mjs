@@ -20,7 +20,8 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 13) throw new Error(`Expected protocol 13, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 14) throw new Error(`Expected protocol 14, received ${welcomeA.protocolVersion}.`);
+  if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
   if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');

@@ -23,7 +23,7 @@ public sealed partial class RealityWorld
     private GeographicDataset? _geographic;
     private readonly ConcurrentDictionary<string, CanonicalEntity> _baseEntities = new();
     private readonly ConcurrentDictionary<string, ElevationSample> _elevationSamples = new();
-    private readonly ConcurrentDictionary<string, byte> _loadedAreas = new();
+    private readonly ConcurrentDictionary<string, WorldBounds> _loadedAreas = new();
     private WorldBounds? _loadedBounds;
     private WorldNavigation? _navigation;
 
@@ -58,7 +58,7 @@ public sealed partial class RealityWorld
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
-        _loadedAreas["0:0"] = 1;
+        _loadedAreas["0:0"] = Configuration.Area.Bounds;
         await RefreshWeatherAsync(cancellationToken);
         IsInitialized = true;
     }
@@ -407,7 +407,7 @@ public sealed partial class RealityWorld
             _realityEntities.Clear();
             _baseEntities.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
             ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
-            _loadedAreas["0:0"] = 1;
+            _loadedAreas["0:0"] = Configuration.Area.Bounds;
             _baseBuildings.Clear();
             foreach (var pair in _players.ToArray())
             {
@@ -450,7 +450,7 @@ public sealed partial class RealityWorld
     public WorldSnapshot CreateSnapshot() => new(Configuration, _loadedBounds ?? Configuration.Area.Bounds,
         _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
         _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
-        Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray());
+        Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray());
 
     private void ApplyGeneratedWorld(GeographicDataset generated)
     {
@@ -501,8 +501,9 @@ public sealed partial class RealityWorld
             var center = new LocalTangentProjection(Configuration.Area.Region).Unproject(centerPosition);
             if (RegionId.FromGeo(center) != Configuration.Area.Region) throw new InvalidOperationException("This prototype reached a geographic projection boundary. Cross-region Earth streaming is the next world-scale milestone.");
             var areaConfiguration = Configuration with { Area = new GeographicArea(center, size) };
-            ApplyGeneratedWorld(await _generator.GenerateAsync(areaConfiguration, cancellationToken));
-            _loadedAreas[key] = 1;
+            var generated = await _generator.GenerateAsync(areaConfiguration, cancellationToken);
+            ApplyGeneratedWorld(generated);
+            _loadedAreas[key] = generated.Area.Bounds;
             return true;
         }
         finally { _areaLoadLock.Release(); }

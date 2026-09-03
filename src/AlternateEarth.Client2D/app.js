@@ -99,7 +99,7 @@
       case 'dungeonEntered': updatePlayer(message.player); state.path=[];state.target=null;applyPrivate(message.privateState);state.follow=true;showToast('Entered dungeon — unexplored rooms are hidden by fog.');break;
       case 'dungeonExited': {updatePlayer(message.player);applySnapshot(message.snapshot);applyPrivate(message.privateState);state.dungeon=null;state.follow=true;const gpsTarget=state.pendingGpsTeleport;state.pendingGpsTeleport=null;if(gpsTarget){showToast('Loading a safe GPS landing point…');send({type:'teleport',x:gpsTarget.x,y:gpsTarget.y,godMode:true});}else showToast('Returned to the world.');break;}
       case 'dungeonUpdated': state.dungeon=message.dungeon;break;
-      case 'worldExpanded': { const previous=state.snapshot?.bounds;applySnapshot(message.snapshot);if(message.expanded!==false)markNewAreaFog(previous,message.snapshot.bounds);state.areaLoading=false;showToast(message.expanded===false?'Area already loaded.':'New area ready — explore to reveal it.');break; }
+      case 'worldExpanded': { const previous=loadedAreas();applySnapshot(message.snapshot);if(message.expanded!==false)markNewAreaFog(previous,loadedAreas(message.snapshot));state.areaLoading=false;showToast(message.expanded===false?'Area already loaded.':'New area ready — explore to reveal it.');break; }
       case 'tradeQuote': openTrade(message.quote); break;
       case 'tradeCompleted': updatePlayer(message.player);applyPrivate({...state.privateState,inventory:message.inventory,relationships:[...(state.privateState?.relationships||[]).filter(x=>x.actorId!==message.relationship.actorId),message.relationship]});ui.tradeWindow.hidden=true;showToast('Trade completed.');break;
       case 'chestOpened': case 'lootCollected': applyPrivate(message.privateState);showToast(message.message);break;
@@ -151,10 +151,12 @@
   }
   const fogCellSize=32;
   function fogKey(x,y){return`${x},${y}`;}
+  function loadedAreas(snapshot=state.snapshot){if(!snapshot)return[];return snapshot.loadedAreas?.length?snapshot.loadedAreas:[snapshot.bounds];}
+  function areaKey(area){return`${area.minimumX.toFixed(2)},${area.minimumY.toFixed(2)},${area.maximumX.toFixed(2)},${area.maximumY.toFixed(2)}`;}
+  function pointInLoadedArea(point){return loadedAreas().some(area=>point.x>=area.minimumX&&point.x<=area.maximumX&&point.y>=area.minimumY&&point.y<=area.maximumY);}
   function markNewAreaFog(previous,next){
-    if(!previous||!next)return;
-    const minX=Math.floor(next.minimumX/fogCellSize),maxX=Math.ceil(next.maximumX/fogCellSize),minY=Math.floor(next.minimumY/fogCellSize),maxY=Math.ceil(next.maximumY/fogCellSize);
-    for(let x=minX;x<maxX;x++)for(let y=minY;y<maxY;y++){const cx=(x+.5)*fogCellSize,cy=(y+.5)*fogCellSize;if(cx<previous.minimumX||cx>previous.maximumX||cy<previous.minimumY||cy>previous.maximumY)state.outdoorFog.add(fogKey(x,y));}
+    const existing=new Set(previous.map(areaKey));
+    for(const area of next){if(existing.has(areaKey(area)))continue;const minX=Math.floor(area.minimumX/fogCellSize),maxX=Math.ceil(area.maximumX/fogCellSize),minY=Math.floor(area.minimumY/fogCellSize),maxY=Math.ceil(area.maximumY/fogCellSize);for(let x=minX;x<maxX;x++)for(let y=minY;y<maxY;y++){const cx=(x+.5)*fogCellSize,cy=(y+.5)*fogCellSize;if(cx>=area.minimumX&&cx<=area.maximumX&&cy>=area.minimumY&&cy<=area.maximumY)state.outdoorFog.add(fogKey(x,y));}}
   }
   function drawOutdoorFog(view,me){
     if(!state.outdoorFog.size||!me)return;
@@ -186,7 +188,7 @@
     const me = state.players.get(state.playerId);
     if (me && state.follow) { state.camera.x += (me.position.x-state.camera.x)*.14; state.camera.y += (me.position.y-state.camera.y)*.14; }
     const view = viewBounds(16), detail = lod();
-    if(me?.locationId==='outdoor'&&!state.areaLoading&&state.snapshot.bounds&&Date.now()-(state.lastAreaRequest||0)>1200&&(state.camera.x<state.snapshot.bounds.minimumX+120||state.camera.x>state.snapshot.bounds.maximumX-120||state.camera.y<state.snapshot.bounds.minimumY+120||state.camera.y>state.snapshot.bounds.maximumY-120)){state.lastAreaRequest=Date.now();state.areaLoading=true;showToast('Loading and generating the next map area…');send({type:'requestArea',x:state.camera.x,y:state.camera.y});}
+    if(me?.locationId==='outdoor'&&!state.areaLoading&&Date.now()-(state.lastAreaRequest||0)>1200&&!pointInLoadedArea(state.camera)){state.lastAreaRequest=Date.now();state.areaLoading=true;showToast('Loading and generating the next map area…');send({type:'requestArea',x:state.camera.x,y:state.camera.y});}
     if (me?.locationId !== 'outdoor' && state.dungeon) {
       drawDungeon(state.dungeon,view,detail,now); drawProjectiles(now);drawLaser(me); drawSpeechBubbles(view); updateTelemetry(me);syncLightControls(me); return;
     }

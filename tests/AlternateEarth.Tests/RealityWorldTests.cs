@@ -104,6 +104,27 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SnapshotIdentifiesLoadedAreasWithoutTreatingBoundingRectangleHolesAsGenerated()
+    {
+        var configuration = new RealityConfiguration("loaded-cells", "Loaded Cells", 37, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "loaded-cells.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+
+        Assert.True(await world.LoadAreaAsync(600, 600));
+        var diagonal = world.CreateSnapshot();
+        Assert.Equal(2, diagonal.LoadedAreas!.Count);
+        Assert.True(diagonal.Bounds.Contains(0, 500));
+        Assert.DoesNotContain(diagonal.LoadedAreas, area => area.Contains(0, 500));
+
+        Assert.True(await world.LoadAreaAsync(0, 500));
+        var filled = world.CreateSnapshot();
+        Assert.Equal(3, filled.LoadedAreas!.Count);
+        Assert.Contains(filled.LoadedAreas, area => area.Contains(0, 500));
+    }
+
+    [Fact]
     public async Task GodModePurchasesNewAccountBaseForOneCentAndPersistsIt()
     {
         var configuration = new RealityConfiguration("base-purchase", "Base Purchase", 20, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
