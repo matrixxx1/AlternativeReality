@@ -95,10 +95,12 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var player = await world.JoinAsync("teleporter", "Traveler", "teleport-account");
         await world.SetGodModeAsync(player.Id, true);
 
-        var teleported = await world.TeleportAsync(player.Id, new TeleportRequest(20, 20, true));
+        var teleported = await world.TeleportAsync(player.Id, new TeleportRequest(20, 20, false));
 
         Assert.False(teleported.Position.X is >= 15 and <= 25 && teleported.Position.Y is >= 15 and <= 25);
         Assert.NotEqual(TerrainType.DeepWater, teleported.Terrain);
+        var rebuilt = await world.RebuildAsync(player.Id, false);
+        Assert.NotEmpty(rebuilt.BaseEntities);
     }
 
     [Fact]
@@ -178,6 +180,11 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal("rock", combat.Event.Weapon);
         Assert.Equal("fist", combat.Attacker.EquippedWeapon);
         Assert.DoesNotContain(combat.Inventory.Items, item => item.ItemType == "rock");
+
+        var unequipped = await world.SetEquipmentAsync(attacker.Id, "weapon", null);
+        Assert.Equal("none", unequipped.EquippedWeapon);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "fist")));
+        Assert.Contains("Equip a weapon", error.Message);
     }
 
     [Fact]
@@ -200,6 +207,15 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.True(combat.Event.Hit);
         Assert.Equal(7, combat.Event.Damage);
         Assert.Equal(1, combat.Inventory.Items.Single(item => item.ItemType == "bullet").Quantity);
+
+        await world.SetEquipmentAsync(attacker.Id, "weapon", "sword");
+        var sword = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "sword"));
+        Assert.True(sword.Event.Hit);
+        Assert.Equal(5, sword.Event.Damage);
+        await world.SetEquipmentAsync(attacker.Id, "weapon", "knife");
+        var knife = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "knife"));
+        Assert.True(knife.Event.Hit);
+        Assert.Equal(2, knife.Event.Damage);
     }
 
     private static CanonicalEntity Building(string id, RegionId region, double x, double y) =>

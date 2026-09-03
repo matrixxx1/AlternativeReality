@@ -21,9 +21,10 @@ public sealed partial class RealityWorld
         ("slingshot", "a slingshot", 5_000, 15_000, true), ("crossbow", "a crossbow", 30_000, 50_000, true),
         ("arrow", "an arrow", 5, 500, false), ("pistol", "a pistol", 100_000, 300_000, true),
         ("rifle", "a rifle", 300_000, 600_000, true), ("bullet", "a bullet", 25, 500, false),
+        ("knife", "a knife", 2_000, 4_000, true), ("sword", "a sword", 30_000, 50_000, true),
         ("water", "water", 50, 200, false), ("food", "food", 200, 500, false)
     };
-    private static readonly string[] WeaponPowerOrder = ["rifle", "pistol", "crossbow", "slingshot", "rock", "fist"];
+    private static readonly string[] WeaponPowerOrder = ["rifle", "sword", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
     private const double DirtBikeTankGallons = 2;
     private const double MotorcycleTankGallons = 4;
     private readonly ConcurrentDictionary<string, Dictionary<string, int>> _inventories = new();
@@ -122,10 +123,10 @@ public sealed partial class RealityWorld
         }
         else if (slot == "weapon")
         {
-            itemType ??= "fist";
+            itemType ??= "none";
             itemType = itemType.ToLowerInvariant();
-            if (!WeaponPowerOrder.Contains(itemType)) throw new InvalidOperationException("That item cannot be equipped as a weapon.");
-            if (!player.GodMode && !OwnsWeapon(playerId, itemType)) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your backpack.");
+            if (itemType != "none" && !WeaponPowerOrder.Contains(itemType)) throw new InvalidOperationException("That item cannot be equipped as a weapon.");
+            if (itemType != "none" && !player.GodMode && !OwnsWeapon(playerId, itemType)) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your backpack.");
             updated = player with { EquippedWeapon = itemType, Version = player.Version + 1 };
         }
         else throw new InvalidOperationException("That equipment slot is not available yet.");
@@ -398,7 +399,10 @@ public sealed partial class RealityWorld
         "gallonOfGas" => "a gallon of gas",
         "ballBearing" => "a ball bearing",
         "fist" => "your fist",
+        "none" => "no weapon",
         "crossbow" => "a crossbow",
+        "knife" => "a knife",
+        "sword" => "a sword",
         "pistol" => "a pistol",
         "rifle" => "a rifle",
         _ => itemType
@@ -417,6 +421,7 @@ public sealed partial class RealityWorld
         var targetPosition = actorTarget?.Position ?? playerTarget!.Position;
         var targetName = actorTarget?.Name ?? playerTarget!.Name;
         var targetHealth = actorTarget?.HealthHearts ?? playerTarget!.HealthHearts;
+        if (player.EquippedWeapon.Equals("none", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Equip a weapon before attacking.");
         var weapon = BestUsableWeapon(playerId, player.EquippedWeapon, player.GodMode);
         var (range, baseDamage, ammo) = WeaponDefinition(weapon);
         var distance = player.Position.Distance2D(targetPosition);
@@ -466,6 +471,7 @@ public sealed partial class RealityWorld
     private string BestUsableWeapon(string playerId, string requestedWeapon, bool godMode)
     {
         requestedWeapon = (requestedWeapon ?? "fist").ToLowerInvariant();
+        if (requestedWeapon == "none") return "none";
         var start = Array.IndexOf(WeaponPowerOrder, requestedWeapon);
         if (start < 0) start = WeaponPowerOrder.Length - 1;
         for (var i = start; i < WeaponPowerOrder.Length; i++) if (CanUseWeapon(playerId, WeaponPowerOrder[i], godMode)) return WeaponPowerOrder[i];
@@ -475,6 +481,8 @@ public sealed partial class RealityWorld
     private static (double Range, double Damage, string? Ammo) WeaponDefinition(string weapon) => weapon switch
     {
         "fist" => (1.6, .25, null),
+        "knife" => (1.6, 2, null),
+        "sword" => (2.3, 5, null),
         "rock" => (25, 1, "rock"),
         "slingshot" => (60, 2, "ballBearing"),
         "crossbow" => (100, 3, "arrow"),

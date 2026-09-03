@@ -303,7 +303,7 @@ public sealed partial class RealityWorld
 
     public async Task<PlayerState> TeleportAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default)
     {
-        if (!request.GodMode || !playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to teleport.");
+        if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to teleport.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with { X = request.X, Y = request.Y });
@@ -391,7 +391,7 @@ public sealed partial class RealityWorld
 
     public async Task<WorldSnapshot> RebuildAsync(string characterId, bool godMode, CancellationToken cancellationToken = default)
     {
-        if (!godMode || !playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this area.");
+        if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this reality.");
         await _rebuildLock.WaitAsync(cancellationToken);
         try
         {

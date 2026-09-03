@@ -74,7 +74,7 @@ try {
   const godRide = await first.waitFor(message => message.type === 'movementBlocked' || message.type === 'playerMoved' && message.player.id === welcomeA.playerId && message.player.travelMode === 'dirtBike');
   if (godRide.type === 'movementBlocked' && /gas/i.test(godRide.message)) throw new Error('God Mode did not bypass the dirt-bike gas check.');
   if (godRide.type === 'playerMoved' && godRide.player.dirtBikeGasGallons !== godDirtBike.player.dirtBikeGasGallons) throw new Error('God Mode consumed dirt-bike gas.');
-  first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true }));
+  first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: false }));
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
   const unavailableBuildings=new Set([welcomeA.privateState.base.buildingId,welcomeB.privateState.base.buildingId]);
   const candidateDoors=welcomeA.snapshot.baseEntities.filter(entity=>entity.kind==='door'&&!unavailableBuildings.has(entity.properties?.buildingId));

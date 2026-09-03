@@ -9,6 +9,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `moveRequest` | direction `x`, `y`; client `sequence` | normalizes direction, bounds elapsed time/speed, clamps world bounds |
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
 | `setTravelMode` | walk, run, skateboard, bike, dirt bike, motorcycle, or raft | validates terrain, equipment ownership, and motorized-vehicle fuel |
+| `setEquipment` | logical equipment slot and item, or null to unequip | validates ownership; the weapon slot supports a true empty state while fists remain permanently available |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, and current location; dungeon session state is fresh on entry and discarded on exit |
 | `purchaseBase` | logical building door ID | validates proximity, account ownership, price, and wallet; changes the account-wide base |
@@ -16,8 +17,8 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `requestTrade`, `confirmTrade`, `consumeItem` | merchant/item intent | validates proximity, inventory, stock, wallet, effects, and adding purchased gasoline to the selected vehicle's tank |
 | `openChest`, `chestSeen`, `collectLoot` | world-object intent | validates visibility/proximity and authoritative rewards |
 | `requestArea` | local-meter camera location | streams and locally caches another geographic cell |
-| `rebuildArea` | `godMode` acknowledgement | requires a connected character and explicit God Mode; resets all loaded regions and transient world state, regenerates, and returns players to their bases |
-| `teleport` | destination `x`, `y`; `godMode` acknowledgement | requires God Mode and resolves the requested point to a safe canonical destination |
+| `rebuildArea` | legacy `godMode` acknowledgement | checks only the connected character's authoritative God Mode state; resets all loaded regions and transient world state, regenerates, and returns players to their bases |
+| `teleport` | destination `x`, `y`; legacy `godMode` acknowledgement | checks only authoritative God Mode and resolves the requested point to a safe canonical destination |
 | `say` | `message` text | derives username/player ID and UTC time on the server; rejects blank, rapid, or over-180-character messages |
 | `placeObject` | reserved logical `objectType`, `x`, `y`, `rotationDegrees` | currently rejected unless an administrator enables object placement |
 | `removeObject` | reserved `entityId` | currently rejected unless an administrator enables object placement |
