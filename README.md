@@ -34,6 +34,8 @@ For access from other devices on the same network, run `tools/open-lan-port.ps1`
 - Use the mouse wheel to zoom.
 - Choose Walk, Run, Skateboard, or Bike from the travel panel. Running starts at twice walking speed, drains stamina, and gradually slows toward walking pace; resting restores stamina. Skateboards move at 4× walking speed on roads/parking lots and 3× on sidewalks, but leaving a supported surface causes a fall and removes one quarter-heart. Skateboarding and cycling each have their own close-range movement animation.
 - God Mode exposes an administrator rebuild button which clears reality deltas, regenerates the area, and moves any trapped player to a safe position. While enabled, right-clicking the world also offers an instant server-authoritative teleport to the selected safe location.
+- Use the bottom chat box and **Say** button to speak. Nearby visible clients see a ten-second speech bubble over the character; **Show chat** opens a client-local history of the last ten messages said or seen, with username and time.
+- Wildlife and human NPCs use the same speech system. Birds squeak or call, cats meow, dogs bark, and residents tell random jokes on independently randomized schedules ranging from two to thirty minutes.
 
 Paved surfaces use a representative 3.5 mph walking speed, forest uses 2 mph, sand uses 1 mph, and mud, grass, and shallow water have their own canonical rates. Click-to-walk asks the server for a route around solid geometry. Deep water is deliberately excluded from routes; manually entering it drowns and resets the character to a safe starting point.
 

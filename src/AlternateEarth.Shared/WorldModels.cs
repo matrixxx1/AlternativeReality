@@ -78,6 +78,13 @@ public sealed record ActorState(
     bool IsMoving = false,
     long Version = 1);
 
+public sealed record ChatMessage(
+    string Id,
+    string PlayerId,
+    string Username,
+    string Message,
+    DateTimeOffset SaidAtUtc);
+
 public sealed record WeatherState(
     string Condition,
     int WeatherCode,

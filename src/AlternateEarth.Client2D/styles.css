@@ -33,6 +33,15 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .action-menu { min-width: 180px; padding: 10px; font-size: 12px; }
 .action-menu div { color: #aeb9ab; margin-top: 7px; }
 .action-menu button { width: 100%; margin-top: 8px; }
+.chat-form { left: 50%; bottom: 14px; transform: translateX(-50%); width: min(470px, calc(100% - 620px)); min-width: 290px; padding: 7px; display: flex; gap: 7px; }
+.chat-form input { flex: 1; min-width: 0; color: #fff8d8; background: #14231c; border: 2px solid #8d7138; border-radius: 3px; padding: 8px 10px; outline: none; }
+.chat-form input:focus { border-color: #f0cd6d; box-shadow: 0 0 0 2px rgba(240,205,109,.18); }
+.chat-history { right: 14px; bottom: 72px; width: 360px; max-height: 310px; padding: 10px; }
+.chat-messages { margin-top: 7px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.chat-message { padding: 6px 7px; background: rgba(10,20,15,.55); border-left: 3px solid #b99345; overflow-wrap: anywhere; }
+.chat-meta { display: flex; justify-content: space-between; gap: 8px; color: #e5c66d; font-size: 10px; }
+.chat-text { margin-top: 3px; color: #f4eed5; font-size: 12px; text-shadow: none; }
+.empty-chat { color: #aeb9ab; font-size: 12px; }
 #toast { position: fixed; left: 50%; bottom: 145px; z-index: 5; transform: translate(-50%, 20px); color: #fff6d1; background: rgba(49,31,22,.96); border: 2px solid #d8a44a; border-radius: 4px; padding: 10px 16px; opacity: 0; pointer-events: none; transition: .18s; box-shadow: 3px 4px 0 rgba(0,0,0,.35); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 @media (max-width: 760px) {
@@ -42,4 +51,6 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
   .travel-panel { left: 8px; bottom: 8px; max-width: calc(100% - 16px); }
   .mode-buttons { flex-wrap: wrap; }
   .god-panel { right: 8px; bottom: 8px; transform: translateY(-58px); }
+  .chat-form { left: 8px; right: 8px; bottom: 8px; width: auto; min-width: 0; transform: none; }
+  .chat-history { right: 8px; bottom: 130px; width: min(360px, calc(100% - 16px)); }
 }

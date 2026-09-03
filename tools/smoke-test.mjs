@@ -38,7 +38,7 @@ try {
     second.waitFor(message => message.type === 'welcome')
   ]);
   const playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 4) throw new Error(`Expected protocol 4, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 5) throw new Error(`Expected protocol 5, received ${welcomeA.protocolVersion}.`);
   if (welcomeA.snapshot.actors?.length !== 40) throw new Error('Expected 40 authoritative wildlife/NPC actors.');
 
   first.socket.send(JSON.stringify({ type: 'setTravelMode', mode: 'run' }));
@@ -66,6 +66,13 @@ try {
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
   if (teleported.player.position.x <= seenByA.player.position.x) throw new Error('God Mode teleport did not relocate the player.');
 
+  first.socket.send(JSON.stringify({ type: 'say', message: 'Hello from the smoke test' }));
+  const [chatA, chatB] = await Promise.all([
+    first.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId),
+    second.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId)
+  ]);
+  if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== 'Smoke-2D-A') throw new Error('Chat did not synchronize authoritatively.');
+
   first.socket.send(JSON.stringify({
     type: 'placeObject', objectType: 'must-be-rejected',
     x: seenByA.player.position.x + 1, y: seenByA.player.position.y, rotationDegrees: 0
@@ -80,6 +87,7 @@ try {
     actors: welcomeA.snapshot.actors.length,
     travelMode: modeChanged.player.travelMode,
     godModeTeleport: true,
+    chatSynchronized: true,
     movementSynchronized: true,
     serverPathfinding: true,
     authoritativePosition: teleported.player.position,

@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v4
+# Renderer-neutral protocol v5
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Clients connect with a server-issued or locally remembered character ID and a display name. The server sends `welcome` with the assigned player ID and an authoritative `WorldSnapshot`.
 
@@ -11,6 +11,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Clients
 | `setTravelMode` | logical `mode`: walk, run, skateboard, or bike | validates the enum and persists the authoritative character mode |
 | `rebuildArea` | `godMode` acknowledgement | requires a connected character and explicit God Mode; clears deltas, regenerates, safely repositions players |
 | `teleport` | destination `x`, `y`; `godMode` acknowledgement | requires God Mode and resolves the requested point to a safe canonical destination |
+| `say` | `message` text | derives username/player ID and UTC time on the server; rejects blank, rapid, or over-180-character messages |
 | `placeObject` | reserved logical `objectType`, `x`, `y`, `rotationDegrees` | currently rejected unless an administrator enables object placement |
 | `removeObject` | reserved `entityId` | currently rejected unless an administrator enables object placement |
 | `requestChunk` | chunk `x`, `y` | prototype returns the area snapshot; chunk filtering is next |
@@ -29,6 +30,7 @@ The exploration client currently sends movement, path, chunk, and ping requests.
 | `playerFell`, `playerDied` | authoritative damage, death, and safe respawn outcomes |
 | `worldRebuilt` | regenerated base snapshot and safe positions after a God Mode refresh |
 | `playerTeleported` | authoritative instant relocation visible to every connected client |
+| `chatSaid` | server-authored player ID, username, text, and timestamp for ephemeral speech and local history |
 | `objectCreated`, `objectRemoved` | accepted reality delta events |
 | `error` | rejected command with safe message |
 | `pong` | liveness response |

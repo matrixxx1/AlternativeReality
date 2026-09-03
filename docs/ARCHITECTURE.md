@@ -84,6 +84,8 @@ Character records are scoped by `RealityId`; cross-reality transfer is intention
 
 The browser client uses a 3/4 oblique camera, visual ground tiles, animated sprites, and depth-sorted raised geometry. It changes from full to medium to light rendering as the camera zooms out, and suppresses distant animation. This is presentation only: tile boundaries do not constrain movement, collision, entities, or protocol coordinates.
 
+Ephemeral chat is server-authored and renderer-neutral. Player messages are validated and timestamped by the server; wildlife sounds and resident jokes are scheduled independently at randomized two-to-thirty-minute intervals. Clients render ten-second speech bubbles only for speakers in view and keep their own ten-message seen history.
+
 ## Geographic abstraction
 
 `IGeographicProvider.GetAreaAsync` returns a canonical `GeographicDataset`, and `IElevationProvider` returns meter samples. The current adapters query OpenStreetMap through Overpass with endpoint failover and SRTM90m elevation through OpenTopoData. Raw and converted results are cached before play, so normal movement generates no public map API traffic.

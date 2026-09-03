@@ -46,15 +46,24 @@
     <div><kbd>Wheel</kbd> zoom</div>
   </section>
   <section class="panel god-panel">
+    <button id="toggleChatButton" type="button">Show chat</button>
     <label><input id="godMode" type="checkbox"> God Mode</label>
     <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
   </section>
+  <section id="chatHistory" class="panel chat-history" hidden>
+    <strong>Recent chat</strong>
+    <div id="chatMessages" class="chat-messages"><div class="empty-chat">No messages yet.</div></div>
+  </section>
+  <form id="chatForm" class="panel chat-form">
+    <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
+    <button type="submit">Say</button>
+  </form>
   <section id="actionMenu" class="panel action-menu" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

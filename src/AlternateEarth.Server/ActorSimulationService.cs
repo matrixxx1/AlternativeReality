@@ -21,6 +21,8 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.BroadcastActorsAsync(actors, stoppingToken);
             var players = await _world.AdvanceStaminaAsync(Tick, stoppingToken);
             await _hub.BroadcastPlayersAsync(players, stoppingToken);
+            var speech = _world.AdvanceActorSpeech(DateTimeOffset.UtcNow);
+            await _hub.BroadcastChatAsync(speech, stoppingToken);
         }
     }
 }

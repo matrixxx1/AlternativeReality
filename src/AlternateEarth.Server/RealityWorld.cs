@@ -13,7 +13,9 @@ public sealed class RealityWorld
     private readonly ConcurrentDictionary<string, PlayerState> _players = new();
     private readonly ConcurrentDictionary<string, ActorState> _actors = new();
     private readonly ConcurrentDictionary<string, Queue<WorldPosition>> _actorRoutes = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _nextActorSpeech = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastMovement = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastChat = new();
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly Random _actorRandom;
     private GeographicDataset? _geographic;
@@ -77,6 +79,20 @@ public sealed class RealityWorld
     {
         _players.TryRemove(characterId, out _);
         _lastMovement.TryRemove(characterId, out _);
+        _lastChat.TryRemove(characterId, out _);
+    }
+
+    public ChatMessage Say(string characterId, SayRequest request)
+    {
+        if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        var now = DateTimeOffset.UtcNow;
+        if (_lastChat.TryGetValue(characterId, out var last) && now - last < TimeSpan.FromMilliseconds(500))
+            throw new InvalidOperationException("Please wait a moment before saying something else.");
+        var cleaned = new string((request.Message ?? string.Empty).Where(character => !char.IsControl(character)).ToArray()).Trim();
+        if (cleaned.Length == 0) throw new InvalidOperationException("Enter a message first.");
+        if (cleaned.Length > 180) throw new InvalidOperationException("Chat messages are limited to 180 characters.");
+        _lastChat[characterId] = now;
+        return new ChatMessage($"chat:{Guid.NewGuid():N}", player.Id, player.Name, cleaned, now);
     }
 
     public async Task<MovementOutcome?> MoveAsync(string characterId, MoveRequest request, CancellationToken cancellationToken = default)
@@ -226,6 +242,27 @@ public sealed class RealityWorld
         return changed;
     }
 
+    public IReadOnlyList<ChatMessage> AdvanceActorSpeech(DateTimeOffset now)
+    {
+        var messages = new List<ChatMessage>();
+        lock (_actorRandom)
+        {
+            foreach (var actor in _actors.Values)
+            {
+                if (!_nextActorSpeech.TryGetValue(actor.Id, out var next))
+                {
+                    _nextActorSpeech[actor.Id] = now.AddSeconds(_actorRandom.Next(10, 61));
+                    continue;
+                }
+                if (now < next) continue;
+                var line = ActorSpeech(actor);
+                messages.Add(new ChatMessage($"chat:{Guid.NewGuid():N}", actor.Id, ActorDisplayName(actor), line, now));
+                _nextActorSpeech[actor.Id] = now.AddMinutes(2 + (_actorRandom.NextDouble() * 28));
+            }
+        }
+        return messages;
+    }
+
     public async Task<WorldSnapshot> RebuildAsync(string characterId, bool godMode, CancellationToken cancellationToken = default)
     {
         if (!godMode || !_players.ContainsKey(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this area.");
@@ -288,6 +325,7 @@ public sealed class RealityWorld
         _navigation = new WorldNavigation(Configuration.Area.Bounds, staticEntities.Concat(_realityEntities.Values).ToArray(), generated.Elevation);
         _actors.Clear();
         _actorRoutes.Clear();
+        _nextActorSpeech.Clear();
         foreach (var entity in actorEntities)
         {
             var safe = Navigation.FindNearestWalkable(entity.Position);
@@ -313,6 +351,40 @@ public sealed class RealityWorld
         "rabbit" => 2.2, "dog" => 1.8, "cat" => 1.4, "bird" => 2.6,
         "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, _ => 1.25
     };
+
+    private string ActorSpeech(ActorState actor)
+    {
+        if (actor.Kind == EntityKind.Npc)
+        {
+            var jokes = new[]
+            {
+                "Why did the scarecrow win an award? It was outstanding in its field!",
+                "I tried to catch some fog earlier. I mist.",
+                "Why don't skeletons fight each other? They don't have the guts.",
+                "Two parallel lines have so much in common. It's a shame they'll never meet.",
+                "I know a great map joke, but you had to be there.",
+                "Why was the bicycle tired? It was two-tired.",
+                "The shovel was a groundbreaking invention.",
+                "What do you call a bear with no teeth? A gummy bear!"
+            };
+            return jokes[_actorRandom.Next(jokes.Length)];
+        }
+        return actor.Subtype switch
+        {
+            "bird" => _actorRandom.Next(2) == 0 ? "squeak!" : "kaaaw!",
+            "cat" => "meow!",
+            "dog" => "bark!",
+            "rabbit" => "sniff sniff",
+            "deer" => "snort!",
+            "cougar" => "growl...",
+            "bear" => "grrr...",
+            _ => "..."
+        };
+    }
+
+    private static string ActorDisplayName(ActorState actor) => actor.Kind == EntityKind.Npc
+        ? actor.Name
+        : char.ToUpperInvariant(actor.Subtype[0]) + actor.Subtype[1..];
 
     private PlayerState ResetPlayer(PlayerState player)
     {

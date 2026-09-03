@@ -8,12 +8,14 @@
     terrain: $('#terrainValue'), elevation: $('#elevationValue'), speed: $('#speedValue'), distance: $('#distanceValue'),
     camera: $('#cameraValue'), weather: $('#weatherValue'), sun: $('#sunValue'), moon: $('#moonValue'), hearts: $('#heartsValue'), stamina: $('#staminaValue'),
     playerGps: $('#playerGpsValue'), destinationGps: $('#destinationGpsValue'), actionMenu: $('#actionMenu'),
-    noActions: $('#noActions'), teleport: $('#teleportButton'),
+    noActions: $('#noActions'), teleport: $('#teleportButton'), chatForm: $('#chatForm'), chatInput: $('#chatInput'),
+    chatHistory: $('#chatHistory'), chatMessages: $('#chatMessages'), toggleChat: $('#toggleChatButton'),
     center: $('#centerButton'), god: $('#godMode'), rebuild: $('#rebuildButton')
   };
   const state = {
     socket: null, playerId: null, snapshot: null, weather: null, base: [], lists: {},
     players: new Map(), actors: new Map(), reality: new Map(), doors: new Map(), facings: new Map(), movingUntil: new Map(),
+    chat: [], speech: new Map(), chatVisible: false,
     camera: { x: 0, y: 0 }, scale: 18, pitch: .69, shear: .14, follow: true,
     keys: new Set(), path: [], target: null, pathSequence: 0, lastInput: 0, lastBlocked: 0,
     pointer: { down: false, dragged: false, x: 0, y: 0 }, actionPoint: null, frame: 0
@@ -74,6 +76,7 @@
       case 'playerFell': updatePlayer(message.player); stopTravel(message.message); break;
       case 'playerDied': updatePlayer(message.player); state.follow = true; stopTravel(message.reason); break;
       case 'playerTeleported': updatePlayer(message.player); if(message.player.id===state.playerId){state.follow=true;state.path=[];state.target=null;showToast('Teleported.');} break;
+      case 'chatSaid': receiveChat(message.chat); break;
       case 'weatherChanged': state.weather = message.weather; break;
       case 'worldRebuilt': applySnapshot(message.snapshot); state.path = []; state.target = null; showToast('Area rebuilt from its geographic source.'); break;
       case 'objectCreated': state.reality.set(message.entity.id, message.entity); break;
@@ -144,6 +147,7 @@
     drawTarget(now);
     drawRaised(view,detail,now);
     drawAtmosphere(me,detail,now);
+    drawSpeechBubbles(view);
     updateTelemetry(me);
   }
   function connecting() { ctx.fillStyle='#e7eadf'; ctx.textAlign='center'; ctx.font='700 15px monospace'; ctx.fillText('Resolving geographic reality…',innerWidth/2,innerHeight/2); }
@@ -210,6 +214,24 @@
     const step=moving?Math.sin(now/75+phase*6)*s*.32:0,bob=moving?Math.abs(Math.sin(now/75+phase*6))*1.5:0;ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(x,y+2,s*.65,s*.25,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#292421';ctx.lineWidth=Math.max(2,s*.18);ctx.beginPath();ctx.moveTo(x-s*.18,y-s*.2-bob);ctx.lineTo(x-s*.22-step,y+s*.48);ctx.moveTo(x+s*.18,y-s*.2-bob);ctx.lineTo(x+s*.22+step,y+s*.48);ctx.stroke();ctx.fillStyle=shirt;ctx.fillRect(x-s*.38,y-s*.82-bob,s*.76,s*.75);ctx.fillStyle=skin;ctx.beginPath();ctx.arc(x,y-s*1.03-bob,s*.34,0,Math.PI*2);ctx.fill();
   }
 
+  function receiveChat(chat){
+    state.speech.set(chat.playerId,{chat,expiresAt:Date.now()+10000});
+    const speaker=state.players.get(chat.playerId)||state.actors.get(chat.playerId);
+    if(chat.playerId===state.playerId||(speaker&&pointVisible(speaker.position,viewBounds()))) {
+      state.chat.push(chat); if(state.chat.length>10)state.chat.splice(0,state.chat.length-10); renderChatHistory();
+    }
+  }
+  function renderChatHistory(){
+    ui.chatMessages.replaceChildren();
+    if(!state.chat.length){const empty=document.createElement('div');empty.className='empty-chat';empty.textContent='No messages yet.';ui.chatMessages.append(empty);return;}
+    for(const chat of state.chat){const row=document.createElement('div');row.className='chat-message';const meta=document.createElement('div');meta.className='chat-meta';const user=document.createElement('strong');user.textContent=chat.username;const time=document.createElement('span');time.textContent=new Date(chat.saidAtUtc).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'});meta.append(user,time);const message=document.createElement('div');message.className='chat-text';message.textContent=chat.message;row.append(meta,message);ui.chatMessages.append(row);}ui.chatMessages.scrollTop=ui.chatMessages.scrollHeight;
+  }
+  function drawSpeechBubbles(view){
+    const now=Date.now();
+    for(const [speakerId,speech] of state.speech){if(speech.expiresAt<=now){state.speech.delete(speakerId);continue;}const speaker=state.players.get(speakerId)||state.actors.get(speakerId);if(!speaker||!pointVisible(speaker.position,view))continue;const anchor=toScreen(speaker.position),maxWidth=220;ctx.save();ctx.font='12px "Trebuchet MS",sans-serif';const lines=wrapChat(`“${speech.chat.message}”`,maxWidth-18);ctx.font='700 10px "Trebuchet MS",sans-serif';const nameWidth=ctx.measureText(speech.chat.username).width;ctx.font='12px "Trebuchet MS",sans-serif';const textWidth=Math.max(nameWidth,...lines.map(line=>ctx.measureText(line).width));const width=Math.min(maxWidth,Math.max(72,textWidth+18)),height=24+lines.length*15;const x=Math.max(5,Math.min(innerWidth-width-5,anchor.x-width/2)),y=Math.max(5,anchor.y-state.scale*1.7-height);ctx.fillStyle='rgba(255,248,218,.96)';ctx.strokeStyle='#4a3520';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,y,width,height,6);ctx.fill();ctx.stroke();const tipX=Math.max(x+12,Math.min(x+width-12,anchor.x));ctx.beginPath();ctx.moveTo(tipX-7,y+height);ctx.lineTo(tipX+7,y+height);ctx.lineTo(anchor.x,anchor.y-state.scale*.75);ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle='#5a3b1f';ctx.font='700 10px "Trebuchet MS",sans-serif';ctx.textAlign='left';ctx.fillText(speech.chat.username,x+9,y+14);ctx.fillStyle='#1d211e';ctx.font='12px "Trebuchet MS",sans-serif';lines.forEach((line,index)=>ctx.fillText(line,x+9,y+29+index*15));ctx.restore();}
+  }
+  function wrapChat(text,maxWidth){const words=text.split(/\s+/),lines=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=maxWidth||!line)line=test;else{lines.push(line);line=word;}}if(line)lines.push(line);return lines.slice(0,6);}
+
   function drawTarget(now){if(!state.target)return;const p=toScreen(state.target),r=8+Math.sin(now/180)*2;ctx.strokeStyle='#fff09a';ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();}
   function drawAtmosphere(me,detail,now){const light=daylight();const moonBoost=!state.weather?.isDay?Math.max(0,state.weather?.moonIllumination||0)*.18:0;const darkness=Math.max(0,.7-light*.7-moonBoost);if(darkness>.02){if(me){const p=toScreen(me.position),radius=detail===0?70:150,gradient=ctx.createRadialGradient(p.x,p.y,10,p.x,p.y,radius);gradient.addColorStop(0,`rgba(8,18,29,${darkness*.06})`);gradient.addColorStop(.35,`rgba(8,18,29,${darkness*.16})`);gradient.addColorStop(1,`rgba(8,18,29,${darkness})`);ctx.fillStyle=gradient;}else ctx.fillStyle=`rgba(8,18,29,${darkness})`;ctx.fillRect(0,0,innerWidth,innerHeight);}
     const code=state.weather?.weatherCode??0,rain=(code>=51&&code<=99)&&code<71||code>=80,snow=code>=71&&code<=77;if((rain||snow)&&detail>0){const count=detail===2?90:35;ctx.strokeStyle=rain?'rgba(169,211,232,.55)':'rgba(245,250,255,.8)';ctx.lineWidth=rain?1:2;for(let i=0;i<count;i++){const seed=hash(`${i}:${Math.floor(now/120)}`),x=(seed*innerWidth+(now*.28*(i%3+1)))%innerWidth,y=(hash(`${i}:y`)*innerHeight+now*.45)%innerHeight;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-(rain?4:1),y+(rain?11:2));ctx.stroke();}}
@@ -231,13 +253,15 @@
   canvas.addEventListener('contextmenu',event=>event.preventDefault());
   canvas.addEventListener('click',event=>{if(event.button!==0)return;ui.actionMenu.hidden=true;const target=toWorld({x:event.clientX,y:event.clientY});state.target=target;state.path=[];state.pathSequence++;send({type:'pathRequest',x:target.x,y:target.y,sequence:state.pathSequence});});
   canvas.addEventListener('wheel',event=>{event.preventDefault();const anchor=toWorld({x:event.clientX,y:event.clientY});state.scale=Math.max(1.2,Math.min(28,state.scale*Math.exp(-event.deltaY*.001)));const after=toWorld({x:event.clientX,y:event.clientY});state.camera.x+=anchor.x-after.x;state.camera.y+=anchor.y-after.y;state.follow=false;},{passive:false});
-  addEventListener('keydown',event=>{const key=event.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){event.preventDefault();state.keys.add(key);state.follow=true;}});
+  addEventListener('keydown',event=>{if(event.target.matches('input,textarea'))return;const key=event.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){event.preventDefault();state.keys.add(key);state.follow=true;}});
   addEventListener('keyup',event=>state.keys.delete(event.key.toLowerCase()));
   ui.center.addEventListener('click',()=>state.follow=true);
   document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>send({type:'setTravelMode',mode:button.dataset.mode})));
   function updateActionMenu(){const canTeleport=ui.god.checked&&state.actionPoint;ui.teleport.hidden=!canTeleport;ui.noActions.hidden=!!canTeleport;}
   ui.god.addEventListener('change',()=>{ui.rebuild.disabled=!ui.god.checked;updateActionMenu();});
   ui.teleport.addEventListener('click',()=>{if(!ui.god.checked||!state.actionPoint)return;send({type:'teleport',x:state.actionPoint.x,y:state.actionPoint.y,godMode:true});ui.actionMenu.hidden=true;});
+  ui.chatForm.addEventListener('submit',event=>{event.preventDefault();const message=ui.chatInput.value.trim();if(!message)return;send({type:'say',message});ui.chatInput.value='';ui.chatInput.focus();});
+  ui.toggleChat.addEventListener('click',()=>{state.chatVisible=!state.chatVisible;ui.chatHistory.hidden=!state.chatVisible;ui.toggleChat.textContent=state.chatVisible?'Hide chat':'Show chat';if(state.chatVisible)renderChatHistory();});
   ui.rebuild.addEventListener('click',()=>{if(!ui.god.checked)return;if(confirm('Rebuild this area from its geographic source? All player-created area changes will be removed.'))send({type:'rebuildArea',godMode:true});});
   addEventListener('resize',resize);resize();connect();requestAnimationFrame(render);requestAnimationFrame(movementLoop);
 })();
