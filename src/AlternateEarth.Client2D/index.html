@@ -62,6 +62,10 @@
   <section class="panel god-panel">
     <button id="toggleChatButton" type="button">Show chat</button>
     <label><input id="godMode" type="checkbox"> God Mode</label>
+    <button id="gpsTeleportButton" class="gps-teleport" type="button" hidden title="Teleport near my real location" aria-label="Teleport near my real GPS location">
+      <span class="compass-icon" aria-hidden="true"><b>N</b><i></i></span>
+      <span class="gps-button-label">My location</span>
+    </button>
     <button id="rebuildButton" type="button" disabled>Refresh &amp; rebuild area</button>
   </section>
   <section class="panel inventory-panel">
@@ -122,6 +126,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=25"></script>
+  <script src="app.js?v=29"></script>
 </body>
 </html>

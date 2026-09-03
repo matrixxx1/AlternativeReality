@@ -79,6 +79,27 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.True(normalRide.Player.DirtBikeGasGallons < 1);
     }
 
+    [Fact]
+    public async Task GodModeTeleportAimedInsideBuildingUsesSafeLandingPoint()
+    {
+        var configuration = new RealityConfiguration("teleport-test", "Teleport Test", 19, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var building = new CanonicalEntity("teleport-building", EntityKind.Building, new WorldPosition(region, 20, 20),
+            new GeometryPoint[] { new(15, 15), new(25, 15), new(25, 25), new(15, 25), new(15, 15) },
+            new Dictionary<string, string> { ["building"] = "yes" });
+        var store = new SqliteRealityStore(Path.Combine(_directory, "teleport.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("teleporter", "Traveler", "teleport-account");
+        await world.SetGodModeAsync(player.Id, true);
+
+        var teleported = await world.TeleportAsync(player.Id, new TeleportRequest(20, 20, true));
+
+        Assert.False(teleported.Position.X is >= 15 and <= 25 && teleported.Position.Y is >= 15 and <= 25);
+        Assert.NotEqual(TerrainType.DeepWater, teleported.Terrain);
+    }
+
     private sealed class FixedGeographicProvider(CanonicalEntity building) : IGeographicProvider
     {
         public string Name => "test";
