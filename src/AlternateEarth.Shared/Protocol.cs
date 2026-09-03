@@ -25,7 +25,7 @@ public sealed record ConsumeItemRequest(string ItemType);
 public sealed record OpenChestRequest(string ChestId);
 public sealed record ChestSeenRequest(string ChestId);
 public sealed record RestAtBedRequest(string BedId);
-public sealed record SetLightsRequest(bool FlashlightOn, bool LanternOn);
+public sealed record SetLightsRequest(bool FlashlightOn, bool LanternOn, bool LaserOn);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);

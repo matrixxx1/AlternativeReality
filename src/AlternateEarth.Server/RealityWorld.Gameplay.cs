@@ -51,13 +51,14 @@ public sealed partial class RealityWorld
             TravelMode = !enabled && player.TravelMode==TravelMode.Skateboard && InventoryQuantity(playerId,"skateboard")<=0 || !enabled && player.TravelMode==TravelMode.Bike && InventoryQuantity(playerId,"bike")<=0 || !enabled && player.TravelMode==TravelMode.Raft && InventoryQuantity(playerId,"inflatableRaft")<=0 ? TravelMode.Walk : player.TravelMode,
             FlashlightOn = enabled ? player.FlashlightOn : player.FlashlightOn && InventoryQuantity(playerId,"flashlight")>0,
             LanternOn = enabled ? player.LanternOn : player.LanternOn && InventoryQuantity(playerId,"lantern")>0,
+            LaserOn = enabled ? player.LaserOn : player.LaserOn && InventoryQuantity(playerId,"laser")>0,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken); return updated;
     }
 
-    public async Task<PlayerState> SetLightsAsync(string playerId,bool flashlight,bool lantern,CancellationToken cancellationToken=default)
-    { if(!_players.TryGetValue(playerId,out var player))throw new InvalidOperationException("Unknown player.");if(!player.GodMode&&flashlight&&InventoryQuantity(playerId,"flashlight")<=0)throw new InvalidOperationException("You need a flashlight in your inventory.");if(!player.GodMode&&lantern&&InventoryQuantity(playerId,"lantern")<=0)throw new InvalidOperationException("You need a lantern in your inventory.");var updated=player with{FlashlightOn=flashlight,LanternOn=lantern,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated; }
+    public async Task<PlayerState> SetLightsAsync(string playerId,bool flashlight,bool lantern,bool laser,CancellationToken cancellationToken=default)
+    { if(!_players.TryGetValue(playerId,out var player))throw new InvalidOperationException("Unknown player.");if(!player.GodMode&&flashlight&&InventoryQuantity(playerId,"flashlight")<=0)throw new InvalidOperationException("You need a flashlight in your inventory.");if(!player.GodMode&&lantern&&InventoryQuantity(playerId,"lantern")<=0)throw new InvalidOperationException("You need a lantern in your inventory.");if(!player.GodMode&&laser&&InventoryQuantity(playerId,"laser")<=0)throw new InvalidOperationException("You need a laser in your inventory.");var updated=player with{FlashlightOn=flashlight,LanternOn=lantern,LaserOn=laser,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated; }
 
     private bool playerIsGod(string playerId) => _players.TryGetValue(playerId, out var player) && player.GodMode;
 
@@ -228,7 +229,7 @@ public sealed partial class RealityWorld
 
     private TradeQuote GenerateTradeQuote(string playerId, ActorState merchant)
     {
-        var ranges = new (string Item, int Min, int Max)[] { ("rock",1,100),("ballBearing",5,200),("skateboard",20000,30000),("bike",40000,50000),("inflatableRaft",45000,65000),("flashlight",1000,5000),("lantern",5000,10000),("water",50,200),("food",200,500) };
+        var ranges = new (string Item, int Min, int Max)[] { ("rock",1,100),("ballBearing",5,200),("skateboard",20000,30000),("bike",40000,50000),("inflatableRaft",45000,65000),("flashlight",1000,5000),("lantern",5000,10000),("laser",20000,40000),("water",50,200),("food",200,500) };
         var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}")); var selected = ranges.OrderBy(_ => random.Next()).Take(random.Next(3, 7)).ToArray(); var friendship = Relationship(playerId, merchant.Id); var factor = Math.Clamp(1 - friendship * .025, .6, 1.4);
         var offers = selected.Select(range => new MerchantOffer(range.Item, range.Item is "bike" or "skateboard" or "inflatableRaft" ? 1 : random.Next(3, 31), (long)Math.Clamp(Math.Round(random.Next(range.Min, range.Max + 1) * factor), range.Min, range.Max))).ToArray();
         return new TradeQuote(merchant.Id, merchant.Name, friendship, offers);
@@ -286,7 +287,7 @@ public sealed partial class RealityWorld
         var now = DateTimeOffset.UtcNow;
         foreach (var player in _players.Values.ToArray())
         {
-            var sight = Weather.IsDay ? 45d : 16d + Math.Max(0, Weather.MoonIllumination) * 18d + (player.FlashlightOn?22:0) + (player.LanternOn?12:0);
+            var sight = Weather.IsDay ? 45d : 16d + Math.Max(0, Weather.MoonIllumination) * 18d + (player.FlashlightOn?22:0) + (player.LanternOn?12:0) + (player.LaserOn?30:0);
             _dungeons.TryGetValue(player.LocationId, out var currentDungeon);
             var actors = player.LocationId == "outdoor" ? _actors.Values.ToArray() : currentDungeon?.Actors.ToArray() ?? Array.Empty<ActorState>();
             var target = actors.Select(actor => (Actor: actor, Rating: Relationship(player.Id, actor.Id)))

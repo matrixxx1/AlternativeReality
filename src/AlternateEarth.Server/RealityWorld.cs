@@ -79,7 +79,7 @@ public sealed partial class RealityWorld
             Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10,
             Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
             existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
-            existing?.FlashlightOn ?? false, existing?.LanternOn ?? false);
+            existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false);
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
@@ -441,7 +441,7 @@ public sealed partial class RealityWorld
         {
             if (actor.IsMerchant)
             {
-                var goods = new[] { ("rocks", "$0.01-$1.00"), ("ball bearings", "$0.05-$2.00"), ("food", "$2-$5"), ("water", "$0.50-$2"), ("a flashlight", "$10-$50"), ("a lantern", "$50-$100"), ("a skateboard", "$200-$300"), ("a bike", "$400-$500"), ("an inflatable raft", "$450-$650") };
+                var goods = new[] { ("rocks", "$0.01-$1.00"), ("ball bearings", "$0.05-$2.00"), ("food", "$2-$5"), ("water", "$0.50-$2"), ("a flashlight", "$10-$50"), ("a lantern", "$50-$100"), ("a laser", "$200-$400"), ("a skateboard", "$200-$300"), ("a bike", "$400-$500"), ("an inflatable raft", "$450-$650") };
                 var good = goods[_actorRandom.Next(goods.Length)];
                 return $"For sale! {good.Item1} for {good.Item2}.";
             }

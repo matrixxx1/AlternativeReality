@@ -79,7 +79,8 @@ public sealed record PlayerState(
     DateTimeOffset? WaterProtectedUntilUtc = null,
     string LocationId = "outdoor",
     bool FlashlightOn = false,
-    bool LanternOn = false);
+    bool LanternOn = false,
+    bool LaserOn = false);
 
 public sealed record ActorState(
     string Id,

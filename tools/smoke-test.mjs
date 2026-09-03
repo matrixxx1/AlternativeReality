@@ -31,11 +31,13 @@ try {
   const path = await first.waitFor(message => message.type === 'pathResult' && message.sequence === 2); if (!path.waypoints?.length) throw new Error('Pathfinding failed.');
   first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: false }));
   await first.waitFor(message => message.type === 'error' && message.message.includes('flashlight'));
+  first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: false, lanternOn: false, laserOn:true }));
+  await first.waitFor(message => message.type === 'error' && message.message.includes('laser'));
   first.socket.send(JSON.stringify({ type: 'setGodMode', enabled: true }));
   const god = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.godMode);
   if (god.player.walletCents < 50000 || god.player.water < 10 || god.player.stamina < 10) throw new Error('God Mode resources were not enforced.');
-  first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: true }));
-  await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.flashlightOn && message.player.lanternOn);
+  first.socket.send(JSON.stringify({ type: 'setLights', flashlightOn: true, lanternOn: true,laserOn:true }));
+  await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.flashlightOn && message.player.lanternOn&&message.player.laserOn);
   first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: true }));
   const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
   const homeBase=welcomeA.privateState.base;
