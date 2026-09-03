@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alternate Earth — 2D Client</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="world" aria-label="Alternate Earth game world"></canvas>
+  <header class="panel title-panel">
+    <div class="eyebrow">ALTERNATE EARTH // REALITY LINK</div>
+    <h1 id="realityName">Connecting…</h1>
+    <div class="status-row"><span id="connectionDot" class="dot"></span><span id="status">Opening reality link</span></div>
+  </header>
+  <aside class="panel legend-panel">
+    <div><i class="swatch road"></i>Real road</div>
+    <div><i class="swatch building"></i>Real footprint</div>
+    <div><i class="swatch water"></i>Water</div>
+    <div><i class="swatch structure"></i>Reality object</div>
+  </aside>
+  <section class="panel help-panel">
+    <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
+    <div><kbd>Left click</kbd> place object within 5m</div>
+    <div><kbd>Right click</kbd> remove nearby object</div>
+    <div><kbd>Wheel</kbd> zoom</div>
+  </section>
+  <div id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Renderer-neutral protocol v1
+
+The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Clients connect with a server-issued or locally remembered character ID and a display name. The server sends `welcome` with the assigned player ID and an authoritative `WorldSnapshot`.
+
+## Client to server
+
+| Type | Logical payload | Server validation |
+|---|---|---|
+| `moveRequest` | direction `x`, `y`; client `sequence` | normalizes direction, bounds elapsed time/speed, clamps world bounds |
+| `placeObject` | logical `objectType`, `x`, `y`, `rotationDegrees` | five-meter reach, reality bounds, 0.5m snap, server ID/ownership |
+| `removeObject` | `entityId` | entity is a reality delta, five-meter reach, destruction setting |
+| `requestChunk` | chunk `x`, `y` | prototype returns the area snapshot; chunk filtering is next |
+| `ping` | none | no state mutation |
+
+Future gameplay follows the same command pattern: `InteractRequest`, `AttackRequest`, `PickupItem`, `CraftItem`, and `OpenContainer` contain intent and references, never final authoritative results.
+
+## Server to client
+
+| Type | Purpose |
+|---|---|
+| `welcome` | protocol version, assigned player, complete initial snapshot |
+| `chunkSnapshot` | authoritative base and reality state for requested scope |
+| `playerJoined`, `playerMoved`, `playerLeft` | multiplayer presence |
+| `objectCreated`, `objectRemoved` | accepted reality delta events |
+| `error` | rejected command with safe message |
+| `pong` | liveness response |
+
+Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. They never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.

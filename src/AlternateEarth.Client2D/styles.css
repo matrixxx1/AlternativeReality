@@ -1,0 +1,36 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --ink: #e7eadf;
+  --panel: rgba(15, 21, 20, 0.86);
+  --line: rgba(220, 229, 210, 0.16);
+  --accent: #e4b95f;
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #15211d; color: var(--ink); }
+#world { display: block; width: 100%; height: 100%; cursor: crosshair; image-rendering: pixelated; }
+.panel { position: fixed; z-index: 2; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(12px); box-shadow: 0 12px 34px rgba(0,0,0,.24); }
+.title-panel { left: 20px; top: 20px; padding: 14px 18px 13px; min-width: min(410px, calc(100vw - 40px)); border-left: 3px solid var(--accent); }
+.eyebrow { color: #a9b6a9; font-size: 10px; font-weight: 800; letter-spacing: .2em; }
+h1 { margin: 5px 0 7px; font-family: Georgia, serif; font-size: clamp(21px, 3vw, 30px); font-weight: 500; }
+.status-row { display: flex; align-items: center; gap: 8px; color: #b9c4bb; font-size: 12px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #b75b4d; box-shadow: 0 0 12px currentColor; }
+.dot.online { background: #76c78c; }
+.legend-panel { top: 20px; right: 20px; padding: 12px 14px; display: grid; gap: 7px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.legend-panel div { display: flex; align-items: center; gap: 8px; }
+.swatch { width: 13px; height: 4px; display: inline-block; }
+.swatch.road { background: #d8cfb2; }
+.swatch.building { background: #866e5b; height: 9px; }
+.swatch.water { background: #4c8794; height: 9px; }
+.swatch.structure { background: #e4b95f; height: 9px; }
+.help-panel { left: 20px; bottom: 20px; padding: 12px 14px; display: grid; gap: 6px; color: #b9c4bb; font-size: 12px; }
+kbd { border: 1px solid #56635b; border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; color: #ecf1e8; background: #26312c; font: inherit; font-size: 10px; }
+#toast { position: fixed; z-index: 3; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: #271e19; border: 1px solid #795746; color: #f2d5bd; padding: 9px 14px; opacity: 0; transition: .2s; pointer-events: none; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 650px) {
+  .legend-panel { display: none; }
+  .help-panel { left: 12px; bottom: 12px; }
+  .title-panel { left: 12px; top: 12px; }
+}

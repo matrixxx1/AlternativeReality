@@ -1,0 +1,61 @@
+using AlternateEarth.Server;
+using AlternateEarth.Shared;
+
+namespace AlternateEarth.Tests;
+
+public sealed class PersistenceTests : IAsyncLifetime
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), $"alternate-earth-tests-{Guid.NewGuid():N}");
+    private readonly RealityConfiguration _reality = new(
+        "persistence-test", "Persistence Test", 42,
+        new GeographicArea(new GeoCoordinate(45.6387, -122.6615), 2000));
+
+    public Task InitializeAsync()
+    {
+        Directory.CreateDirectory(_directory);
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        Directory.Delete(_directory, true);
+        return Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task EntitySurvivesStoreReopenAndCanBeTombstoned()
+    {
+        var database = Path.Combine(_directory, "reality.db");
+        var originalStore = new SqliteRealityStore(database);
+        await originalStore.InitializeAsync(_reality);
+        var entity = new CanonicalEntity(
+            "placed:test", EntityKind.PlayerStructure,
+            new WorldPosition(_reality.Area.Region, 10.5, -4.0),
+            Array.Empty<GeometryPoint>(),
+            new Dictionary<string, string> { ["objectType"] = "wall" },
+            IsBaseEntity: false);
+        await originalStore.SaveEntityAsync(_reality.Id, entity);
+
+        var reopenedStore = new SqliteRealityStore(database);
+        var reloaded = Assert.Single(await reopenedStore.LoadActiveEntitiesAsync(_reality.Id));
+        Assert.Equal(entity.Id, reloaded.Id);
+        Assert.Equal(entity.Position, reloaded.Position);
+        Assert.Equal("wall", reloaded.Properties["objectType"]);
+
+        await reopenedStore.RemoveEntityAsync(_reality.Id, reloaded);
+        Assert.Empty(await new SqliteRealityStore(database).LoadActiveEntitiesAsync(_reality.Id));
+    }
+
+    [Fact]
+    public async Task CharacterStateBelongsToRealityAndPersists()
+    {
+        var store = new SqliteRealityStore(Path.Combine(_directory, "characters.db"));
+        await store.InitializeAsync(_reality);
+        var player = new PlayerState("character-1", "Ada", new WorldPosition(_reality.Area.Region, 15, 25), 7);
+
+        await store.SaveCharacterAsync(_reality.Id, player);
+        var loaded = await new SqliteRealityStore(Path.Combine(_directory, "characters.db")).LoadCharacterAsync(_reality.Id, player.Id);
+
+        Assert.Equal(player, loaded);
+    }
+}
