@@ -7,8 +7,8 @@
   const toast = document.querySelector('#toast');
   const state = {
     socket: null, playerId: null, snapshot: null,
-    base: [], reality: new Map(), players: new Map(), keys: new Set(),
-    camera: { x: 0, y: 0 }, scale: 2.3, sequence: 0
+    base: [], reality: new Map(), players: new Map(), facings: new Map(), keys: new Set(),
+    camera: { x: 0, y: 0 }, scale: 10, sequence: 0, facing: 'south'
   };
 
   function createClientId() {
@@ -53,7 +53,17 @@
         break;
       }
       case 'playerJoined': state.players.set(message.player.id, message.player); break;
-      case 'playerMoved': state.players.set(message.player.id, message.player); break;
+      case 'playerMoved': {
+        const previous = state.players.get(message.player.id);
+        if (previous) {
+          const dx = message.player.position.x - previous.position.x;
+          const dy = message.player.position.y - previous.position.y;
+          if (Math.abs(dx) > Math.abs(dy)) state.facings.set(message.player.id, dx > 0 ? 'east' : 'west');
+          else if (Math.abs(dy) > 0) state.facings.set(message.player.id, dy > 0 ? 'north' : 'south');
+        }
+        state.players.set(message.player.id, message.player);
+        break;
+      }
       case 'playerLeft': state.players.delete(message.playerId); break;
       case 'objectCreated': state.reality.set(message.entity.id, message.entity); break;
       case 'objectRemoved': state.reality.delete(message.entityId); break;
@@ -150,8 +160,10 @@
 
   function drawRoad(entity) {
     const major = ['primary', 'secondary', 'tertiary'].includes(entity.properties?.highway);
-    drawGeometry(entity, null, '#36413b', major ? 8 : 5);
-    drawGeometry(entity, null, major ? '#d4c7a6' : '#a8a38e', major ? 5 : 3);
+    const outerWidth = state.scale * (major ? 8 : 5);
+    const innerWidth = state.scale * (major ? 6 : 3.5);
+    drawGeometry(entity, null, '#36413b', Math.max(major ? 8 : 5, outerWidth));
+    drawGeometry(entity, null, major ? '#d4c7a6' : '#a8a38e', Math.max(major ? 5 : 3, innerWidth));
   }
 
   function drawTree(entity) {
@@ -171,22 +183,69 @@
 
   function drawPlayer(player, self) {
     const p = toScreen(player.position);
-    ctx.fillStyle = self ? '#f3d680' : '#8bc1d1'; ctx.strokeStyle = '#17201d'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(p.x, p.y, self ? 7 : 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#edf0e7'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(player.name, p.x, p.y - 12);
+    const unit = Math.max(2, Math.round(state.scale / 5));
+    const facing = state.facings.get(player.id) || (self ? state.facing : 'south');
+    const tunic = self ? '#d6a84a' : characterColor(player.id);
+    const tunicDark = self ? '#8f652b' : '#31576b';
+
+    ctx.fillStyle = 'rgba(3,10,8,.42)';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y + unit * 5, unit * 4.2, unit * 1.8, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#302a25';
+    ctx.fillRect(p.x - unit * 3, p.y + unit * 2, unit * 2, unit * 3);
+    ctx.fillRect(p.x + unit, p.y + unit * 2, unit * 2, unit * 3);
+    ctx.fillStyle = '#171918';
+    ctx.fillRect(p.x - unit * 3, p.y + unit * 4, unit * 2, unit);
+    ctx.fillRect(p.x + unit, p.y + unit * 4, unit * 2, unit);
+
+    ctx.fillStyle = tunicDark;
+    ctx.fillRect(p.x - unit * 5, p.y - unit, unit, unit * 4);
+    ctx.fillRect(p.x + unit * 4, p.y - unit, unit, unit * 4);
+    ctx.fillStyle = tunic;
+    ctx.fillRect(p.x - unit * 4, p.y - unit * 2, unit * 8, unit * 5);
+    ctx.fillStyle = '#493921';
+    ctx.fillRect(p.x - unit * 4, p.y + unit, unit * 8, unit);
+    ctx.fillStyle = '#ead0aa';
+    ctx.fillRect(p.x - unit * 3, p.y - unit * 6, unit * 6, unit * 4);
+    ctx.fillStyle = self ? '#6a3f24' : '#44352d';
+    ctx.fillRect(p.x - unit * 3, p.y - unit * 7, unit * 6, unit * 2);
+    ctx.fillRect(p.x - unit * 4, p.y - unit * 6, unit, unit * 3);
+    ctx.fillRect(p.x + unit * 3, p.y - unit * 6, unit, unit * 3);
+
+    ctx.fillStyle = '#26251f';
+    if (facing === 'south') {
+      ctx.fillRect(p.x - unit * 2, p.y - unit * 4, unit, unit);
+      ctx.fillRect(p.x + unit, p.y - unit * 4, unit, unit);
+    } else if (facing === 'east') {
+      ctx.fillRect(p.x + unit, p.y - unit * 4, unit, unit);
+    } else if (facing === 'west') {
+      ctx.fillRect(p.x - unit * 2, p.y - unit * 4, unit, unit);
+    } else {
+      ctx.fillStyle = self ? '#6a3f24' : '#44352d';
+      ctx.fillRect(p.x - unit * 2, p.y - unit * 5, unit * 4, unit * 2);
+    }
+
+    ctx.fillStyle = '#edf0e7'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(player.name, p.x, p.y - unit * 9);
     if (self) { ctx.strokeStyle = 'rgba(228,185,95,.18)'; ctx.beginPath(); ctx.arc(p.x, p.y, 5 * state.scale, 0, Math.PI * 2); ctx.stroke(); }
+  }
+
+  function characterColor(id) {
+    const palette = ['#5489a3', '#668f57', '#9b6158', '#785f9e', '#b17743'];
+    let hash = 0;
+    for (const character of id) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+    return palette[hash % palette.length];
   }
 
   function drawCoordinates() {
     const me = state.players.get(state.playerId); if (!me) return;
     ctx.fillStyle = 'rgba(229,234,222,.55)'; ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'right';
-    ctx.fillText(`${me.position.region.latitudeBand},${me.position.region.longitudeBand}  X ${me.position.x.toFixed(1)}m  Y ${me.position.y.toFixed(1)}m  Z ${me.position.z.toFixed(1)}m`, innerWidth - 18, innerHeight - 18);
+    ctx.fillText(`${me.position.region.latitudeBand},${me.position.region.longitudeBand}  X ${me.position.x.toFixed(1)}m  Y ${me.position.y.toFixed(1)}m  Z ${me.position.z.toFixed(1)}m  ·  ${state.scale.toFixed(1)}px/m`, innerWidth - 18, innerHeight - 18);
   }
 
   addEventListener('keydown', event => { if (!event.repeat) state.keys.add(event.key.toLowerCase()); });
   addEventListener('keyup', event => state.keys.delete(event.key.toLowerCase()));
   addEventListener('blur', () => state.keys.clear());
-  canvas.addEventListener('wheel', event => { event.preventDefault(); state.scale = Math.max(.25, Math.min(8, state.scale * (event.deltaY > 0 ? .88 : 1.14))); }, { passive: false });
+  canvas.addEventListener('wheel', event => { event.preventDefault(); state.scale = Math.max(.5, Math.min(32, state.scale * (event.deltaY > 0 ? .88 : 1.14))); }, { passive: false });
   canvas.addEventListener('click', event => {
     const point = toWorld({ x: event.clientX, y: event.clientY });
     send({ type: 'placeObject', objectType: 'wooden-crate', x: point.x, y: point.y, rotationDegrees: 0 });
@@ -200,7 +259,12 @@
   setInterval(() => {
     const x = (state.keys.has('d') || state.keys.has('arrowright') ? 1 : 0) - (state.keys.has('a') || state.keys.has('arrowleft') ? 1 : 0);
     const y = (state.keys.has('w') || state.keys.has('arrowup') ? 1 : 0) - (state.keys.has('s') || state.keys.has('arrowdown') ? 1 : 0);
-    if (x || y) send({ type: 'moveRequest', x, y, sequence: ++state.sequence });
+    if (x || y) {
+      if (Math.abs(x) > Math.abs(y)) state.facing = x > 0 ? 'east' : 'west';
+      else state.facing = y > 0 ? 'north' : 'south';
+      state.facings.set(state.playerId, state.facing);
+      send({ type: 'moveRequest', x, y, sequence: ++state.sequence });
+    }
   }, 50);
 
   addEventListener('resize', resize); resize(); connect(); render();
