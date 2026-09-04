@@ -151,3 +151,103 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 }
 @media (min-width:761px) and (max-width:1200px) { .inventory-panel { left:14px; top:135px; width:min(760px,calc(100vw - 28px)); } }
 @media (max-width:760px) { .equipment-layout { grid-template-columns:1fr; }.inventory-panel { width:min(360px,calc(100% - 16px)); }.backpack { min-height:130px; } }
+
+/* A single control rail keeps interface panels out of the playable canvas. */
+.right-rail {
+  position: fixed;
+  z-index: 20;
+  inset: 0 0 0 auto;
+  width: 420px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: linear-gradient(90deg, rgba(8,16,13,.96), rgba(15,28,22,.99));
+  border-left: 3px solid #533c1e;
+  box-shadow: -7px 0 18px rgba(0,0,0,.42);
+}
+.right-rail-heading {
+  position: sticky;
+  z-index: 30;
+  top: -10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  margin: -10px -10px 1px;
+  padding: 9px 12px;
+  color: #f2d889;
+  background: #101e18;
+  border-bottom: 1px solid rgba(217,181,92,.45);
+  font: 700 11px monospace;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.right-rail-heading span { color: #989f91; font-size: 9px; }
+.right-rail > .panel {
+  position: relative;
+  inset: auto;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  transform: none;
+  box-shadow: 0 0 0 2px #533c1e, 3px 4px 0 rgba(0,0,0,.3);
+}
+.right-rail > .panel:not(.panel-collapsed) { width: 100%; }
+.right-rail > .panel-collapsed { align-self: flex-end; }
+.right-rail .title-panel,
+.right-rail .telemetry-panel,
+.right-rail .travel-panel,
+.right-rail .help-panel,
+.right-rail .god-panel,
+.right-rail .inventory-panel,
+.right-rail .character-panel,
+.right-rail .home-storage,
+.right-rail .chat-history,
+.right-rail .chat-form,
+.right-rail .action-menu,
+.right-rail .trade-window,
+.right-rail .quest-log,
+.right-rail .quest-window,
+.right-rail .server-config-window { left:auto; right:auto; top:auto; bottom:auto; }
+.right-rail .title-panel { min-width: 0; padding: 10px 12px; }
+.right-rail .telemetry-panel { padding: 10px 12px; }
+.right-rail .mode-buttons { flex-wrap: wrap; }
+.right-rail .help-panel { display: grid; }
+.right-rail .god-panel { display: flex; flex-wrap: wrap; align-items: center; }
+.right-rail .inventory-panel { overflow: hidden; padding: 9px 10px; }
+.right-rail .equipment-layout { grid-template-columns: 1fr; }
+.right-rail .equipment-doll { min-height: 225px; }
+.right-rail .character-panel,
+.right-rail .home-storage,
+.right-rail .chat-history,
+.right-rail .trade-window,
+.right-rail .quest-log,
+.right-rail .quest-window { overflow: visible; }
+.right-rail .home-storage-items,
+.right-rail .home-item-storage-columns { grid-template-columns: 1fr; }
+.right-rail .chat-form { display: flex; min-width: 0; }
+.right-rail .action-menu { min-width: 0; }
+.right-rail .trade-offer { grid-template-columns: 46px minmax(100px,1fr) auto 64px; gap: 6px; }
+.right-rail .trade-offer input { width: 58px; }
+.right-rail .server-config-window { overflow-x: auto; overflow-y: visible; }
+.right-rail .server-config-table { min-width: 1120px; }
+.right-rail .modifier-groups { grid-template-columns: 1fr; }
+.right-rail [hidden] { display: none !important; }
+
+@media (min-width: 901px) {
+  .world-task { left: 0; right: 420px; width: max-content; margin: auto; transform: none; }
+  .safe-exit-button { left: calc((100vw - 420px) / 2); }
+  #toast { left: calc((100vw - 420px) / 2); }
+}
+
+@media (max-width: 900px) {
+  .right-rail { width: min(380px, 92vw); background: linear-gradient(90deg, rgba(8,16,13,.92), rgba(15,28,22,.98)); }
+  .right-rail .telemetry-panel,
+  .right-rail .home-storage,
+  .right-rail .inventory-panel { max-height: none; }
+}

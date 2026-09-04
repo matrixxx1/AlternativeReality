@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=27">
+  <link rel="stylesheet" href="styles.css?v=28">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
   <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
   <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
+  <aside id="rightRail" class="right-rail" aria-label="Game panels">
+  <div class="right-rail-heading"><strong>AlternativeReality</strong><span>Control rail</span></div>
   <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link">
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
     <h1>AlternativeReality</h1>
@@ -67,7 +69,7 @@
     <button id="rebuildButton" type="button" disabled>Reset &amp; rebuild reality</button>
     <button id="serverConfigButton" type="button" hidden>Server config</button>
   </section>
-  <section class="panel inventory-panel">
+  <section id="inventoryPanel" class="panel inventory-panel">
     <div class="inventory-header"><strong>Inventory &amp; equipment</strong><button id="toggleInventoryButton" type="button">Hide</button></div>
     <div id="inventoryContent" class="equipment-layout">
       <div class="equipment-doll" role="group" aria-label="Equipped clothing and weapon">
@@ -120,7 +122,7 @@
     <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
     <button type="submit">Say</button>
   </form>
-  <section id="actionMenu" class="panel action-menu" hidden>
+  <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
     <button id="enterBuildingButton" type="button" hidden>Enter building</button>
@@ -149,7 +151,7 @@
   <section id="questLog" class="panel quest-log" data-collapsible="Quests">
     <strong>Quests</strong><div id="questList"><small>No active quests.</small></div>
   </section>
-  <section id="questWindow" class="panel quest-window" hidden>
+  <section id="questWindow" class="panel quest-window" data-collapsible="Quest details" hidden>
     <h2 id="questTitle">Quest</h2><p id="questDescription"></p><strong id="questReward"></strong>
     <div class="trade-actions"><button id="questAbandon" type="button" hidden>Abandon</button><button id="questClose" type="button">Close</button><button id="questAccept" type="button" hidden>Accept</button><button id="questComplete" type="button" hidden>Complete</button></div>
   </section>
@@ -162,6 +164,7 @@
     </section>
     <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
   </section>
+  </aside>
   <div id="actorTooltip" class="actor-tooltip" hidden></div>
   <section id="accountSetup" class="account-setup">
     <form id="accountForm" class="panel account-card">
@@ -190,6 +193,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=53"></script>
+  <script src="app.js?v=54"></script>
 </body>
 </html>
