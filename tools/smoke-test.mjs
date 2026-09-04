@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=74`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=77`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -12,8 +12,8 @@ if (!clientHtml.includes('Inventory</strong>') || !clientScript.includes("config
   throw new Error('Server-config inventory controls are missing.');
 if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('for(const amount of [1,10,50])'))
   throw new Error('Inventory drop controls are missing.');
-if (!clientHtml.includes('miniMap') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'"))
-  throw new Error('Personal flag or mini-map client controls are missing.');
+if (!clientHtml.includes('miniMapTooltip') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'") || !clientScript.includes('miniMapMarkerAt') || !clientScript.includes('miniMapMarkers'))
+  throw new Error('Personal flag, categorized mini-map markers, or hover labels are missing.');
 if (!clientHtml.includes('brontosaurusIntervalConfig') || !clientHtml.includes('stegosaurusIntervalConfig') || !clientHtml.includes('raptorIntervalConfig') || !clientHtml.includes('landOfGiantsIntervalConfig') || !clientScript.includes('drawBrontosaurusActor') || !clientScript.includes('drawStegosaurusActor') || !clientScript.includes('drawRaptorActor') || !clientScript.includes('drawGiantActor'))
   throw new Error('Dinosaur event controls or renderers are missing.');
 if (!clientHtml.includes('activeEventsPanel') || !clientHtml.includes('ufoEventNameConfig') || !clientHtml.includes('landOfGiantsEventNameConfig') || !clientScript.includes('renderActiveEvents'))
