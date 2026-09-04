@@ -94,6 +94,29 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void OpenWaterwayKeepsItsThreeMeterWidthAcrossSpatialCells()
+    {
+        var stream = new CanonicalEntity("stream", EntityKind.Water, new WorldPosition(Region, 31, 0),
+            new GeometryPoint[] { new(31, -10), new(31, 10) }, new Dictionary<string, string> { ["waterway"] = "stream" });
+        var navigation = CreateNavigation(stream);
+
+        Assert.Equal(TerrainType.ShallowWater, navigation.TerrainAt(32.4, 0));
+        Assert.Equal(TerrainType.Grass, navigation.TerrainAt(32.6, 0));
+    }
+
+    [Fact]
+    public void OpenWaterwayWithManyPointsDoesNotBecomeADeepWaterPolygon()
+    {
+        var stream = new CanonicalEntity("bending-stream", EntityKind.Water, new WorldPosition(Region, 30, 30),
+            new GeometryPoint[] { new(20, 20), new(40, 20), new(40, 40), new(20, 40) },
+            new Dictionary<string, string> { ["waterway"] = "stream" });
+        var navigation = CreateNavigation(stream);
+
+        Assert.Equal(TerrainType.Grass, navigation.TerrainAt(30, 30));
+        Assert.Equal(TerrainType.ShallowWater, navigation.TerrainAt(30, 20.5));
+    }
+
+    [Fact]
     public void ClickRouteGoesAroundBuilding()
     {
         var building = Polygon("building", EntityKind.Building, -2, -6, 2, 6);

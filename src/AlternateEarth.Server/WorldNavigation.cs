@@ -296,6 +296,7 @@ public sealed class WorldNavigation
         var padding = entity.Kind switch
         {
             EntityKind.Road or EntityKind.Sidewalk => Width(entity, 5) / 2,
+            EntityKind.Water => 1.5,
             EntityKind.Tree => Width(entity, .85) + PlayerRadiusMeters,
             EntityKind.Vehicle => 3,
             _ => PlayerRadiusMeters

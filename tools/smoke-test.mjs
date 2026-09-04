@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=78`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=79`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -16,6 +16,8 @@ if (!clientHtml.includes('miniMapTooltip') || !clientHtml.includes('placeFlagBut
   throw new Error('Personal flag, categorized mini-map markers, or hover labels are missing.');
 if (!clientHtml.includes('Active tasks') || !clientScript.includes('setPerformanceTask') || !clientScript.includes('activeOperations') || !clientScript.includes('area-prefetch:'))
   throw new Error('Performance active-task lifecycle or map-area task reporting is missing.');
+if (!clientScript.includes('waterGeometryClosed') || !clientScript.includes("state.scale*3)"))
+  throw new Error('Water rendering is not aligned with authoritative water geometry.');
 if (!clientHtml.includes('brontosaurusIntervalConfig') || !clientHtml.includes('stegosaurusIntervalConfig') || !clientHtml.includes('raptorIntervalConfig') || !clientHtml.includes('landOfGiantsIntervalConfig') || !clientScript.includes('drawBrontosaurusActor') || !clientScript.includes('drawStegosaurusActor') || !clientScript.includes('drawRaptorActor') || !clientScript.includes('drawGiantActor'))
   throw new Error('Dinosaur event controls or renderers are missing.');
 if (!clientHtml.includes('activeEventsPanel') || !clientHtml.includes('ufoEventNameConfig') || !clientHtml.includes('landOfGiantsEventNameConfig') || !clientScript.includes('renderActiveEvents'))
