@@ -140,6 +140,7 @@ public sealed class RealitySocketHub
                     case "updateServerEvents":
                         var eventConfiguration = await _world.UpdateServerEventConfigurationAsync(characterId, root.Deserialize<UpdateServerEventsRequest>(SharedJson.Options)!, cancellationToken);
                         await connection.SendAsync(new { type = "serverEventsUpdated", events = eventConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        await BroadcastAsync(new { type = "serverEventsChanged", events = _world.ClientEventConfiguration }, characterId, cancellationToken);
                         await BroadcastWeatherAsync(cancellationToken);
                         break;
                     case "enterDungeon":

@@ -84,7 +84,12 @@ public sealed partial class RealityWorld
                     CarriedInBackpack = defaults.CarriedInBackpack
                 };
         _movementConfiguration = await _store.LoadMovementConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultMovementConfiguration;
-        _eventConfiguration = await _store.LoadServerEventConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultEventConfiguration;
+        var storedEvents = await _store.LoadServerEventConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultEventConfiguration;
+        var storedTimeMode = storedEvents.ServerTimeMode.Trim().ToLowerInvariant();
+        if (storedTimeMode is not ("auto" or "manual")) storedTimeMode = "auto";
+        // Configurations written before explicit clock modes used a non-zero offset as a manual clock.
+        if (storedTimeMode == "auto" && storedEvents.ServerTimeOffsetMinutes != 0) storedTimeMode = "manual";
+        _eventConfiguration = storedEvents with { ServerTimeMode = storedTimeMode, ServerUtcOffsetMinutes = 0 };
         ResetScheduledEventCycles(DateTimeOffset.UtcNow);
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
@@ -127,7 +132,7 @@ public sealed partial class RealityWorld
 
     private WeatherState CreateConfiguredWeather(string mode, double? temperatureCelsius)
     {
-        var now = DateTimeOffset.UtcNow.AddMinutes(_eventConfiguration.ServerTimeOffsetMinutes);
+        var now = CurrentServerTime;
         var profile = mode.ToLowerInvariant() switch
         {
             "clear" => ("Clear", 0, 0d, 8d),
@@ -143,6 +148,21 @@ public sealed partial class RealityWorld
         var sunrise = new DateTimeOffset(date.AddHours(7), now.Offset).ToUniversalTime();
         var sunset = new DateTimeOffset(date.AddHours(19), now.Offset).ToUniversalTime();
         return new WeatherState(profile.Item1, profile.Item2, temperatureCelsius ?? (mode.Equals("snow", StringComparison.OrdinalIgnoreCase) ? -3 : 18), profile.Item3, profile.Item4, isDay, DateTimeOffset.UtcNow, "server override", sunrise, sunset, Weather.MoonPhase, Weather.MoonIllumination);
+    }
+
+    private static int ServerUtcOffsetMinutes(DateTimeOffset utcNow) =>
+        (int)Math.Round(TimeZoneInfo.Local.GetUtcOffset(utcNow).TotalMinutes);
+
+    public DateTimeOffset CurrentServerTime
+    {
+        get
+        {
+            var utcNow = DateTimeOffset.UtcNow;
+            var manualOffset = _eventConfiguration.ServerTimeMode.Equals("manual", StringComparison.OrdinalIgnoreCase)
+                ? _eventConfiguration.ServerTimeOffsetMinutes
+                : 0;
+            return utcNow.AddMinutes(ServerUtcOffsetMinutes(utcNow) + manualOffset);
+        }
     }
 
     public async Task<PlayerState> JoinAsync(string characterId, string requestedName, string? accountId = null, CancellationToken cancellationToken = default)

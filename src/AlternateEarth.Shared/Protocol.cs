@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 36;
+    public const int Version = 37;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -65,7 +65,7 @@ public sealed record UpdateServerEventsRequest(
     string UfoEventName = "UFO Flyover", string TrexEventName = "T-Rex Portal",
     string BrontosaurusEventName = "Brontosaurus Portal", string StegosaurusEventName = "Stegosaurus Portal",
     string RaptorEventName = "Raptor Pack", string LandOfGiantsEventName = "Land of the Giants",
-    string BearEventName = "The Great Bear");
+    string BearEventName = "The Great Bear", string ServerTimeMode = "auto");
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record PlaceFlagRequest(double X, double Y, string Label);
 public sealed record RemoveObjectRequest(string EntityId);

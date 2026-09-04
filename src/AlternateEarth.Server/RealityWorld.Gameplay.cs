@@ -146,7 +146,7 @@ public sealed partial class RealityWorld
                 baseState = new BaseState(buildingId, door.Id, door.Position, player?.Name ?? "Explorer", squareFeet, CalculateBuildingPriceCents(building));
             }
         }
-        var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration, _eventConfiguration);
+        var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration, ClientEventConfiguration);
         var revealedAreas = _revealedWorldAreas.Keys.Where(key => key.Player == playerId).Select(key => key.Area).OrderBy(key => key).ToArray();
         IReadOnlyList<CanonicalEntity>? homeStorage = null;
         InventoryState? homeItemStorage = null;
@@ -1082,6 +1082,7 @@ public sealed partial class RealityWorld
     }
 
     public ServerEventConfiguration EventConfiguration => _eventConfiguration;
+    public ServerEventConfiguration ClientEventConfiguration => _eventConfiguration with { ServerUtcOffsetMinutes = ServerUtcOffsetMinutes(DateTimeOffset.UtcNow) };
 
     public async Task<ServerEventConfiguration> UpdateServerEventConfigurationAsync(string playerId, UpdateServerEventsRequest request, CancellationToken cancellationToken = default)
     {
@@ -1098,6 +1099,11 @@ public sealed partial class RealityWorld
                 throw new InvalidOperationException($"{label} must be 3 to 60 printable characters.");
             return name;
         }
+        var serverTimeMode = (request.ServerTimeMode ?? string.Empty).Trim().ToLowerInvariant();
+        if (serverTimeMode is not ("auto" or "manual")) throw new InvalidOperationException("Server-time mode must be auto or manual.");
+        var serverTimeOffset = serverTimeMode == "manual"
+            ? InRange(request.ServerTimeOffsetMinutes, -52_596_000, 52_596_000, "Manual server-time offset")
+            : 0;
         var updated = new ServerEventConfiguration(
             InRange(request.WeatherRefreshMinutes, 1, 1_440, "Weather refresh"),
             InRange(request.StreetLightsOnHour, 0, 23, "Street-light on hour"),
@@ -1111,7 +1117,7 @@ public sealed partial class RealityWorld
             InRange(request.TrexDurationMinutes, 1, 120, "T-Rex duration"),
             InRange(request.BearIntervalHours, 1, 168, "Bear interval"),
             InRange(request.BearDurationMinutes, 1, 120, "Bear duration"),
-            InRange(request.ServerTimeOffsetMinutes, -525_600, 525_600, "Server-time offset"),
+            serverTimeOffset,
             request.WeatherMode.Trim().ToLowerInvariant(),
             request.TemperatureCelsius,
             InRange(request.BrontosaurusIntervalHours, 1, 168, "Brontosaurus interval"),
@@ -1128,7 +1134,9 @@ public sealed partial class RealityWorld
             EventName(request.StegosaurusEventName, "Stegosaurus event name"),
             EventName(request.RaptorEventName, "Raptor event name"),
             EventName(request.LandOfGiantsEventName, "Land of the Giants event name"),
-            EventName(request.BearEventName, "Bear event name"));
+            EventName(request.BearEventName, "Bear event name"),
+            serverTimeMode,
+            0);
         if (updated.StreetLightsOnHour == updated.StreetLightsOffHour) throw new InvalidOperationException("Street-light on and off hours must differ.");
         if (updated.WeatherMode is not ("live" or "clear" or "rain" or "snow" or "fog" or "storm")) throw new InvalidOperationException("Weather mode must be live, clear, rain, snow, fog, or storm.");
         if (updated.TemperatureCelsius is < -90 or > 60) throw new InvalidOperationException("Temperature must be between -90 and 60 °C.");

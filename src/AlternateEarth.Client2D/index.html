@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=46">
+  <link rel="stylesheet" href="styles.css?v=47">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -198,7 +198,11 @@
     <section class="server-config-page" data-server-config-page="events" hidden>
       <p>Schedules are server-authoritative and persist for this reality. Hours use the server location's 24-hour clock.</p>
       <div class="server-event-list">
-        <div class="server-event-row"><label>Simulated server time<input id="serverTimeConfig" type="datetime-local" step="60"></label></div>
+        <div class="server-event-row server-time-row">
+          <label>Server date/time mode<select id="serverTimeModeConfig"><option value="auto">Auto — host local clock</option><option value="manual">Manual — selected clock</option></select></label>
+          <label>Manual date and time<input id="serverTimeConfig" type="datetime-local" step="60"></label>
+          <small id="serverTimePreview" aria-live="polite"></small>
+        </div>
         <div class="server-event-row"><label>Weather mode<select id="weatherModeConfig"><option value="live">Live local weather</option><option value="clear">Clear</option><option value="rain">Rain</option><option value="snow">Snow</option><option value="fog">Fog</option><option value="storm">Thunderstorm</option></select></label></div>
         <div class="server-event-row"><label>Temperature override °C<input id="weatherTemperatureConfig" type="number" min="-90" max="60" step="0.1" placeholder="Live/default"></label></div>
         <div class="server-event-row"><label>Weather refresh (minutes)<input id="weatherRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
@@ -247,6 +251,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=82"></script>
+  <script src="app.js?v=83"></script>
 </body>
 </html>

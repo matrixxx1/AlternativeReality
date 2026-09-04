@@ -904,12 +904,13 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var other = await world.JoinAsync("event-other", "EventOther");
         await world.SetGodModeAsync(admin.Id, true);
         var request = new UpdateServerEventsRequest(30, 20, 6, 10, 180, 120, 12, 3, 36, 15, 48, 20, 240, "rain", 11.5, 18, 11, 30, 12, 8, 9, 20, 14,
-            "Sky Watch", "Jurassic Hour", "Long Neck Alert", "Spiked Tail", "Raptor Rush", "Big Trouble", "Bear Warning");
+            "Sky Watch", "Jurassic Hour", "Long Neck Alert", "Spiked Tail", "Raptor Rush", "Big Trouble", "Bear Warning", "manual");
 
         var updated = await world.UpdateServerEventConfigurationAsync(admin.Id, request);
 
         Assert.Equal(30, updated.WeatherRefreshMinutes);
         Assert.Equal(240, updated.ServerTimeOffsetMinutes);
+        Assert.Equal("manual", updated.ServerTimeMode);
         Assert.Equal("rain", updated.WeatherMode);
         Assert.Equal(18, updated.BrontosaurusIntervalHours);
         Assert.Equal(30, updated.StegosaurusIntervalHours);
@@ -920,10 +921,21 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal("Big Trouble", updated.LandOfGiantsEventName);
         Assert.Equal("Sky Watch", Assert.Single(world.TriggerWorldEvent(admin.Id, "ufo")).EventName);
         Assert.Equal(11.5, world.Weather.TemperatureCelsius);
+        var manualTime = world.CurrentServerTime;
+        await Task.Delay(20);
+        Assert.True(world.CurrentServerTime > manualTime);
+        var expectedManualTime = DateTimeOffset.UtcNow.Add(TimeZoneInfo.Local.GetUtcOffset(DateTimeOffset.UtcNow)).AddMinutes(240);
+        Assert.InRange((world.CurrentServerTime - expectedManualTime).TotalSeconds, -2, 2);
         var persisted = await store.LoadServerEventConfigurationAsync(configuration.Id);
         Assert.Equal(updated, persisted);
+        var automatic = await world.UpdateServerEventConfigurationAsync(admin.Id, request with { ServerTimeMode = "auto", ServerTimeOffsetMinutes = 240 });
+        Assert.Equal("auto", automatic.ServerTimeMode);
+        Assert.Equal(0, automatic.ServerTimeOffsetMinutes);
+        var expectedAutomaticTime = DateTimeOffset.UtcNow.Add(TimeZoneInfo.Local.GetUtcOffset(DateTimeOffset.UtcNow));
+        Assert.InRange((world.CurrentServerTime - expectedAutomaticTime).TotalSeconds, -2, 2);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(other.Id, request));
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(admin.Id, request with { UfoEventName = "x" }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(admin.Id, request with { ServerTimeMode = "frozen" }));
     }
 
     [Fact]

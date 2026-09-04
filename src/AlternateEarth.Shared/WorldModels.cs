@@ -184,7 +184,9 @@ public sealed record ServerEventConfiguration(
     string StegosaurusEventName = "Stegosaurus Portal",
     string RaptorEventName = "Raptor Pack",
     string LandOfGiantsEventName = "Land of the Giants",
-    string BearEventName = "The Great Bear");
+    string BearEventName = "The Great Bear",
+    string ServerTimeMode = "auto",
+    int ServerUtcOffsetMinutes = 0);
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,
