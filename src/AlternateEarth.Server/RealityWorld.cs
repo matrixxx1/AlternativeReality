@@ -7,6 +7,8 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
+    private static readonly Func<TerrainType, bool> RaftTerrainOnly =
+        terrain => WorldNavigation.SupportsTravelMode(terrain, TravelMode.Raft);
     private readonly DeterministicWorldGenerator _generator;
     private readonly IWeatherProvider _weatherProvider;
     private readonly SqliteRealityStore _store;
@@ -344,6 +346,12 @@ public sealed partial class RealityWorld
         });
 
         var requestedTerrain = Navigation.TerrainAt(requested.X, requested.Y);
+        if (player.TravelMode == TravelMode.Raft && !RaftTerrainOnly(requestedTerrain))
+        {
+            var stopped = player with { SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
+            await SavePlayerAsync(stopped, cancellationToken);
+            return new(stopped, false, true, false, false, false, "A raft cannot leave the water. Switch to another travel mode before going ashore.");
+        }
         if (player.TravelMode == TravelMode.Skateboard && !WorldNavigation.SupportsTravelMode(requestedTerrain, TravelMode.Skateboard))
         {
             var damaged = player with { HealthHearts = player.GodMode ? Math.Max(1, player.HealthHearts - .25) : Math.Max(0, player.HealthHearts - .25), TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
@@ -358,13 +366,18 @@ public sealed partial class RealityWorld
         }
 
         var next = requested;
-        var blocked = !Navigation.CanTraverse(player.Position, requested);
+        var raftTerrain = player.TravelMode == TravelMode.Raft
+            ? RaftTerrainOnly
+            : null;
+        var blocked = raftTerrain is null
+            ? !Navigation.CanTraverse(player.Position, requested)
+            : !Navigation.CanTraverse(player.Position, requested, raftTerrain);
         if (blocked)
         {
             var slideX = requested with { Y = player.Position.Y };
             var slideY = requested with { X = player.Position.X };
-            if (Navigation.CanTraverse(player.Position, slideX)) next = slideX;
-            else if (Navigation.CanTraverse(player.Position, slideY)) next = slideY;
+            if (raftTerrain is null ? Navigation.CanTraverse(player.Position, slideX) : Navigation.CanTraverse(player.Position, slideX, raftTerrain)) next = slideX;
+            else if (raftTerrain is null ? Navigation.CanTraverse(player.Position, slideY) : Navigation.CanTraverse(player.Position, slideY, raftTerrain)) next = slideY;
             else next = player.Position;
         }
         var nextTerrain = Navigation.TerrainAt(next.X, next.Y);
@@ -488,6 +501,16 @@ public sealed partial class RealityWorld
             return (new(true, new[] { target }), false);
         }
         var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
+        if (player.TravelMode == TravelMode.Raft)
+        {
+            if (!RaftTerrainOnly(Navigation.TerrainAt(request.X, request.Y)))
+                return (new(false, Array.Empty<WorldPosition>(), "A raft cannot leave the water. Switch to another travel mode before going ashore."), expanded);
+            var waterRoute = Navigation.FindPath(player.Position, request.X, request.Y,
+                terrain => ConfiguredSpeedMetersPerSecond(player, terrain), RaftTerrainOnly);
+            return waterRoute.Success
+                ? (waterRoute, expanded)
+                : (new(false, Array.Empty<WorldPosition>(), "No continuous water route to that destination was found."), expanded);
+        }
         return (Navigation.FindPath(player.Position, request.X, request.Y, terrain => ConfiguredSpeedMetersPerSecond(player, terrain)), expanded);
     }
 

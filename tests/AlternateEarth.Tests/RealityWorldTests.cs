@@ -1183,6 +1183,33 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RaftMovementCannotCrossOntoLand()
+    {
+        var configuration = new RealityConfiguration("raft-boundary", "Raft Boundary", 335, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var water = new CanonicalEntity("test-lake", EntityKind.Water, new WorldPosition(region, 0, 0),
+            new GeometryPoint[] { new(0, -10), new(20, -10), new(20, 10), new(0, 10), new(0, -10) },
+            new Dictionary<string, string> { ["natural"] = "water" });
+        var store = new SqliteRealityStore(Path.Combine(_directory, "raft-boundary.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveCharacterAsync(configuration.Id, new PlayerState("rafter", "Rafter", new WorldPosition(region, .005, 0), TravelMode: TravelMode.Raft, GodMode: true));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(water)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("rafter", "Rafter");
+
+        var movement = await world.MoveAsync(player.Id, new MoveRequest(-1, 0, 1));
+        var landRoute = await world.FindPathAsync(player.Id, new PathRequest(-5, 0, 1));
+
+        Assert.NotNull(movement);
+        Assert.False(movement.Moved);
+        Assert.True(movement.Blocked);
+        Assert.Contains("cannot leave the water", movement.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(player.Position.X, movement.Player.Position.X);
+        Assert.False(landRoute.Result.Success);
+        Assert.Contains("cannot leave the water", landRoute.Result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ClothingAndOffhandEquipmentDriveTemperatureAndLighting()
     {
         var configuration = new RealityConfiguration("climate-test", "Climate Test", 901, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

@@ -168,6 +168,9 @@ public sealed class WorldNavigation
     }
 
     public bool CanTraverse(WorldPosition start, WorldPosition end, bool avoidDeepWater = false)
+        => CanTraverse(start, end, terrain => !avoidDeepWater || terrain != TerrainType.DeepWater);
+
+    public bool CanTraverse(WorldPosition start, WorldPosition end, Func<TerrainType, bool> terrainAllowed)
     {
         var distance = start.Distance2D(end);
         var steps = Math.Max(1, (int)Math.Ceiling(distance / .25));
@@ -176,17 +179,19 @@ public sealed class WorldNavigation
             var amount = step / (double)steps;
             var x = start.X + ((end.X - start.X) * amount);
             var y = start.Y + ((end.Y - start.Y) * amount);
-            if (IsBlocked(x, y) || avoidDeepWater && TerrainAt(x, y) == TerrainType.DeepWater) return false;
+            if (IsBlocked(x, y) || !terrainAllowed(TerrainAt(x, y))) return false;
         }
         return true;
     }
 
-    public NavigationResult FindPath(WorldPosition start, double targetX, double targetY, Func<TerrainType, double>? speedForTerrain = null)
+    public NavigationResult FindPath(WorldPosition start, double targetX, double targetY, Func<TerrainType, double>? speedForTerrain = null,
+        Func<TerrainType, bool>? terrainAllowed = null)
     {
+        terrainAllowed ??= terrain => terrain != TerrainType.DeepWater;
         if (!_bounds.Contains(targetX, targetY)) return new(false, Array.Empty<WorldPosition>(), "That destination is outside this reality.");
-        if (IsBlocked(targetX, targetY) || TerrainAt(targetX, targetY) == TerrainType.DeepWater) return new(false, Array.Empty<WorldPosition>(), "That destination is blocked or in deep water.");
+        if (IsBlocked(targetX, targetY) || !terrainAllowed(TerrainAt(targetX, targetY))) return new(false, Array.Empty<WorldPosition>(), "That destination is blocked or has impassable terrain.");
         var target = start with { X = targetX, Y = targetY, Z = ElevationAt(targetX, targetY) };
-        if (CanTraverse(start, target, true)) return new(true, new[] { target });
+        if (CanTraverse(start, target, terrainAllowed)) return new(true, new[] { target });
         if (start.Distance2D(target) > 1500) return new(false, Array.Empty<WorldPosition>(), "That destination is too far away. Choose a closer point.");
 
         const double cell = 1.5;
@@ -223,9 +228,9 @@ public sealed class WorldNavigation
                 var next = (X: current.X + direction.Item1, Y: current.Y + direction.Item2);
                 if (next.X < 0 || next.Y < 0 || next.X >= columns || next.Y >= rows) continue;
                 var nextPosition = Position(next);
-                if (IsBlocked(nextPosition.X, nextPosition.Y) || TerrainAt(nextPosition.X, nextPosition.Y) == TerrainType.DeepWater) continue;
+                if (IsBlocked(nextPosition.X, nextPosition.Y) || !terrainAllowed(TerrainAt(nextPosition.X, nextPosition.Y))) continue;
                 var currentPosition = Position(current);
-                if (!CanTraverse(currentPosition, nextPosition, true)) continue;
+                if (!CanTraverse(currentPosition, nextPosition, terrainAllowed)) continue;
                 var terrainSpeed = (speedForTerrain ?? SpeedFor)(TerrainAt(nextPosition.X, nextPosition.Y));
                 if (terrainSpeed <= 0) continue;
                 var stepDistance = direction.Item1 != 0 && direction.Item2 != 0 ? cell * Math.Sqrt(2) : cell;
@@ -248,7 +253,7 @@ public sealed class WorldNavigation
         }
         reverse.Add(start);
         reverse.Reverse();
-        return new(true, Smooth(reverse));
+        return new(true, Smooth(reverse, terrainAllowed));
     }
 
     public WorldPosition FindNearestWalkable(WorldPosition preferred)
@@ -268,7 +273,7 @@ public sealed class WorldNavigation
         return preferred with { Z = ElevationAt(preferred.X, preferred.Y) };
     }
 
-    private IReadOnlyList<WorldPosition> Smooth(IReadOnlyList<WorldPosition> path)
+    private IReadOnlyList<WorldPosition> Smooth(IReadOnlyList<WorldPosition> path, Func<TerrainType, bool> terrainAllowed)
     {
         var result = new List<WorldPosition>();
         var anchor = 0;
@@ -277,7 +282,7 @@ public sealed class WorldNavigation
             var furthest = anchor + 1;
             for (var candidate = path.Count - 1; candidate > anchor + 1; candidate--)
             {
-                if (!CanTraverse(path[anchor], path[candidate], true)) continue;
+                if (!CanTraverse(path[anchor], path[candidate], terrainAllowed)) continue;
                 furthest = candidate;
                 break;
             }

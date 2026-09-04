@@ -135,6 +135,27 @@ public sealed class NavigationTests
         }
     }
 
+    [Fact]
+    public void RaftRouteStaysInWaterAndRejectsLand()
+    {
+        var water = Polygon("water", EntityKind.Water, -20, -20, 20, 20);
+        var navigation = CreateNavigation(water);
+        var start = new WorldPosition(Region, -15, 0);
+        bool WaterOnly(TerrainType terrain) => WorldNavigation.SupportsTravelMode(terrain, TravelMode.Raft);
+
+        var acrossWater = navigation.FindPath(start, 15, 0, terrain => navigation.SpeedFor(terrain, TravelMode.Raft), WaterOnly);
+        var ontoLand = navigation.FindPath(start, 25, 0, terrain => navigation.SpeedFor(terrain, TravelMode.Raft), WaterOnly);
+
+        Assert.True(acrossWater.Success, acrossWater.Message);
+        Assert.False(ontoLand.Success);
+        var previous = start;
+        foreach (var waypoint in acrossWater.Waypoints)
+        {
+            Assert.True(navigation.CanTraverse(previous, waypoint, WaterOnly));
+            previous = waypoint;
+        }
+    }
+
     private static WorldNavigation CreateNavigation(params CanonicalEntity[] entities) =>
         new(Bounds, entities, new[] { new ElevationSample(0, 0, 12) });
 
