@@ -422,6 +422,22 @@ public sealed class SqliteRealityStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<ServerEventConfiguration?> LoadServerEventConfigurationAsync(string realityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM ServerSettings WHERE Key=$key"; command.Parameters.AddWithValue("$key", $"event-configuration:{realityId}");
+        var json = (string?)await command.ExecuteScalarAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<ServerEventConfiguration>(json, SharedJson.Options);
+    }
+
+    public async Task SaveServerEventConfigurationAsync(string realityId, ServerEventConfiguration configuration, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO ServerSettings (Key,Value) VALUES ($key,$value) ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value";
+        command.Parameters.AddWithValue("$key", $"event-configuration:{realityId}"); command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(configuration, SharedJson.Options));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<RelationshipState>> LoadRelationshipsAsync(string realityId, string playerId, CancellationToken cancellationToken = default)
     {
         var result = new List<RelationshipState>(); await using var connection = await OpenAsync(cancellationToken);

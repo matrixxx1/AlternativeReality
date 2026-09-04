@@ -359,7 +359,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Single(entered.Dungeon.Actors, actor => actor.IsMerchant);
         Assert.DoesNotContain(entered.Dungeon.Actors, actor => actor.Name.Contains("Dungeon Dweller", StringComparison.OrdinalIgnoreCase));
         Assert.All(entered.Dungeon.Actors, actor => Assert.True(actor.IsMerchant || actor.Subtype == "storeEmployee"));
-        Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.Name, new[] { "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo", "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis" }));
+        Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.Name.Split(' ')[0], new[] { "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo", "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis" }));
+        Assert.Equal(entered.Dungeon.Actors.Count, entered.Dungeon.Actors.Select(actor => actor.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal("outdoor", (await world.ExitDungeonAsync(player.Id)).LocationId);
     }
 
@@ -587,20 +588,19 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var store = new SqliteRealityStore(Path.Combine(_directory, "inventory-limits.db"));
         await store.InitializeAsync(configuration);
         await store.SaveInventoryAsync(new InventoryState("heavy", new[] { new ItemStack("rock", 100) }));
-        await store.SaveInventoryAsync(new InventoryState("armed", new[] { new ItemStack("knife", 1), new ItemStack("sword", 1), new ItemStack("slingshot", 1) }));
-        await store.SaveInventoryAsync(new InventoryState("packed", new[] { new ItemStack("water", 1), new ItemStack("food", 1), new ItemStack("flashlight", 1), new ItemStack("hat", 1), new ItemStack("laser", 1), new ItemStack("arrow", 1) }));
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
 
-        foreach (var (characterId, expectedMessage) in new[] { ("heavy", "maximum"), ("armed", "weapon slots"), ("packed", "other-item slots") })
-        {
-            var player = await world.JoinAsync(characterId, characterId);
-            player = await world.SetGodModeAsync(player.Id, true);
-            var chest = world.GetPrivateState(player.Id).Chests!.First();
-            await world.TeleportAsync(player.Id, new TeleportRequest(chest.Position.X, chest.Position.Y, true));
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.OpenChestAsync(player.Id, chest.Id));
-            Assert.Contains(expectedMessage, error.Message, StringComparison.OrdinalIgnoreCase);
-        }
+        var player = await world.JoinAsync("heavy", "heavy");
+        player = await world.SetGodModeAsync(player.Id, true);
+        var chest = world.GetPrivateState(player.Id).Chests!.First();
+        await world.TeleportAsync(player.Id, new TeleportRequest(chest.Position.X, chest.Position.Y, true));
+        var opened = await world.OpenChestAsync(player.Id, chest.Id);
+        Assert.True(opened.Player.WalletCents > player.WalletCents);
+        Assert.Equal(100, world.GetPrivateState(player.Id).Inventory.Items.Single(item => item.ItemType == "rock").Quantity);
+        var reward = opened.Contents.Items.First();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.TakeChestItemsAsync(player.Id, new TakeChestItemsRequest(chest.Id, new[] { new PurchaseLine(reward.ItemType, 1) })));
+        Assert.Contains("maximum", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -647,6 +647,28 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RangedWeaponsCannotShootThroughCanonicalBuildings()
+    {
+        var configuration = new RealityConfiguration("blocked-shot", "Blocked Shot", 29, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500), PvpEnabled: true);
+        var blocker = Building("shot-blocker", configuration.Area.Region, 0, 0);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "blocked-shot.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(blocker)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var attacker = await world.JoinAsync("blocked-attacker", "Attacker");
+        var target = await world.JoinAsync("blocked-target", "Target");
+        await world.SetGodModeAsync(attacker.Id, true);
+        await world.SetGodModeAsync(target.Id, true);
+        attacker = await world.TeleportAsync(attacker.Id, new TeleportRequest(-10, 0, true));
+        target = await world.TeleportAsync(target.Id, new TeleportRequest(10, 0, true));
+        await world.SetEquipmentAsync(attacker.Id, "weapon", "rifle");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "rifle")));
+
+        Assert.Contains("blocks your shot", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MovementConfigurationUsesAdditiveModifiersAndPersists()
     {
         var configuration = new RealityConfiguration("movement-config", "Movement Config", 31, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -675,6 +697,30 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(-1, persisted.TerrainSpeedModifiersMph[TerrainType.Grass]);
         Assert.Equal(2, persisted.TravelModeSpeedModifiersMph[TravelMode.Run]);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateMovementConfigurationAsync(other.Id, new UpdateMovementConfigurationRequest(4, 120, terrain, modes)));
+    }
+
+    [Fact]
+    public async Task ServerEventScheduleClockAndWeatherOverridePersist()
+    {
+        var configuration = new RealityConfiguration("event-config", "Event Config", 41, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "event-config.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var admin = await world.JoinAsync("event-admin", "EventAdmin");
+        var other = await world.JoinAsync("event-other", "EventOther");
+        await world.SetGodModeAsync(admin.Id, true);
+        var request = new UpdateServerEventsRequest(30, 20, 6, 10, 180, 120, 12, 3, 36, 15, 48, 20, 240, "rain", 11.5);
+
+        var updated = await world.UpdateServerEventConfigurationAsync(admin.Id, request);
+
+        Assert.Equal(30, updated.WeatherRefreshMinutes);
+        Assert.Equal(240, updated.ServerTimeOffsetMinutes);
+        Assert.Equal("rain", updated.WeatherMode);
+        Assert.Equal(11.5, world.Weather.TemperatureCelsius);
+        var persisted = await store.LoadServerEventConfigurationAsync(configuration.Id);
+        Assert.Equal(updated, persisted);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(other.Id, request));
     }
 
     [Fact]

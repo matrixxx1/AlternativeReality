@@ -17,6 +17,12 @@ public sealed partial class RealityWorld
         "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
         "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis"
     ];
+    private static readonly string[] FriendlyHumanSurnames =
+    [
+        "Morgan", "Rivera", "Chen", "Patel", "Brooks", "Nguyen", "Taylor", "Reed",
+        "Foster", "Kim", "Ramirez", "Bennett", "Price", "Diaz", "Ward", "Hayes",
+        "Sullivan", "Ortiz", "Parker", "Shaw", "Coleman", "Wright", "Flores", "Stone"
+    ];
     private static readonly ItemConfiguration[] DefaultItemConfigurations =
     {
         new("fist","Fist","Permanent melee weapon; consumes no ammunition",.25,1.6,0,0,false,true,WeightPounds:0,Category:InventoryCategory.Weapon),
@@ -85,6 +91,8 @@ public sealed partial class RealityWorld
             [TravelMode.Bike] = 0, [TravelMode.Raft] = 0, [TravelMode.DirtBike] = 0, [TravelMode.Motorcycle] = 0, [TravelMode.EBike] = 0
         });
     private MovementConfiguration _movementConfiguration = DefaultMovementConfiguration;
+    private static readonly ServerEventConfiguration DefaultEventConfiguration = new();
+    private ServerEventConfiguration _eventConfiguration = DefaultEventConfiguration;
     private static readonly string[] WeaponPowerOrder = ["rifle", "sword", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
     private static readonly HashSet<string> HatItems = new(["hat", "coolingHat", "warmHat"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> ShirtItems = new(["tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket"], StringComparer.OrdinalIgnoreCase);
@@ -100,6 +108,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<(string Player, string Merchant, long Rotation), TradeQuote> _tradeQuotes = new();
     private readonly ConcurrentDictionary<string, LootDropState> _loot = new();
     private readonly ConcurrentDictionary<string, TreasureChestState> _outdoorChests = new();
+    private readonly ConcurrentDictionary<string, ChestContentsState> _chestContents = new();
     private readonly ConcurrentDictionary<(string Actor, string Player), DateTimeOffset> _lastActorAttack = new();
     private readonly ConcurrentDictionary<string, string> _playerAccounts = new();
     private readonly ConcurrentDictionary<string, string> _baseBuildings = new();
@@ -134,7 +143,7 @@ public sealed partial class RealityWorld
                 baseState = new BaseState(buildingId, door.Id, door.Position, player?.Name ?? "Explorer", squareFeet, CalculateBuildingPriceCents(building));
             }
         }
-        var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration);
+        var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration, _eventConfiguration);
         var revealedAreas = _revealedWorldAreas.Keys.Where(key => key.Player == playerId).Select(key => key.Area).OrderBy(key => key).ToArray();
         IReadOnlyList<CanonicalEntity>? homeStorage = null;
         InventoryState? homeItemStorage = null;
@@ -304,7 +313,7 @@ public sealed partial class RealityWorld
             if (await SavePlayerAsync(updated, cancellationToken)) changed.Add(updated);
         }
         foreach (var expired in _loot.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) _loot.TryRemove(expired, out _);
-        foreach (var expired in _outdoorChests.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) _outdoorChests.TryRemove(expired, out _);
+        foreach (var expired in _outdoorChests.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) { _outdoorChests.TryRemove(expired, out _); _chestContents.TryRemove(expired, out _); }
         return changed;
     }
 
@@ -607,10 +616,11 @@ public sealed partial class RealityWorld
         {
             var merchant = i == 0 && random.NextDouble() < .55; var foe = merchant ? random.NextDouble() * 2 : -2 + random.NextDouble() * 4;
             var position = RandomInteriorPosition(random, layout, region, stairs);
-            var actorName = merchant || foe >= 0 ? FriendlyHumanName(id, i) : $"Dungeon Dweller {i + 1}";
+            var actorId = $"{id}:npc:{i}";
+            var actorName = UniqueNpcName(FriendlyHumanName(id, i), actorId, actors);
             var maximumHealth = Math.Round(Math.Clamp(4 + difficulty * .2 + (level - 1) * .55 + random.NextDouble() * 2.5, 4, 35) * 2) / 2;
             var weapon = merchant ? "pistol" : DungeonWeaponFor(difficulty, level, random);
-            actors.Add(new ActorState($"{id}:npc:{i}", EntityKind.Npc, merchant ? "merchant" : "resident", actorName,
+            actors.Add(new ActorState(actorId, EntityKind.Npc, merchant ? "merchant" : "resident", actorName,
                 position, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
                 FriendRating: foe, IsMerchant: merchant, TravelMode: (TravelMode)random.Next(0, 4), LocationId: id,
                 EquippedWeapon: weapon));
@@ -675,14 +685,16 @@ public sealed partial class RealityWorld
         var factionId = $"{sessionId}:staff";
         var actors = new List<ActorState>();
         var merchantPosition = RandomInteriorPosition(random, layout, building.Position.Region, layout.Exit);
-        actors.Add(new ActorState($"{sessionId}:merchant", EntityKind.Npc, "storeMerchant", FriendlyHumanName(sessionId, 0), merchantPosition,
+        var merchantId = $"{sessionId}:merchant";
+        actors.Add(new ActorState(merchantId, EntityKind.Npc, "storeMerchant", UniqueNpcName(FriendlyHumanName(sessionId, 0), merchantId, actors), merchantPosition,
             HealthHearts: 8, MaximumHealthHearts: 8, FriendRating: 1, IsMerchant: true, LocationId: sessionId,
             MerchantCategory: store.Category, EquippedWeapon: "pistol", FactionId: factionId));
         var employeeCount = random.Next(2, 7);
         for (var index = 0; index < employeeCount; index++)
         {
             var position = RandomInteriorPosition(random, layout, building.Position.Region, layout.Exit);
-            actors.Add(new ActorState($"{sessionId}:employee:{index}", EntityKind.Npc, "storeEmployee", FriendlyHumanName(sessionId, index + 1), position,
+            var employeeId = $"{sessionId}:employee:{index}";
+            actors.Add(new ActorState(employeeId, EntityKind.Npc, "storeEmployee", UniqueNpcName(FriendlyHumanName(sessionId, index + 1), employeeId, actors), position,
                 HealthHearts: 6, MaximumHealthHearts: 6, FriendRating: 1, LocationId: sessionId,
                 EquippedWeapon: "fist", FactionId: factionId));
         }
@@ -699,7 +711,18 @@ public sealed partial class RealityWorld
     private static string FriendlyHumanName(string scope, int ordinal)
     {
         var start = (StableInt($"friendly-name:{scope}") & int.MaxValue) % FriendlyHumanNames.Length;
-        return FriendlyHumanNames[(start + ordinal) % FriendlyHumanNames.Length];
+        var surname = (StableInt($"friendly-surname:{scope}:{ordinal}") & int.MaxValue) % FriendlyHumanSurnames.Length;
+        return $"{FriendlyHumanNames[(start + ordinal) % FriendlyHumanNames.Length]} {FriendlyHumanSurnames[surname]}";
+    }
+
+    private string UniqueNpcName(string preferred, string actorId, IEnumerable<ActorState>? pending = null)
+    {
+        var used = _actors.Values.Select(actor => actor.Name)
+            .Concat(_dungeons.Values.SelectMany(dungeon => dungeon.Actors).Select(actor => actor.Name))
+            .Concat(pending?.Select(actor => actor.Name) ?? Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidate = preferred.Contains(' ') ? preferred : $"{preferred} {FriendlyHumanSurnames[(StableInt(actorId) & int.MaxValue) % FriendlyHumanSurnames.Length]}";
+        if (!used.Contains(candidate)) return candidate;
+        for (var number = 2; ; number++) if (!used.Contains($"{candidate} {number}")) return $"{candidate} {number}";
     }
 
     public async Task<PlayerState> RestAtBedAsync(string playerId,string bedId,CancellationToken cancellationToken=default)
@@ -818,7 +841,7 @@ public sealed partial class RealityWorld
         return selected.Select(item => new MerchantOffer(item.ItemType, item.Single ? 1 : random.Next(3, 31), random.NextInt64(item.MinimumPriceCents, item.MaximumPriceCents + 1), item.DisplayName, item.ItemType, new Dictionary<string, string> { ["description"] = item.Effect })).ToArray();
     }
 
-    private static long MerchantInventoryRotation(DateTimeOffset value) => value.ToUnixTimeSeconds() / (4 * 60 * 60);
+    private long MerchantInventoryRotation(DateTimeOffset value) => value.ToUnixTimeSeconds() / (Math.Max(1, _eventConfiguration.MerchantRefreshMinutes) * 60L);
 
     private static string DisplayItem(string itemType) => itemType switch
     {
@@ -863,6 +886,14 @@ public sealed partial class RealityWorld
         var (range, baseDamage, ammo) = WeaponDefinition(weapon);
         var distance = player.Position.Distance2D(targetPosition);
         if (distance > range) throw new InvalidOperationException($"{targetName} is beyond the {range:0.#}-meter range of your {DisplayItem(weapon)}.");
+        var ranged = weapon is not ("fist" or "knife" or "sword");
+        if (ranged)
+        {
+            var blocked = player.LocationId == "outdoor"
+                ? !Navigation.CanTraverse(player.Position, targetPosition)
+                : _dungeons.TryGetValue(player.LocationId, out var lineOfSightDungeon) && lineOfSightDungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, targetPosition, wall));
+            if (blocked) throw new InvalidOperationException($"A wall, building, tree, or other solid object blocks your shot at {targetName}.");
+        }
         if (!player.GodMode && ammo is not null && !RemoveInventory(playerId, ammo, 1)) throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");
         var hitChance = weapon == "fist" ? 1 : Math.Clamp(.97 - distance / (range * 1.25), .15, .97);
         var hit = RandomNumberGenerator.GetInt32(1_000_000) < hitChance * 1_000_000;
@@ -1018,6 +1049,43 @@ public sealed partial class RealityWorld
         return _movementConfiguration;
     }
 
+    public ServerEventConfiguration EventConfiguration => _eventConfiguration;
+
+    public async Task<ServerEventConfiguration> UpdateServerEventConfigurationAsync(string playerId, UpdateServerEventsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to change server events.");
+        static int InRange(int value, int minimum, int maximum, string name)
+        {
+            if (value < minimum || value > maximum) throw new InvalidOperationException($"{name} must be between {minimum} and {maximum}.");
+            return value;
+        }
+        var updated = new ServerEventConfiguration(
+            InRange(request.WeatherRefreshMinutes, 1, 1_440, "Weather refresh"),
+            InRange(request.StreetLightsOnHour, 0, 23, "Street-light on hour"),
+            InRange(request.StreetLightsOffHour, 0, 23, "Street-light off hour"),
+            InRange(request.BuildingLightsRefreshMinutes, 1, 1_440, "Building-light refresh"),
+            InRange(request.MerchantRefreshMinutes, 1, 10_080, "Merchant refresh"),
+            InRange(request.DoorLockRefreshMinutes, 1, 10_080, "Door-lock refresh"),
+            InRange(request.UfoIntervalHours, 1, 168, "UFO interval"),
+            InRange(request.UfoDurationMinutes, 1, 120, "UFO duration"),
+            InRange(request.TrexIntervalHours, 1, 168, "T-Rex interval"),
+            InRange(request.TrexDurationMinutes, 1, 120, "T-Rex duration"),
+            InRange(request.BearIntervalHours, 1, 168, "Bear interval"),
+            InRange(request.BearDurationMinutes, 1, 120, "Bear duration"),
+            InRange(request.ServerTimeOffsetMinutes, -525_600, 525_600, "Server-time offset"),
+            request.WeatherMode.Trim().ToLowerInvariant(),
+            request.TemperatureCelsius);
+        if (updated.StreetLightsOnHour == updated.StreetLightsOffHour) throw new InvalidOperationException("Street-light on and off hours must differ.");
+        if (updated.WeatherMode is not ("live" or "clear" or "rain" or "snow" or "fog" or "storm")) throw new InvalidOperationException("Weather mode must be live, clear, rain, snow, fog, or storm.");
+        if (updated.TemperatureCelsius is < -90 or > 60) throw new InvalidOperationException("Temperature must be between -90 and 60 °C.");
+        _eventConfiguration = updated;
+        _tradeQuotes.Clear();
+        ResetScheduledEventCycles(DateTimeOffset.UtcNow);
+        await _store.SaveServerEventConfigurationAsync(Configuration.Id, updated, cancellationToken);
+        await RefreshWeatherAsync(cancellationToken);
+        return updated;
+    }
+
     private static double ValidateSpeedModifier(double value)
     {
         if (!double.IsFinite(value) || value is < -200 or > 200) throw new InvalidOperationException("Each speed modifier must be between -200 and +200 mph.");
@@ -1040,24 +1108,77 @@ public sealed partial class RealityWorld
         }
     }
 
-    public async Task<(PlayerState Player, InventoryState Inventory, string Message)> OpenChestAsync(string playerId, string chestId, CancellationToken cancellationToken = default)
+    public async Task<ChestOpenResult> OpenChestAsync(string playerId, string chestId, CancellationToken cancellationToken = default)
+    {
+        var (player, _, _) = ValidateTreasureChest(playerId, chestId);
+        var contents = _chestContents.GetOrAdd(chestId, CreateChestContents);
+        var collectedMoney = contents.MoneyCents;
+        var updated = player;
+        if (collectedMoney > 0)
+        {
+            updated = player with { WalletCents = player.WalletCents + collectedMoney, Version = player.Version + 1 };
+            _chestContents[chestId] = contents = contents with { MoneyCents = 0 };
+            await SavePlayerAsync(updated, cancellationToken);
+        }
+        var message = collectedMoney > 0 ? $"Collected {collectedMoney / 100m:C} cash. Choose any items you want to carry." : "Choose any remaining items you want to carry.";
+        return new ChestOpenResult(updated, contents, message);
+    }
+
+    public async Task<ChestTakeResult> TakeChestItemsAsync(string playerId, TakeChestItemsRequest request, CancellationToken cancellationToken = default)
+    {
+        var (player, _, dungeon) = ValidateTreasureChest(playerId, request.ChestId);
+        if (!_chestContents.TryGetValue(request.ChestId, out var contents)) throw new InvalidOperationException("Open the treasure chest first.");
+        var requested = request.Items.Where(item => item.Quantity > 0).GroupBy(item => item.ItemType, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PurchaseLine(group.Key, group.Sum(line => line.Quantity))).ToArray();
+        foreach (var line in requested)
+        {
+            var available = contents.Items.FirstOrDefault(item => item.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase))?.Quantity ?? 0;
+            if (line.Quantity > available) throw new InvalidOperationException($"The chest does not contain {line.Quantity} × {DisplayItem(line.ItemType)}.");
+        }
+        var rewards = requested.Select(line => InventoryStack(line.ItemType, line.Quantity)).ToArray();
+        if (!CanAddToBackpack(playerId, rewards, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
+        foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity);
+        var remaining = contents.Items.Select(item => item with
+        {
+            Quantity = item.Quantity - requested.Where(line => line.ItemType.Equals(item.ItemType, StringComparison.OrdinalIgnoreCase)).Sum(line => line.Quantity)
+        }).Where(item => item.Quantity > 0).ToArray();
+        var removed = remaining.Length == 0;
+        if (removed)
+        {
+            _chestContents.TryRemove(request.ChestId, out _);
+            if (player.LocationId == "outdoor") _outdoorChests.TryRemove(request.ChestId, out _);
+            else if (dungeon is not null) _dungeons[player.LocationId] = dungeon with { Chests = dungeon.Chests.Where(chest => chest.Id != request.ChestId).ToArray() };
+        }
+        else _chestContents[request.ChestId] = contents = contents with { Items = remaining };
+        await SaveInventoryAsync(playerId, cancellationToken);
+        var message = rewards.Length == 0 ? "Left all items in the chest." : $"Took {string.Join(", ", rewards.Select(item => $"{item.Quantity} × {DisplayItem(item.ItemType)}"))}.";
+        return new ChestTakeResult(player, GetInventoryState(playerId), removed ? null : contents, removed, message);
+    }
+
+    private (PlayerState Player, TreasureChestState Chest, DungeonState? Dungeon) ValidateTreasureChest(string playerId, string chestId)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
-        TreasureChestState? chest;
         DungeonState? dungeon = null;
+        TreasureChestState? chest;
         if (player.LocationId == "outdoor") chest = _outdoorChests.GetValueOrDefault(chestId);
-        else { _dungeons.TryGetValue(player.LocationId, out dungeon); chest = dungeon?.Chests.FirstOrDefault(c => c.Id == chestId); }
-        if (chest is null) throw new InvalidOperationException("Chest not found."); if (player.Position.Distance2D(chest.Position) > 4) throw new InvalidOperationException("Move closer to the chest.");
-        var random = new Random(StableInt($"{chestId}:{playerId}")); var money = random.Next(25, 5001); var rocks = random.Next(1, 8); var bearings = random.Next(0, 12);
-        string[] bonusPool = ["knife", "sword", "slingshot", "crossbow", "pistol", "rifle", "arrow", "bullet", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone"];
-        var rewards = new List<ItemStack> { InventoryStack("rock", rocks) };
+        else { _dungeons.TryGetValue(player.LocationId, out dungeon); chest = dungeon?.Chests.FirstOrDefault(item => item.Id == chestId); }
+        if (chest is null) throw new InvalidOperationException("Chest not found.");
+        if (chest.ExpiresAtUtc is not null && chest.ExpiresAtUtc <= DateTimeOffset.UtcNow) throw new InvalidOperationException("That treasure chest has disappeared.");
+        if (player.Position.Distance2D(chest.Position) > 4) throw new InvalidOperationException("Move closer to the chest.");
+        return (player, chest, dungeon);
+    }
+
+    private ChestContentsState CreateChestContents(string chestId)
+    {
+        var random = new Random(StableInt($"treasure:{Configuration.Seed}:{chestId}"));
+        var rewards = new List<ItemStack> { InventoryStack("rock", random.Next(1, 8)) };
+        var bearings = random.Next(0, 12);
         if (bearings > 0) rewards.Add(InventoryStack("ballBearing", bearings));
+        string[] bonusPool = ["knife", "sword", "slingshot", "crossbow", "pistol", "rifle", "arrow", "bullet", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone"];
         if (random.NextDouble() < .75) rewards.Add(InventoryStack(bonusPool[random.Next(bonusPool.Length)], 1));
-        if (!CanAddToBackpack(playerId, rewards, out var capacityMessage)) throw new InvalidOperationException(capacityMessage + " Store something at Home before opening this chest.");
-        foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity);
-        if (player.LocationId == "outdoor") _outdoorChests.TryRemove(chestId, out _); else _dungeons[player.LocationId] = dungeon! with { Chests = dungeon!.Chests.Where(c => c.Id != chestId).ToArray() }; var updated = player with { WalletCents = player.WalletCents + money, Version = player.Version + 1 };
-        var contents = rewards.Select(reward => $"{reward.Quantity} × {InventoryDefinition(reward.ItemType).DisplayName}");
-        await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken); return (updated, GetInventoryState(playerId), $"Found {money / 100.0:C}, {string.Join(", ", contents)}.");
+        var combined = rewards.GroupBy(item => item.ItemType, StringComparer.OrdinalIgnoreCase)
+            .Select(group => InventoryStack(group.Key, group.Sum(item => item.Quantity))).ToArray();
+        return new ChestContentsState(chestId, random.Next(25, 5001), combined);
     }
 
     public TreasureChestState MarkChestSeen(string playerId, string chestId)
@@ -1077,7 +1198,7 @@ public sealed partial class RealityWorld
             if (now < pending.Value.DueAtUtc || !_pendingPolice.TryRemove(pending.Key, out var response) || !_players.TryGetValue(response.PlayerId, out var suspect)) continue;
             var spawn = Navigation.FindNearestWalkable(response.WitnessPosition with { X = response.WitnessPosition.X + 8, Y = response.WitnessPosition.Y + 8 });
             var id = $"cop:{Guid.NewGuid():N}";
-            var cop = new ActorState(id, EntityKind.Npc, "policeOfficer", "Officer Morgan", spawn, EquippedWeapon: "pistol");
+            var cop = new ActorState(id, EntityKind.Npc, "policeOfficer", UniqueNpcName($"Officer {FriendlyHumanName(id, 0)}", id), spawn, EquippedWeapon: "pistol");
             _actors[id] = cop; _relationships[(suspect.Id, id)] = -10;
             await _store.SaveRelationshipAsync(Configuration.Id, new RelationshipState(suspect.Id, id, -10), cancellationToken);
             changedActors[id] = cop;
@@ -1273,3 +1394,5 @@ public sealed partial class RealityWorld
 
 public sealed record HostileTick(IReadOnlyList<ActorState> Actors, IReadOnlyList<PlayerState> Players, IReadOnlyList<CombatEvent> Combat);
 public sealed record CombatResult(CombatEvent Event, PlayerState Attacker, PlayerState? TargetPlayer, InventoryState Inventory, RelationshipState? Relationship, DungeonState? Dungeon, IReadOnlyList<CombatEvent>? Consequences = null);
+public sealed record ChestOpenResult(PlayerState Player, ChestContentsState Contents, string Message);
+public sealed record ChestTakeResult(PlayerState Player, InventoryState Inventory, ChestContentsState? Contents, bool ChestRemoved, string Message);

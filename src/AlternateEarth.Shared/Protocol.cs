@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 27;
+    public const int Version = 28;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -34,6 +34,7 @@ public sealed record PickLockRequest(string DoorId);
 public sealed record ConsumeItemRequest(string ItemType);
 public sealed record DropItemRequest(string ItemType, int Quantity = 1);
 public sealed record OpenChestRequest(string ChestId);
+public sealed record TakeChestItemsRequest(string ChestId, IReadOnlyList<PurchaseLine> Items);
 public sealed record ChestSeenRequest(string ChestId);
 public sealed record RestAtBedRequest(string BedId);
 public sealed record MoveFurnitureRequest(string FurnitureId, double X, double Y);
@@ -50,6 +51,13 @@ public sealed record SetEquipmentRequest(string Slot, string? ItemType);
 public sealed record UpdateItemConfigurationRequest(string ItemType, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, double SpeedModifierMph = 0, double VisibilityModifierMeters = 0);
 public sealed record ConfigureInventoryItemRequest(string ItemType, string Action);
 public sealed record UpdateMovementConfigurationRequest(double BaseSpeedMph, double BaseVisibilityMeters, IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph, IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
+public sealed record UpdateServerEventsRequest(
+    int WeatherRefreshMinutes, int StreetLightsOnHour, int StreetLightsOffHour,
+    int BuildingLightsRefreshMinutes, int MerchantRefreshMinutes, int DoorLockRefreshMinutes,
+    int UfoIntervalHours, int UfoDurationMinutes,
+    int TrexIntervalHours, int TrexDurationMinutes,
+    int BearIntervalHours, int BearDurationMinutes,
+    int ServerTimeOffsetMinutes = 0, string WeatherMode = "live", double? TemperatureCelsius = null);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=36">
+  <link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -60,11 +60,7 @@
       <button type="button" data-world-event="trex">T-Rex</button>
       <button type="button" data-world-event="bear">Bear</button>
     </div>
-    <button id="gpsTeleportButton" class="gps-teleport" type="button" hidden title="Teleport near my real location" aria-label="Teleport near my real GPS location">
-      <span class="compass-icon" aria-hidden="true"><b>N</b><i></i></span>
-      <span class="gps-button-label">My location</span>
-    </button>
-    <button id="rebuildButton" type="button" disabled>Reset &amp; rebuild reality</button>
+    <button id="rebuildButton" type="button" disabled>Rebuild Reality</button>
     <button id="serverConfigButton" type="button" hidden>Server config</button>
   </section>
   <section id="inventoryPanel" class="panel inventory-panel">
@@ -88,6 +84,7 @@
         <small id="backpackSummary">0.0 / 50 lb</small>
         <nav class="backpack-tabs" aria-label="Backpack categories">
           <button type="button" data-inventory-tab="weapon">Weapons <span id="weaponSlotCount">0/3</span></button>
+          <button type="button" data-inventory-tab="ammo">Ammo</button>
           <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount">0/3</span></button>
           <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount">0/6</span></button>
         </nav>
@@ -146,6 +143,14 @@
     <div id="tradeOffers"></div>
     <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm trade</button></div>
   </section>
+  <section id="treasureWindow" class="panel treasure-window" data-collapsible="Treasure" hidden>
+    <h2>Treasure chest</h2>
+    <div id="treasureCash" class="treasure-cash"></div>
+    <div id="treasureItems" class="treasure-items"></div>
+    <div id="treasureWeight" class="treasure-weight"></div>
+    <div id="treasureWarning" class="treasure-warning" hidden></div>
+    <div class="trade-actions"><button id="treasureClose" type="button">Leave items</button><button id="treasureTake" type="button">Review &amp; take</button></div>
+  </section>
   <section id="questLog" class="panel quest-log" data-collapsible="Quests">
     <strong>Quests</strong><div id="questList"><small>No active quests.</small></div>
   </section>
@@ -155,12 +160,47 @@
   </section>
   <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
     <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
-    <p>Movement is additive: base speed + terrain + travel mode + every active item modifier. Dynamic characters and treasure are hidden beyond visible range; geographic scenery remains visible.</p>
-    <section class="movement-config">
-      <div class="movement-base"><label>Player base speed (mph)<input id="baseSpeedConfig" type="number" min="0.1" max="200" step="0.1"></label><label>Base visible range (m)<input id="baseVisibilityConfig" type="number" min="1" max="5000" step="1"></label><button id="saveMovementConfig" type="button">Save movement &amp; visibility</button></div>
-      <div class="modifier-groups"><div><strong>Terrain speed +/- mph</strong><div id="terrainSpeedConfig" class="modifier-grid"></div></div><div><strong>Travel mode speed +/- mph</strong><div id="travelSpeedConfig" class="modifier-grid"></div></div></div>
+    <nav class="server-config-tabs" role="tablist" aria-label="Server configuration sections">
+      <button type="button" role="tab" data-server-config-tab="inventory" class="active">Inventory Items</button>
+      <button type="button" role="tab" data-server-config-tab="quests">Quest Items</button>
+      <button type="button" role="tab" data-server-config-tab="movement">Terrain &amp; Movement</button>
+      <button type="button" role="tab" data-server-config-tab="events">Server Events</button>
+    </nav>
+    <section class="server-config-page" data-server-config-page="inventory">
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
     </section>
-    <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
+    <section class="server-config-page" data-server-config-page="quests" hidden>
+      <p>Items currently used by generated quests. Take 1 adds the item to Home inventory; Give 1 removes it from Home inventory first, then the backpack.</p>
+      <div id="serverConfigQuestItems" class="server-config-quest-items"></div>
+    </section>
+    <section class="server-config-page" data-server-config-page="movement" hidden>
+      <p>Movement is additive: base speed + terrain + travel mode + every active item modifier. Dynamic characters and treasure are hidden beyond visible range; geographic scenery remains visible.</p>
+      <section class="movement-config">
+        <div class="movement-base"><label>Player base speed (mph)<input id="baseSpeedConfig" type="number" min="0.1" max="200" step="0.1"></label><label>Base visible range (m)<input id="baseVisibilityConfig" type="number" min="1" max="5000" step="1"></label><button id="saveMovementConfig" type="button">Save movement &amp; visibility</button></div>
+        <div class="modifier-groups"><div><strong>Terrain speed +/- mph</strong><div id="terrainSpeedConfig" class="modifier-grid"></div></div><div><strong>Travel mode speed +/- mph</strong><div id="travelSpeedConfig" class="modifier-grid"></div></div></div>
+      </section>
+    </section>
+    <section class="server-config-page" data-server-config-page="events" hidden>
+      <p>Schedules are server-authoritative and persist for this reality. Hours use the server location's 24-hour clock.</p>
+      <div class="server-event-grid">
+        <label>Simulated server time<input id="serverTimeConfig" type="datetime-local" step="60"></label>
+        <label>Weather mode<select id="weatherModeConfig"><option value="live">Live local weather</option><option value="clear">Clear</option><option value="rain">Rain</option><option value="snow">Snow</option><option value="fog">Fog</option><option value="storm">Thunderstorm</option></select></label>
+        <label>Temperature override °C<input id="weatherTemperatureConfig" type="number" min="-90" max="60" step="0.1" placeholder="Live/default"></label>
+        <label>Weather refresh (minutes)<input id="weatherRefreshConfig" type="number" min="1" max="1440" step="1"></label>
+        <label>Street lights on (hour)<input id="streetLightsOnConfig" type="number" min="0" max="23" step="1"></label>
+        <label>Street lights off (hour)<input id="streetLightsOffConfig" type="number" min="0" max="23" step="1"></label>
+        <label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label>
+        <label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label>
+        <label>Door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label>
+        <label>UFO interval (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label>
+        <label>UFO duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label>
+        <label>T-Rex interval (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label>
+        <label>T-Rex portal duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label>
+        <label>Bear interval (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label>
+        <label>Bear duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label>
+      </div>
+      <button id="saveServerEventsConfig" type="button">Save server events</button>
+    </section>
   </section>
   </aside>
   <div id="actorTooltip" class="actor-tooltip" hidden></div>
@@ -191,6 +231,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=66"></script>
+  <script src="app.js?v=68"></script>
 </body>
 </html>

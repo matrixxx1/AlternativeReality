@@ -149,7 +149,23 @@ public sealed record MovementConfiguration(
     double BaseVisibilityMeters,
     IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph,
     IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
-public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement);
+public sealed record ServerEventConfiguration(
+    int WeatherRefreshMinutes = 60,
+    int StreetLightsOnHour = 19,
+    int StreetLightsOffHour = 7,
+    int BuildingLightsRefreshMinutes = 15,
+    int MerchantRefreshMinutes = 240,
+    int DoorLockRefreshMinutes = 240,
+    int UfoIntervalHours = 24,
+    int UfoDurationMinutes = 2,
+    int TrexIntervalHours = 24,
+    int TrexDurationMinutes = 10,
+    int BearIntervalHours = 24,
+    int BearDurationMinutes = 10,
+    int ServerTimeOffsetMinutes = 0,
+    string WeatherMode = "live",
+    double? TemperatureCelsius = null);
+public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,
     int Quantity,
@@ -165,12 +181,13 @@ public sealed record QuestState(
     string? RequiredItemType = null, int RequiredQuantity = 0,
     string? TargetActorId = null, string? TargetName = null,
     string? DestinationActorId = null, string? DestinationName = null,
-    string? DestinationClue = null);
+    string? DestinationClue = null, int Progress = 0);
 public sealed record QuestInteraction(QuestState Quest, bool IsOffer, bool CanComplete, string InteractionActorId);
 public sealed record RelationshipState(string PlayerId, string ActorId, double FriendRating);
 public sealed record DungeonRoom(double X, double Y, double Width, double Height);
 public sealed record DungeonWall(double X1, double Y1, double X2, double Y2, double DoorStart = -1, double DoorEnd = -1);
 public sealed record TreasureChestState(string Id, WorldPosition Position, string LocationId, DateTimeOffset? ExpiresAtUtc = null, bool IsOpened = false);
+public sealed record ChestContentsState(string ChestId, long MoneyCents, IReadOnlyList<ItemStack> Items);
 public sealed record LootDropState(string Id, WorldPosition Position, string LocationId, long MoneyCents, IReadOnlyList<ItemStack> Items, DateTimeOffset ExpiresAtUtc);
 public sealed record DungeonState(
     string Id, string BuildingId, double Width, double Height,

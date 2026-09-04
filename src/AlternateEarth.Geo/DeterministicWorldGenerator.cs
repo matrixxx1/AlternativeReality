@@ -34,7 +34,7 @@ public sealed class DeterministicWorldGenerator
         var propertyFences = GeneratePropertyFences(withSidewalks);
         var trees = GenerateResourceNodes(reality, 220, withSidewalks);
         var bushes = GenerateBushes(reality, 360, withSidewalks);
-        var vehicles = GenerateVehicles(reality, withSidewalks, 12);
+        var vehicles = GenerateVehicles(reality, withSidewalks, 20);
         var streetLights = GenerateStreetLights(reality, withSidewalks);
         var obstacles = withSidewalks.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
         var actors = GenerateActors(reality, obstacles).Concat(GeneratePoiMerchants(reality, withSidewalks)).ToArray();
@@ -200,23 +200,41 @@ public sealed class DeterministicWorldGenerator
     public static IReadOnlyList<CanonicalEntity> GenerateVehicles(RealityConfiguration reality, IReadOnlyList<CanonicalEntity> features, int count)
     {
         var roads = features.Where(entity => entity.Kind == EntityKind.Road && entity.Geometry.Count >= 2).ToArray();
-        if (roads.Length == 0) return Array.Empty<CanonicalEntity>();
+        var parkingLots = features.Where(entity => entity.Kind == EntityKind.Terrain && entity.Geometry.Count >= 3 && entity.Properties.GetValueOrDefault("terrain") == "pavement").ToArray();
+        if (roads.Length == 0 && parkingLots.Length == 0) return Array.Empty<CanonicalEntity>();
         var random = new Random(StableSeed(reality.Seed + 7919, reality));
         var vehicles = new List<CanonicalEntity>();
         for (var index = 0; index < count; index++)
         {
-            var road = roads[random.Next(roads.Length)];
-            var segment = random.Next(road.Geometry.Count - 1);
-            var start = road.Geometry[segment];
-            var end = road.Geometry[segment + 1];
-            var amount = .2 + random.NextDouble() * .6;
-            var x = start.X + ((end.X - start.X) * amount);
-            var y = start.Y + ((end.Y - start.Y) * amount);
-            var rotation = Math.Atan2(end.Y - start.Y, end.X - start.X);
-            var roadWidth = ParseDouble(road.Properties.GetValueOrDefault("widthMeters"), 5);
-            var offset = Math.Max(1.2, (roadWidth / 2) - 1);
-            x += -Math.Sin(rotation) * offset;
-            y += Math.Cos(rotation) * offset;
+            double x, y, rotation;
+            var inParkingLot = parkingLots.Length > 0 && (roads.Length == 0 || random.NextDouble() < .7);
+            if (inParkingLot)
+            {
+                var lot = parkingLots[random.Next(parkingLots.Length)];
+                var minX = lot.Geometry.Min(point => point.X); var maxX = lot.Geometry.Max(point => point.X);
+                var minY = lot.Geometry.Min(point => point.Y); var maxY = lot.Geometry.Max(point => point.Y);
+                x = lot.Position.X; y = lot.Position.Y;
+                for (var attempt = 0; attempt < 24; attempt++)
+                {
+                    var candidateX = minX + random.NextDouble() * (maxX - minX);
+                    var candidateY = minY + random.NextDouble() * (maxY - minY);
+                    if (!PointInPolygon(candidateX, candidateY, lot.Geometry)) continue;
+                    x = candidateX; y = candidateY; break;
+                }
+                rotation = random.Next(2) * Math.PI / 2;
+            }
+            else
+            {
+                var road = roads[random.Next(roads.Length)];
+                var segment = random.Next(road.Geometry.Count - 1);
+                var start = road.Geometry[segment]; var end = road.Geometry[segment + 1];
+                var amount = .2 + random.NextDouble() * .6;
+                x = start.X + ((end.X - start.X) * amount); y = start.Y + ((end.Y - start.Y) * amount);
+                rotation = Math.Atan2(end.Y - start.Y, end.X - start.X);
+                var roadWidth = ParseDouble(road.Properties.GetValueOrDefault("widthMeters"), 5);
+                var offset = Math.Max(1.2, (roadWidth / 2) - 1);
+                x += -Math.Sin(rotation) * offset; y += Math.Cos(rotation) * offset;
+            }
             vehicles.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:{AreaKey(reality)}:vehicle:{index}",
                 EntityKind.Vehicle,
@@ -227,6 +245,7 @@ public sealed class DeterministicWorldGenerator
                     ["vehicleType"] = "car",
                     ["lengthMeters"] = "4.5",
                     ["widthMeters"] = "1.9",
+                    ["parkedIn"] = inParkingLot ? "parkingLot" : "roadside",
                     ["rotationDegrees"] = (rotation * 180 / Math.PI).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
                 }));
         }

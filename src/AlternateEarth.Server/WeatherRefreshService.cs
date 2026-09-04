@@ -15,9 +15,9 @@ public sealed class WeatherRefreshService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
+            await Task.Delay(TimeSpan.FromMinutes(_world.EventConfiguration.WeatherRefreshMinutes), stoppingToken);
             if (!await _world.RefreshWeatherAsync(stoppingToken))
             {
                 _logger.LogWarning("Live weather refresh failed; retaining the last successful conditions.");

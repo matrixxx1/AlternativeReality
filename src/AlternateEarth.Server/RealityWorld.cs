@@ -28,9 +28,9 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, WorldBounds> _loadedAreas = new();
     private WorldBounds? _loadedBounds;
     private WorldNavigation? _navigation;
-    private DateOnly? _lastUfoDay;
-    private DateOnly? _lastTrexDay;
-    private DateOnly? _lastEventBearDay;
+    private long? _lastUfoCycle;
+    private long? _lastTrexCycle;
+    private long? _lastEventBearCycle;
     private readonly ConcurrentDictionary<string, byte> _ufoHits = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _eventAttackCooldowns = new();
 
@@ -65,6 +65,8 @@ public sealed partial class RealityWorld
                     CarriedInBackpack = defaults.CarriedInBackpack
                 };
         _movementConfiguration = await _store.LoadMovementConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultMovementConfiguration;
+        _eventConfiguration = await _store.LoadServerEventConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultEventConfiguration;
+        ResetScheduledEventCycles(DateTimeOffset.UtcNow);
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
         foreach (var entityId in await _store.LoadRemovedEntityIdsAsync(Configuration.Id, cancellationToken))
@@ -91,12 +93,37 @@ public sealed partial class RealityWorld
 
     public async Task<bool> RefreshWeatherAsync(CancellationToken cancellationToken = default)
     {
+        if (!_eventConfiguration.WeatherMode.Equals("live", StringComparison.OrdinalIgnoreCase))
+        {
+            Weather = CreateConfiguredWeather(_eventConfiguration.WeatherMode, _eventConfiguration.TemperatureCelsius);
+            return true;
+        }
         try
         {
             Weather = await _weatherProvider.GetCurrentAsync(Configuration.Area.Center, cancellationToken);
             return true;
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested) { return false; }
+    }
+
+    private WeatherState CreateConfiguredWeather(string mode, double? temperatureCelsius)
+    {
+        var now = DateTimeOffset.UtcNow.AddMinutes(_eventConfiguration.ServerTimeOffsetMinutes);
+        var profile = mode.ToLowerInvariant() switch
+        {
+            "clear" => ("Clear", 0, 0d, 8d),
+            "rain" => ("Rain", 61, 2.5d, 18d),
+            "snow" => ("Snow", 71, 1.8d, 12d),
+            "fog" => ("Fog", 45, .1d, 4d),
+            "storm" => ("Thunderstorm", 95, 6d, 35d),
+            _ => throw new InvalidOperationException("Weather mode must be live, clear, rain, snow, fog, or storm.")
+        };
+        var hour = now.Hour + now.Minute / 60d;
+        var isDay = hour is >= 7 and < 19;
+        var date = now.Date;
+        var sunrise = new DateTimeOffset(date.AddHours(7), now.Offset).ToUniversalTime();
+        var sunset = new DateTimeOffset(date.AddHours(19), now.Offset).ToUniversalTime();
+        return new WeatherState(profile.Item1, profile.Item2, temperatureCelsius ?? (mode.Equals("snow", StringComparison.OrdinalIgnoreCase) ? -3 : 18), profile.Item3, profile.Item4, isDay, DateTimeOffset.UtcNow, "server override", sunrise, sunset, Weather.MoonPhase, Weather.MoonIllumination);
     }
 
     public async Task<PlayerState> JoinAsync(string characterId, string requestedName, string? accountId = null, CancellationToken cancellationToken = default)
@@ -115,7 +142,7 @@ public sealed partial class RealityWorld
         var inside = location != "outdoor";
         var position = resumesInterior
             ? InteriorPositionIsSafe(existing!.Position, _dungeons[existing.LocationId]) ? existing.Position : _dungeons[existing.LocationId].Exit
-            : location == home?.Id ? home.Exit : newAccountSpawn ? RandomOutdoorSpawn(characterId) : resumesOutdoors ? existing!.Position : Navigation.FindNearestWalkable(center);
+            : location == home?.Id ? home.Exit : newAccountSpawn ? InitialBaseSpawn(characterId, home) : resumesOutdoors ? existing!.Position : Navigation.FindNearestWalkable(center);
         position = inside ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
@@ -200,6 +227,13 @@ public sealed partial class RealityWorld
             if (loadedAreas.Any(area => area.Contains(safe.X, safe.Y)) && !Navigation.IsBlocked(safe.X, safe.Y) && Navigation.TerrainAt(safe.X, safe.Y) != TerrainType.DeepWater) return safe;
         }
         return Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
+    }
+
+    private WorldPosition InitialBaseSpawn(string characterId, DungeonState? home)
+    {
+        if (home is not null && _returnPositions.TryGetValue(characterId, out var outside) && !Navigation.IsBlocked(outside.X, outside.Y) && Navigation.TerrainAt(outside.X, outside.Y) != TerrainType.DeepWater)
+            return outside;
+        return RandomOutdoorSpawn(characterId);
     }
 
     private DungeonState? HomeForPlayer(string playerId)
@@ -425,19 +459,19 @@ public sealed partial class RealityWorld
         {
             if (key == "ufo")
             {
-                actor = new ActorState("ufo:manual", EntityKind.Npc, "ufo", "UFO", anchor with { X = anchor.X - 35, Z = 100 }, "east", true, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(2));
+                actor = new ActorState("ufo:manual", EntityKind.Npc, "ufo", "UFO", anchor with { X = anchor.X - 35, Z = 100 }, "east", true, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes));
             }
             else if (key is "trex" or "tyrannosaurus")
             {
                 var angle = _actorRandom.NextDouble() * Math.PI * 2;
                 var position = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * 18, Y = anchor.Y + Math.Sin(angle) * 18 });
-                actor = new ActorState("trex:manual", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10));
+                actor = new ActorState("trex:manual", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.TrexDurationMinutes));
             }
             else if (key is "bear" or "greatbear")
             {
                 var angle = _actorRandom.NextDouble() * Math.PI * 2;
                 var position = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * 14, Y = anchor.Y + Math.Sin(angle) * 14 });
-                actor = new ActorState("event-bear:manual", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10));
+                actor = new ActorState("event-bear:manual", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes));
             }
             else throw new InvalidOperationException("Choose UFO, T-Rex, or bear.");
 
@@ -454,28 +488,29 @@ public sealed partial class RealityWorld
         var changed = new List<ActorState>();
         lock (_actorRandom)
         {
-            var now = DateTimeOffset.UtcNow; var today = DateOnly.FromDateTime(now.UtcDateTime);
-            var dailyMinute = (StableInt($"ufo:{Configuration.Seed}:{today:yyyy-MM-dd}") & int.MaxValue) % 1440;
-            if (_lastUfoDay != today && now.TimeOfDay >= TimeSpan.FromMinutes(dailyMinute) && _loadedBounds is { } ufoBounds)
+            var now = DateTimeOffset.UtcNow;
+            var ufoCycle = ScheduledEventCycle(now, "ufo", _eventConfiguration.UfoIntervalHours);
+            if (_lastUfoCycle != ufoCycle && _loadedBounds is { } ufoBounds)
             {
-                _lastUfoDay = today; var random = new Random(StableInt($"ufo-route:{Configuration.Seed}:{today:yyyy-MM-dd}"));
+                _lastUfoCycle = ufoCycle; var random = new Random(StableInt($"ufo-route:{Configuration.Seed}:{ufoCycle}"));
                 var y = ufoBounds.MinimumY + random.NextDouble() * Math.Max(1, ufoBounds.MaximumY - ufoBounds.MinimumY);
-                var ufo = new ActorState($"ufo:{today:yyyyMMdd}", EntityKind.Npc, "ufo", "UFO", new WorldPosition(Configuration.Area.Region, ufoBounds.MinimumX - 25, y, 100), "east", true);
+                var ufo = new ActorState($"ufo:{ufoCycle}", EntityKind.Npc, "ufo", "UFO", new WorldPosition(Configuration.Area.Region, ufoBounds.MinimumX - 25, y, 100), "east", true,
+                    EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes));
                 _actors[ufo.Id] = ufo; changed.Add(ufo);
             }
             if (_loadedBounds is { } eventBounds)
             {
-                var trexMinute = (StableInt($"trex:{Configuration.Seed}:{today:yyyy-MM-dd}") & int.MaxValue) % 1440;
-                if (_lastTrexDay != today && now.TimeOfDay >= TimeSpan.FromMinutes(trexMinute))
+                var trexCycle = ScheduledEventCycle(now, "trex", _eventConfiguration.TrexIntervalHours);
+                if (_lastTrexCycle != trexCycle)
                 {
-                    _lastTrexDay = today; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
-                    var trex = new ActorState($"trex:{today:yyyyMMdd}", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10)); _actors[trex.Id] = trex; changed.Add(trex);
+                    _lastTrexCycle = trexCycle; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
+                    var trex = new ActorState($"trex:{trexCycle}", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.TrexDurationMinutes)); _actors[trex.Id] = trex; changed.Add(trex);
                 }
-                var bearMinute = (StableInt($"event-bear:{Configuration.Seed}:{today:yyyy-MM-dd}") & int.MaxValue) % 1440;
-                if (_lastEventBearDay != today && now.TimeOfDay >= TimeSpan.FromMinutes(bearMinute))
+                var bearCycle = ScheduledEventCycle(now, "event-bear", _eventConfiguration.BearIntervalHours);
+                if (_lastEventBearCycle != bearCycle)
                 {
-                    _lastEventBearDay = today; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
-                    var bear = new ActorState($"event-bear:{today:yyyyMMdd}", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10)); _actors[bear.Id] = bear; changed.Add(bear);
+                    _lastEventBearCycle = bearCycle; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
+                    var bear = new ActorState($"event-bear:{bearCycle}", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes)); _actors[bear.Id] = bear; changed.Add(bear);
                 }
             }
             foreach (var pair in _actors)
@@ -542,6 +577,20 @@ public sealed partial class RealityWorld
         return changed;
     }
 
+    private long ScheduledEventCycle(DateTimeOffset now, string eventName, int intervalHours)
+    {
+        var seconds = Math.Max(1, intervalHours) * 60L * 60L;
+        var phase = (StableInt($"event-phase:{Configuration.Seed}:{eventName}") & int.MaxValue) % seconds;
+        return (now.ToUnixTimeSeconds() + phase) / seconds;
+    }
+
+    private void ResetScheduledEventCycles(DateTimeOffset now)
+    {
+        _lastUfoCycle = ScheduledEventCycle(now, "ufo", _eventConfiguration.UfoIntervalHours);
+        _lastTrexCycle = ScheduledEventCycle(now, "trex", _eventConfiguration.TrexIntervalHours);
+        _lastEventBearCycle = ScheduledEventCycle(now, "event-bear", _eventConfiguration.BearIntervalHours);
+    }
+
     public IReadOnlyList<ChatMessage> AdvanceActorSpeech(DateTimeOffset now)
     {
         var messages = new List<ChatMessage>();
@@ -571,7 +620,7 @@ public sealed partial class RealityWorld
         {
             await _store.ClearTransientWorldStateAsync(Configuration.Id, cancellationToken);
             _realityEntities.Clear();
-            _baseEntities.Clear(); _removedBaseEntityIds.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _quests.Clear(); _questOffers.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
+            _baseEntities.Clear(); _removedBaseEntityIds.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _chestContents.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _quests.Clear(); _questOffers.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
             ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
             _loadedAreas["0:0"] = Configuration.Area.Bounds;
             _baseBuildings.Clear();
@@ -698,8 +747,10 @@ public sealed partial class RealityWorld
             var questGiver = entity.Kind == EntityKind.Npc && !merchant && identity % 3 == 0;
             var maximumHealth = entity.Kind == EntityKind.Animal && entity.Properties.GetValueOrDefault("subtype") is "bear" or "cougar" ? 8 : 5;
             var travel = entity.Kind == EntityKind.Npc ? (TravelMode)(identity % 10 == 0 ? 3 : identity % 8 == 0 ? 2 : 0) : TravelMode.Walk;
+            var preferredName = entity.Properties.GetValueOrDefault("name") ?? "Wanderer";
+            var actorName = entity.Kind == EntityKind.Npc ? UniqueNpcName(preferredName, entity.Id) : preferredName;
             _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, entity.Properties.GetValueOrDefault("subtype") ?? "unknown",
-                entity.Properties.GetValueOrDefault("name") ?? "Wanderer", safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
+                actorName, safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
                 IsMerchant: merchant, TravelMode: travel, MerchantCategory: merchantCategory,
                 EquippedWeapon: merchant ? "pistol" : "none", IsQuestGiver: questGiver);
         }

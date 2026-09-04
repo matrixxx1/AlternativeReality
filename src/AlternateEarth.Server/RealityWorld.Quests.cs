@@ -134,6 +134,7 @@ public sealed partial class RealityWorld
             message = isMailbox ? "Cut down the mailbox and collected 1 × Wood and 2 × Scrap metal." : vegetation.Kind == EntityKind.Tree ? "Cut down the tree and collected 3 × Wood." : "Cut down the bush and collected 2 × Kindling.";
             if (isMailbox)
             {
+                await RecordMailboxVandalismAsync(playerId, cancellationToken);
                 var witness = _actors.Values.Where(actor => actor.Kind == EntityKind.Npc && actor.LocationId == "outdoor" && actor.Position.Distance2D(vegetation.Position) <= 30).OrderBy(actor => actor.Position.Distance2D(vegetation.Position)).FirstOrDefault();
                 if (witness is not null)
                 {
@@ -160,6 +161,14 @@ public sealed partial class RealityWorld
         if (!_baseEntities.TryGetValue(entityId, out var entity) || entity.Kind != EntityKind.Vehicle) throw new InvalidOperationException("That vehicle is no longer there.");
         if (player.EquippedWeapon == "none") throw new InvalidOperationException("Equip a weapon before attacking a vehicle.");
         if (player.Position.Distance2D(entity.Position) > InventoryDefinition(player.EquippedWeapon).RangeMeters) throw new InvalidOperationException("That vehicle is out of weapon range.");
+        var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
+            .FirstOrDefault(item => item.Kind == "vandalizeCar" && item.Status == "active" && item.TargetActorId == entityId);
+        if (quest is not null)
+        {
+            var ready = quest with { Status = "ready", Progress = 1, Description = $"The target car was vandalized. Return to {quest.GiverName}." };
+            _quests[(playerId, quest.Id)] = ready;
+            await _store.SaveQuestAsync(Configuration.Id, ready, cancellationToken);
+        }
         var updated = await ReportCrimeAsync(playerId, entity.Position, cancellationToken);
         return new WorldCrimeResult(updated, GetPrivateState(playerId), "The vehicle alarm is sounding. Police are on the way.");
     }
@@ -174,7 +183,18 @@ public sealed partial class RealityWorld
         var building = _baseEntities.GetValueOrDefault(buildingId) ?? throw new InvalidOperationException("That building does not exist.");
         if (!IsBuildingLocked(building)) return new LockPickResult(player, GetPrivateState(playerId), true, false, "The door is already unlocked.");
         var success = RandomNumberGenerator.GetInt32(100) < 15;
-        if (success) _pickedLocks[$"{playerId}:{doorId}:{CurrentDoorLockCycle}"] = 0;
+        if (success)
+        {
+            _pickedLocks[$"{playerId}:{doorId}:{CurrentDoorLockCycle}"] = 0;
+            var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
+                .FirstOrDefault(item => item.Kind == "lockpick" && item.Status == "active" && item.TargetActorId == doorId);
+            if (quest is not null)
+            {
+                var ready = quest with { Status = "ready", Progress = 1, Description = $"The target building was unlocked. Return to {quest.GiverName}." };
+                _quests[(playerId, quest.Id)] = ready;
+                await _store.SaveQuestAsync(Configuration.Id, ready, cancellationToken);
+            }
+        }
         var witnessed = _actors.Values.Any(actor => actor.Kind == EntityKind.Npc && actor.LocationId == "outdoor" && actor.Position.Distance2D(door.Position) <= 30);
         var policeCalled = witnessed && success && RandomNumberGenerator.GetInt32(100) < 10;
         if (witnessed) player = await ReportCrimeAsync(playerId, door.Position, cancellationToken, policeCalled);
@@ -209,7 +229,7 @@ public sealed partial class RealityWorld
     {
         var id = $"quest:{giver.Id}:{sequence}";
         var random = new Random(StableInt($"{Configuration.Seed}:{playerId}:{id}"));
-        var kind = (StableInt(giver.Id) & int.MaxValue) % 5;
+        var kind = (StableInt($"{giver.Id}:{sequence}") & int.MaxValue) % 8;
         if (kind == 1)
         {
             var animals = _actors.Values.Where(actor => actor.Kind == EntityKind.Animal && actor.Subtype is not ("dog" or "cat")).OrderBy(actor => actor.Id).ToArray();
@@ -246,6 +266,32 @@ public sealed partial class RealityWorld
                 return new QuestState(id, playerId, giver.Id, giver.Name, "chop", "offered", $"Cut down a specific {target.Kind.ToString().ToLowerInvariant()}", $"Equip a sword and cut down the marked {target.Kind.ToString().ToLowerInvariant()}. {clue}", random.Next(25_000, 70_001), TargetActorId: target.Id, TargetName: name, DestinationClue: clue);
             }
         }
+        if (kind == 5)
+        {
+            var doors = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Door)
+                .Where(door => door.Properties.TryGetValue("buildingId", out var buildingId) && _baseEntities.TryGetValue(buildingId, out var building) && IsBuildingLocked(building))
+                .OrderBy(entity => entity.Id).ToArray();
+            if (doors.Length > 0)
+            {
+                var target = doors[random.Next(doors.Length)];
+                var building = _baseEntities[target.Properties["buildingId"]];
+                var name = building.Properties.GetValueOrDefault("name") ?? building.Properties.GetValueOrDefault("address") ?? "the marked building";
+                var clue = DirectionClue(giver.Position, target.Position, name);
+                return new QuestState(id, playerId, giver.Id, giver.Name, "lockpick", "offered", $"Lockpick {name}", $"Successfully pick the lock on {name}. {clue}", random.Next(75_000, 200_001), TargetActorId: target.Id, TargetName: name, DestinationClue: clue);
+            }
+        }
+        if (kind == 6)
+            return new QuestState(id, playerId, giver.Id, giver.Name, "vandalizeMailboxes", "offered", "Vandalize 20 mailboxes", "Cut down 20 roadside mailboxes with a sword. Progress: 0 / 20. Police consequences still apply.", random.Next(150_000, 350_001), RequiredQuantity: 20);
+        if (kind == 7)
+        {
+            var cars = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Vehicle).OrderBy(entity => entity.Id).ToArray();
+            if (cars.Length > 0)
+            {
+                var target = cars[random.Next(cars.Length)];
+                var clue = DirectionClue(giver.Position, target.Position, "the target parked car");
+                return new QuestState(id, playerId, giver.Id, giver.Name, "vandalizeCar", "offered", "Vandalize a parked car", $"Attack the specified parked car. {clue} Police consequences still apply.", random.Next(80_000, 225_001), TargetActorId: target.Id, TargetName: "parked car", DestinationClue: clue);
+            }
+        }
         var itemType = QuestItemTypes[(StableInt(id) & int.MaxValue) % QuestItemTypes.Length]; var definition = InventoryDefinition(itemType);
         var reward = Math.Max(10_000, checked(definition.MaximumPriceCents * 4 + 10_000));
         return new QuestState(id, playerId, giver.Id, giver.Name, "item", "offered", $"Find {definition.DisplayName}", $"Find 1 {definition.DisplayName} and bring it back to {giver.Name}. Look for loose items, treasure, defeated enemies, or merchants.", reward, itemType, 1);
@@ -261,8 +307,28 @@ public sealed partial class RealityWorld
             "courier" => actorId == quest.DestinationActorId && InventoryQuantity(playerId, QuestPackageItem(quest)) > 0,
             "missingPet" => actorId == quest.GiverId && quest.Status == "ready" && InventoryQuantity(playerId, QuestPetItem(quest)) > 0,
             "chop" => actorId == quest.GiverId && quest.Status == "ready",
+            "lockpick" => actorId == quest.GiverId && quest.Status == "ready",
+            "vandalizeMailboxes" => actorId == quest.GiverId && quest.Status == "ready",
+            "vandalizeCar" => actorId == quest.GiverId && quest.Status == "ready",
             _ => false
         };
+    }
+
+    private async Task RecordMailboxVandalismAsync(string playerId, CancellationToken cancellationToken)
+    {
+        var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
+            .FirstOrDefault(item => item.Kind == "vandalizeMailboxes" && item.Status == "active");
+        if (quest is null) return;
+        var progress = Math.Min(quest.RequiredQuantity, quest.Progress + 1);
+        var ready = progress >= quest.RequiredQuantity;
+        var updated = quest with
+        {
+            Progress = progress,
+            Status = ready ? "ready" : "active",
+            Description = ready ? $"All {quest.RequiredQuantity} mailboxes were vandalized. Return to {quest.GiverName}." : $"Cut down {quest.RequiredQuantity} roadside mailboxes with a sword. Progress: {progress} / {quest.RequiredQuantity}. Police consequences still apply."
+        };
+        _quests[(playerId, quest.Id)] = updated;
+        await _store.SaveQuestAsync(Configuration.Id, updated, cancellationToken);
     }
 
     private static string QuestPackageItem(QuestState quest) => $"quest:package:{quest.Id}";

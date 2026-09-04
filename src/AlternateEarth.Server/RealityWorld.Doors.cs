@@ -4,7 +4,7 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
-    private const long DoorLockCycleSeconds = 4 * 60 * 60;
+    private long DoorLockCycleSeconds => Math.Max(1, _eventConfiguration.DoorLockRefreshMinutes) * 60L;
 
     public long CurrentDoorLockCycle => DateTimeOffset.UtcNow.ToUnixTimeSeconds() / DoorLockCycleSeconds;
 

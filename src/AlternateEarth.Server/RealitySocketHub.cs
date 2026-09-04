@@ -132,6 +132,11 @@ public sealed class RealitySocketHub
                         var movementConfiguration = await _world.UpdateMovementConfigurationAsync(characterId, root.Deserialize<UpdateMovementConfigurationRequest>(SharedJson.Options)!, cancellationToken);
                         await connection.SendAsync(new { type = "movementConfigurationUpdated", movement = movementConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "updateServerEvents":
+                        var eventConfiguration = await _world.UpdateServerEventConfigurationAsync(characterId, root.Deserialize<UpdateServerEventsRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "serverEventsUpdated", events = eventConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        await BroadcastWeatherAsync(cancellationToken);
+                        break;
                     case "enterDungeon":
                         var enter = root.Deserialize<EnterDungeonRequest>(SharedJson.Options)!;
                         var entered = await _world.EnterDungeonAsync(characterId, enter.DoorId, cancellationToken);
@@ -264,7 +269,11 @@ public sealed class RealitySocketHub
                         var chestRequest = root.Deserialize<OpenChestRequest>(SharedJson.Options)!;
                         var reward = await _world.OpenChestAsync(characterId, chestRequest.ChestId, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = reward.Player }, null, cancellationToken);
-                        await connection.SendAsync(new { type = "chestOpened", message = reward.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        await connection.SendAsync(new { type = "chestOpened", contents = reward.Contents, message = reward.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "takeChestItems":
+                        var chestTake = await _world.TakeChestItemsAsync(characterId, root.Deserialize<TakeChestItemsRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "chestItemsTaken", contents = chestTake.Contents, chestRemoved = chestTake.ChestRemoved, chestId = root.Deserialize<TakeChestItemsRequest>(SharedJson.Options)!.ChestId, message = chestTake.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "chestSeen":
                         var seen = root.Deserialize<ChestSeenRequest>(SharedJson.Options)!;
