@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=32">
+  <link rel="stylesheet" href="styles.css?v=33">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -59,6 +59,12 @@
     <button id="toggleChatButton" type="button">Show chat</button>
     <label><input id="godMode" type="checkbox"> God Mode</label>
     <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
+    <div id="worldEventControls" class="world-event-controls" hidden>
+      <span>Trigger event</span>
+      <button type="button" data-world-event="ufo">UFO</button>
+      <button type="button" data-world-event="trex">T-Rex</button>
+      <button type="button" data-world-event="bear">Bear</button>
+    </div>
     <button id="gpsTeleportButton" class="gps-teleport" type="button" hidden title="Teleport near my real location" aria-label="Teleport near my real GPS location">
       <span class="compass-icon" aria-hidden="true"><b>N</b><i></i></span>
       <span class="gps-button-label">My location</span>
@@ -190,6 +196,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=61"></script>
+  <script src="app.js?v=62"></script>
 </body>
 </html>

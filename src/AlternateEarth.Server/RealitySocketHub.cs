@@ -96,6 +96,12 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "playerUpdated", player = godPlayer }, null, cancellationToken);
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "triggerWorldEvent":
+                        var eventRequest = root.Deserialize<TriggerWorldEventRequest>(SharedJson.Options)!;
+                        var eventActor = _world.TriggerWorldEvent(characterId, eventRequest.EventType);
+                        var eventName = eventActor.Subtype == "tRex" ? "T-Rex portal" : eventActor.Subtype == "eventBear" ? "great bear" : "UFO flyover";
+                        await BroadcastAsync(new { type = "worldEventTriggered", actor = eventActor, message = $"God Mode triggered a {eventName}." }, null, cancellationToken);
+                        break;
                     case "setLights":
                         var lightRequest=root.Deserialize<SetLightsRequest>(SharedJson.Options)!;var litPlayer=await _world.SetLightsAsync(characterId,lightRequest.FlashlightOn,lightRequest.LanternOn,lightRequest.LaserOn,cancellationToken);await BroadcastAsync(new{type="playerUpdated",player=litPlayer},null,cancellationToken);break;
                     case "setMagicHikingShoes":

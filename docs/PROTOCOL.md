@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v25
+# Renderer-neutral protocol v26
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -15,6 +15,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist cannot be dropped |
 | `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
+| `triggerWorldEvent` | UFO, T-Rex, or bear event type | requires authoritative God Mode and creates or resets one bounded manual event actor near the triggering player's outdoor position |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, current location, and the active four-hour door-lock cycle; dungeon session state is fresh on entry and discarded on exit |
 | `changeDungeonLevel` | stair direction `-1` up or `1` down | requires a multi-level dungeon, valid floor boundary, and proximity to the shared stairwell |
 | `moveFurniture`, `placeFurniture`, `rotateFurniture`, `storeFurniture` | furniture instance and requested logical Home position/action | requires the owner's Home; validates walls, doors, exit clearance, other furniture, rotation, and storage rules before persisting |
@@ -47,6 +48,7 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | `chunkSnapshot` | authoritative base and reality state for requested scope |
 | `playerJoined`, `playerMoved`, `playerUpdated`, `playerLeft` | multiplayer presence, health, and travel mode |
 | `actorsMoved` | server-simulated wildlife and NPC position/state changes |
+| `worldEventTriggered` | authoritative manual event actor and announcement for every connected client |
 | `doorLocksChanged` | replacement door-lock state and the end of the active four-hour cycle |
 | `privateState`, `dungeonEntered`, `dungeonLevelChanged`, `dungeonUpdated`, `dungeonExited` | character-private inventory, base, relationships, fog, floor number, and interior state |
 | `tradeQuote`, `tradeCompleted`, `basePurchased`, `combatEvent`, `chestOpened`, `lootCollected` | authoritative gameplay outcomes |

@@ -48,6 +48,9 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .god-panel { right: 14px; bottom: 14px; padding: 9px; display: flex; align-items: center; gap: 8px; }
 .god-panel label { font-weight: 700; }
 .god-panel input { accent-color: #d9b55c; }
+.world-event-controls { display:flex; flex:1 1 100%; align-items:center; gap:6px; padding-top:7px; border-top:1px solid rgba(217,181,92,.35); }
+.world-event-controls span { margin-right:auto; color:#e4c86d; font:700 10px monospace; text-transform:uppercase; letter-spacing:.7px; }
+.world-event-controls button { padding:5px 8px; }
 .gps-teleport { display:flex; align-items:center; gap:7px; padding:5px 9px; }
 .gps-teleport[hidden] { display:none; }
 .compass-icon { position:relative; display:block; width:30px; height:30px; flex:0 0 30px; border:2px solid #ead277; border-radius:50%; background:radial-gradient(circle,#263c2d 53%,#142219 55%); box-shadow:inset 0 0 0 2px #59451f; }

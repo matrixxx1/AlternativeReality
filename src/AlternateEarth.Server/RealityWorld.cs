@@ -413,6 +413,42 @@ public sealed partial class RealityWorld
         return (Navigation.FindPath(player.Position, request.X, request.Y, terrain => ConfiguredSpeedMetersPerSecond(player, terrain)), expanded);
     }
 
+    public ActorState TriggerWorldEvent(string characterId, string eventType)
+    {
+        if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (!player.GodMode) throw new InvalidOperationException("God Mode must be enabled to trigger world events.");
+        var key = (eventType ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        var anchor = player.LocationId == "outdoor" ? player.Position : _returnPositions.GetValueOrDefault(characterId, new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
+        var now = DateTimeOffset.UtcNow;
+        ActorState actor;
+        lock (_actorRandom)
+        {
+            if (key == "ufo")
+            {
+                actor = new ActorState("ufo:manual", EntityKind.Npc, "ufo", "UFO", anchor with { X = anchor.X - 35, Z = 100 }, "east", true, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(2));
+            }
+            else if (key is "trex" or "tyrannosaurus")
+            {
+                var angle = _actorRandom.NextDouble() * Math.PI * 2;
+                var position = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * 18, Y = anchor.Y + Math.Sin(angle) * 18 });
+                actor = new ActorState("trex:manual", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10));
+            }
+            else if (key is "bear" or "greatbear")
+            {
+                var angle = _actorRandom.NextDouble() * Math.PI * 2;
+                var position = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * 14, Y = anchor.Y + Math.Sin(angle) * 14 });
+                actor = new ActorState("event-bear:manual", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10));
+            }
+            else throw new InvalidOperationException("Choose UFO, T-Rex, or bear.");
+
+            _actors[actor.Id] = actor;
+            _actorRoutes.TryRemove(actor.Id, out _);
+            foreach (var hit in _ufoHits.Keys.Where(value => value.StartsWith(actor.Id + ":", StringComparison.Ordinal))) _ufoHits.TryRemove(hit, out _);
+            foreach (var cooldown in _eventAttackCooldowns.Keys.Where(value => value.StartsWith(actor.Id + ":", StringComparison.Ordinal))) _eventAttackCooldowns.TryRemove(cooldown, out _);
+        }
+        return actor;
+    }
+
     public IReadOnlyList<ActorState> AdvanceActors(TimeSpan elapsed)
     {
         var changed = new List<ActorState>();

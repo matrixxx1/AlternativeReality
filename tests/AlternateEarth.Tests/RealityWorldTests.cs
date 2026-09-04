@@ -160,6 +160,37 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GodModeCanTriggerEachWorldEventAuthoritatively()
+    {
+        var configuration = new RealityConfiguration("manual-events", "Manual Events", 119, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "manual-events.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("event-admin", "EventAdmin");
+
+        var denied = Assert.Throws<InvalidOperationException>(() => world.TriggerWorldEvent(player.Id, "ufo"));
+        Assert.Contains("God Mode", denied.Message);
+        await world.SetGodModeAsync(player.Id, true);
+
+        var ufo = world.TriggerWorldEvent(player.Id, "ufo");
+        var trex = world.TriggerWorldEvent(player.Id, "trex");
+        var bear = world.TriggerWorldEvent(player.Id, "bear");
+        var actorIds = (world.CreateSnapshot().Actors ?? Array.Empty<ActorState>()).Select(actor => actor.Id).ToHashSet();
+
+        Assert.Equal("ufo", ufo.Subtype);
+        Assert.Equal("tRex", trex.Subtype);
+        Assert.Equal("eventBear", bear.Subtype);
+        Assert.Equal(100, ufo.Position.Z);
+        Assert.All(new[] { ufo, trex, bear }, actor =>
+        {
+            Assert.NotNull(actor.EventStartedAtUtc);
+            Assert.NotNull(actor.EventEndsAtUtc);
+            Assert.Contains(actor.Id, actorIds);
+        });
+    }
+
+    [Fact]
     public async Task SnapshotIdentifiesLoadedAreasWithoutTreatingBoundingRectangleHolesAsGenerated()
     {
         var configuration = new RealityConfiguration("loaded-cells", "Loaded Cells", 37, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
