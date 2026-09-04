@@ -254,6 +254,49 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public void DungeonDifficultyUsesBuildingSquareFootage()
+    {
+        var region = new RegionId(45, -123);
+        var small = SizedBuilding("small", region, 0, 0, 10, 18.5);
+        var medium = SizedBuilding("medium", region, 0, 0, 20, 46.45);
+        var stronghold = SizedBuilding("stronghold", region, 0, 0, 40, 30);
+
+        Assert.Equal(1, RealityWorld.DungeonDifficulty(small));
+        Assert.InRange(RealityWorld.DungeonDifficulty(medium), 49, 51);
+        Assert.True(RealityWorld.DungeonDifficulty(stronghold) > 50);
+    }
+
+    [Fact]
+    public async Task LargeBuildingsBecomeMultiLevelStrongholdsWithTougherArmedActors()
+    {
+        var configuration = new RealityConfiguration("stronghold", "Stronghold", 73, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var home = SizedBuilding("small-home", region, 20, 20, 10, 10);
+        var stronghold = SizedBuilding("large-stronghold", region, 70, 40, 40, 30) with
+        {
+            Properties = new Dictionary<string, string> { ["building"] = "yes", ["questItem"] = "true" }
+        };
+        var store = new SqliteRealityStore(Path.Combine(_directory, "stronghold.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("stronghold-account", "Raider", "hash", "salt", "token", "stronghold-player"), "Raider");
+        await store.SaveBaseBuildingAsync("stronghold-account", configuration.Id, home.Id, home.Position);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(home, stronghold)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("stronghold-player", "Raider", "stronghold-account");
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door && entity.Properties["buildingId"] == stronghold.Id);
+        await world.SetGodModeAsync(player.Id, true);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+
+        Assert.True(entered.Dungeon.Difficulty > 50);
+        Assert.InRange(entered.Dungeon.LevelCount, 5, 10);
+        Assert.True(entered.Dungeon.Actors.Count >= 10);
+        Assert.All(entered.Dungeon.Actors, actor => Assert.True(actor.MaximumHealthHearts >= 17));
+        Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.EquippedWeapon, new[] { "sword", "crossbow", "pistol", "rifle" }));
+    }
+
+    [Fact]
     public async Task DungeonSessionIsRecreatedAfterExit()
     {
         var configuration = new RealityConfiguration("dungeon-reset", "Dungeon Reset", 21, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -276,8 +319,10 @@ public sealed class RealityWorldTests : IAsyncLifetime
 
         Assert.NotSame(first.Dungeon, second.Dungeon);
         Assert.NotEqual(first.Dungeon.SessionId, second.Dungeon.SessionId);
-        Assert.InRange(first.Dungeon.LevelCount, 1, 10);
-        Assert.InRange(second.Dungeon.LevelCount, 1, 10);
+        Assert.Equal(1, first.Dungeon.Difficulty);
+        Assert.Equal(1, second.Dungeon.Difficulty);
+        Assert.Equal(1, first.Dungeon.LevelCount);
+        Assert.Equal(1, second.Dungeon.LevelCount);
         Assert.InRange(first.Dungeon.Actors.Count, 3, 6);
         Assert.InRange(second.Dungeon.Actors.Count, 3, 6);
     }
@@ -821,6 +866,16 @@ public sealed class RealityWorldTests : IAsyncLifetime
     private static CanonicalEntity Building(string id, RegionId region, double x, double y) =>
         new(id, EntityKind.Building, new WorldPosition(region, x, y),
             new GeometryPoint[] { new(x - 5, y - 5), new(x + 5, y - 5), new(x + 5, y + 5), new(x - 5, y + 5), new(x - 5, y - 5) },
+            new Dictionary<string, string> { ["building"] = "yes" });
+
+    private static CanonicalEntity SizedBuilding(string id, RegionId region, double x, double y, double width, double height) =>
+        new(id, EntityKind.Building, new WorldPosition(region, x, y),
+            new GeometryPoint[]
+            {
+                new(x - width / 2, y - height / 2), new(x + width / 2, y - height / 2),
+                new(x + width / 2, y + height / 2), new(x - width / 2, y + height / 2),
+                new(x - width / 2, y - height / 2)
+            },
             new Dictionary<string, string> { ["building"] = "yes" });
 
     [Fact]

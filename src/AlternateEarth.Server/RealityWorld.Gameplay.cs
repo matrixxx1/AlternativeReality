@@ -434,7 +434,7 @@ public sealed partial class RealityWorld
         if (!_baseEntities.TryGetValue(current.BuildingId, out var building)) throw new InvalidOperationException("That building is unavailable.");
         var sessionId = current.SessionId ?? current.Id;
         var targetId = targetLevel == 1 ? sessionId : $"{sessionId}:level:{targetLevel}";
-        var target = _dungeons.GetOrAdd(targetId, _ => GenerateDungeonFloor(sessionId, building, targetLevel, current.LevelCount, current.Stairs));
+        var target = _dungeons.GetOrAdd(targetId, _ => GenerateDungeonFloor(sessionId, building, targetLevel, current.LevelCount, current.Stairs, current.Difficulty));
         foreach (var actor in target.Actors) _relationships.TryAdd((playerId, actor.Id), actor.FriendRating);
         var updated = player with { LocationId = target.Id, Position = target.Stairs ?? target.Exit, SpeedMetersPerSecond = 0, Version = player.Version + 2 };
         await SavePlayerAsync(updated, cancellationToken);
@@ -560,22 +560,32 @@ public sealed partial class RealityWorld
     {
         var store = StoreProfileForBuilding(building);
         if (store is not null) return GenerateStoreInterior(sessionId, building, store);
-        var levelCount = RandomDungeonLevelCount(building);
+        var difficulty = DungeonDifficulty(building);
+        var levelCount = RandomDungeonLevelCount(building, difficulty);
         var layout = CreateInteriorLayout(building);
         var stairRandom = new Random(StableInt($"{sessionId}:stairs"));
         WorldPosition? stairs = levelCount > 1 ? RandomInteriorPosition(stairRandom, layout, building.Position.Region, layout.Exit) : null;
-        return GenerateDungeonFloor(sessionId, building, 1, levelCount, stairs);
+        return GenerateDungeonFloor(sessionId, building, 1, levelCount, stairs, difficulty);
     }
 
-    private static int RandomDungeonLevelCount(CanonicalEntity building)
+    public static int DungeonDifficulty(CanonicalEntity building)
+    {
+        var squareFeet = BuildingSquareFeet(building);
+        if (squareFeet <= 2_000) return 1;
+        var difficulty = 1 + (squareFeet - 2_000) * 49 / 8_000d;
+        return Math.Clamp((int)Math.Round(difficulty, MidpointRounding.AwayFromZero), 1, 100);
+    }
+
+    private static int RandomDungeonLevelCount(CanonicalEntity building, int difficulty)
     {
         if (int.TryParse(building.Properties.GetValueOrDefault("dungeon:levels"), out var specified)) return Math.Clamp(specified, 1, 10);
-        // Seventy percent are single-level; the rest are uniformly distributed
-        // from two through ten levels for an occasional genuinely deep dungeon.
-        return RandomNumberGenerator.GetInt32(100) < 70 ? 1 : RandomNumberGenerator.GetInt32(2, 11);
+        if (difficulty <= 1) return 1;
+        var minimum = difficulty > 50 ? 5 : difficulty >= 40 ? 3 : difficulty >= 20 ? 2 : 1;
+        var maximum = Math.Clamp(1 + (int)Math.Ceiling(difficulty / 7d), minimum, 10);
+        return RandomNumberGenerator.GetInt32(minimum, maximum + 1);
     }
 
-    private DungeonState GenerateDungeonFloor(string sessionId, CanonicalEntity building, int level, int levelCount, WorldPosition? stairs)
+    private DungeonState GenerateDungeonFloor(string sessionId, CanonicalEntity building, int level, int levelCount, WorldPosition? stairs, int difficulty)
     {
         var id = level == 1 ? sessionId : $"{sessionId}:level:{level}";
         var layout = CreateInteriorLayout(building);
@@ -591,20 +601,40 @@ public sealed partial class RealityWorld
         }
         else rooms.Add(new DungeonRoom(0, 0, width, height));
         var region = building.Position.Region; var actors = new List<ActorState>();
-        for (var i = 0; i < random.Next(3, 7); i++)
+        var expectedActors = Math.Clamp(3 + difficulty / 8 + (level - 1) / 2, 3, 17);
+        var actorCount = random.Next(Math.Max(3, expectedActors - 1), Math.Min(19, expectedActors + 2));
+        for (var i = 0; i < actorCount; i++)
         {
             var merchant = i == 0 && random.NextDouble() < .55; var foe = merchant ? random.NextDouble() * 2 : -2 + random.NextDouble() * 4;
             var position = RandomInteriorPosition(random, layout, region, stairs);
             var actorName = merchant || foe >= 0 ? FriendlyHumanName(id, i) : $"Dungeon Dweller {i + 1}";
+            var maximumHealth = Math.Round(Math.Clamp(4 + difficulty * .2 + (level - 1) * .55 + random.NextDouble() * 2.5, 4, 35) * 2) / 2;
+            var weapon = merchant ? "pistol" : DungeonWeaponFor(difficulty, level, random);
             actors.Add(new ActorState($"{id}:npc:{i}", EntityKind.Npc, merchant ? "merchant" : "resident", actorName,
-                position, HealthHearts: 4 + random.Next(5), MaximumHealthHearts: 8,
+                position, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
                 FriendRating: foe, IsMerchant: merchant, TravelMode: (TravelMode)random.Next(0, 4), LocationId: id,
-                EquippedWeapon: merchant ? "pistol" : "none"));
+                EquippedWeapon: weapon));
         }
         var chests = Enumerable.Range(0, random.Next(1, 4)).Select(i => new TreasureChestState($"{id}:chest:{i}", RandomInteriorPosition(random, layout, region, stairs), id)).ToArray();
         return new DungeonState(id, building.Id, width, height, rooms, walls, layout.Exit, actors, chests, Array.Empty<string>(),
             Footprint: layout.Footprint, ExteriorWallCount: exteriorWallCount, Level: level, LevelCount: levelCount,
-            Stairs: stairs, Doorway: layout.Doorway, SessionId: sessionId);
+            Stairs: stairs, Doorway: layout.Doorway, SessionId: sessionId, Difficulty: difficulty);
+    }
+
+    private static string DungeonWeaponFor(int difficulty, int level, Random random)
+    {
+        var threat = Math.Clamp(difficulty + (level - 1) * 2, 1, 100);
+        string[] weapons = threat switch
+        {
+            <= 2 => ["fist"],
+            <= 8 => ["fist", "fist", "knife", "rock"],
+            <= 18 => ["knife", "rock", "sword", "slingshot"],
+            <= 35 => ["sword", "slingshot", "crossbow"],
+            <= 50 => ["sword", "crossbow", "pistol"],
+            <= 75 => ["sword", "crossbow", "pistol", "rifle"],
+            _ => ["crossbow", "pistol", "rifle", "rifle"]
+        };
+        return weapons[random.Next(weapons.Length)];
     }
 
     private sealed record StoreProfile(string Name, string Category);
@@ -1126,11 +1156,14 @@ public sealed partial class RealityWorld
             }
             if (_lastActorAttack.TryGetValue((actor.Id, player.Id), out var last) && now - last < TimeSpan.FromSeconds(3)) continue;
             _lastActorAttack[(actor.Id, player.Id)] = now;
-            var damage = Math.Min(3, .5 + hostility * .25); var health = player.GodMode ? Math.Max(1, player.HealthHearts - damage) : Math.Max(0, player.HealthHearts - damage);
+            var weapon = actor.EquippedWeapon is null or "none" ? "fist" : actor.EquippedWeapon;
+            var weaponDamage = _itemConfigurations.TryGetValue(weapon, out var weaponConfiguration) ? weaponConfiguration.Damage : .5;
+            var damage = Math.Clamp(weaponDamage + Math.Min(2, hostility * .25), .25, 10);
+            var health = player.GodMode ? Math.Max(1, player.HealthHearts - damage) : Math.Max(0, player.HealthHearts - damage);
             var died = health <= 0; var updated = died ? ResetPlayer(player with { HealthHearts = 0 }) : player with { HealthHearts = health, Version = player.Version + 1 };
             if (!await SavePlayerAsync(updated, cancellationToken)) continue;
             changedPlayers.Add(updated);
-            combat.Add(new CombatEvent(actor.Id, player.Id, "attack", actor.Position, player.Position, true, damage, died,
+            combat.Add(new CombatEvent(actor.Id, player.Id, weapon, actor.Position, player.Position, true, damage, died,
                 died ? $"{actor.Name} defeated {player.Name}." : $"{actor.Name} hit {player.Name} for {damage:0.##} heart{(damage == 1 ? "" : "s")} damage.", updated.HealthHearts));
         }
         return new HostileTick(changedActors.Values.ToArray(), changedPlayers, combat);

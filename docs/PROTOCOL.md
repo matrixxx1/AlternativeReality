@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v26
+# Renderer-neutral protocol v27
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -66,7 +66,7 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 
 Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. They never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.
 
-Interior state carries the normalized source-building footprint, exterior-wall count, doorway, current level, total level count, and optional shared stair position. Most fresh dungeons have one level; the remainder receive a random depth from 2 through 10. Homes remain single-level.
+Interior state carries the normalized source-building footprint, exterior-wall count, doorway, current level, total level count, optional shared stair position, and footprint-derived difficulty. Buildings up to about 2,000 square feet start at Difficulty 1, buildings near 10,000 square feet reach about Difficulty 50, and anything above Difficulty 50 is a Stronghold. Difficulty biases floor count, inhabitant population, health, and weapon loadouts; Homes and stores remain safe, single-level exceptions.
 
 Snapshots carry authoritative door-lock state and the current cycle's UTC end time. Approximately 90% of ordinary buildings are locked in each deterministic four-hour cycle. A player's own base is always enterable, and a building property of `questItem=true` (with `quest:item=true` accepted as an alias) permanently exempts a future quest building from locking.
 

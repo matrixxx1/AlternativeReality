@@ -181,7 +181,8 @@ public sealed record DungeonState(
     IReadOnlyList<GeometryPoint>? Footprint = null, int ExteriorWallCount = 4,
     int Level = 1, int LevelCount = 1, WorldPosition? Stairs = null,
     WorldPosition? Doorway = null, string? SessionId = null,
-    bool IsStore = false, string? StoreCategory = null);
+    bool IsStore = false, string? StoreCategory = null,
+    int Difficulty = 1);
 public sealed record BaseState(
     string BuildingId,
     string DoorId,
