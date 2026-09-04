@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v31
+# Renderer-neutral protocol v32
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -14,9 +14,9 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `configureInventoryItem` | item ID and `take` or `give` action | requires authoritative God Mode; `take` adds one to account-wide Home inventory, while `give` removes one from Home first and falls back to the backpack |
 | `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist and personal flags cannot be dropped |
 | `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
-| `updateServerEvents` | simulated clock offset, weather mode/temperature, light/merchant/door refreshes, and UFO/T-Rex/brontosaurus/stegosaurus/raptor-pack/bear intervals and durations | requires authoritative God Mode, validates bounded values, persists the reality-wide schedule, and never changes the host operating-system clock |
+| `updateServerEvents` | simulated clock offset, weather mode/temperature, light/merchant/door refreshes, and UFO/T-Rex/brontosaurus/stegosaurus/raptor-pack/Land-of-the-Giants/bear intervals and durations | requires authoritative God Mode, validates bounded values, persists the reality-wide schedule, and never changes the host operating-system clock |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
-| `triggerWorldEvent` | UFO, T-Rex, brontosaurus, stegosaurus, raptor-pack, or bear event type | requires authoritative God Mode and creates or resets bounded manual event actors near the triggering player's outdoor position; the raptor event creates a pack of three |
+| `triggerWorldEvent` | UFO, T-Rex, brontosaurus, stegosaurus, raptor-pack, Land of the Giants, or bear event type | requires authoritative God Mode and creates or resets bounded manual event actors near the triggering player's outdoor position; the raptor event creates a pack of three |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, current location, and the active configured door-lock cycle; dungeon session state is fresh on entry and discarded on exit |
 | `changeDungeonLevel` | stair direction `-1` up or `1` down | requires a multi-level dungeon, valid floor boundary, and proximity to the shared stairwell |
 | `moveFurniture`, `placeFurniture`, `rotateFurniture`, `storeFurniture` | furniture instance and requested logical Home position/action | requires the owner's Home; validates walls, doors, exit clearance, other furniture, rotation, and storage rules before persisting |
@@ -27,6 +27,8 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 Daily UFOs are ordinary logical actors with subtype `ufo`; green-beam strikes use the existing authoritative `combatEvent` shape with weapon `greenBeam` and 10-heart damage.
 
 Event dinosaurs are authoritative logical actors. T-Rex attacks are `trexBite` (7 hearts) or `trexTail` (3), brontosaurus attacks are `brontosaurusTail` (5) or `brontosaurusStomp` (10), stegosaurus attacks are `stegosaurusTail` (4), and raptor attacks are `raptorBite` (3). The browser derives its matching attack animation from that weapon identifier.
+
+The Land of the Giants event creates one 15.24-meter (50-foot) logical humanoid through a portal. It pursues outdoor players, NPCs, and animals and emits `giantStomp` combat events with 4-heart damage; clients animate the raised foot and impact from that event.
 | `openHomeStorage`, `transferHomeStorage` | built-in chest ID, item ID, direction, and quantity | requires the owner's Home and its actual storage chest; deposits persist without a capacity limit, while withdrawals enforce backpack category slots and weight |
 | `purchaseBase` | logical building door ID | validates proximity, account ownership, and the normal displayed price; changes the account-wide base, with God Mode bypassing affordability and deduction |
 | `attack` | target ID plus the client's current weapon hint | ignores spoofed weapon strength and uses the server-persisted equipped weapon; validates ownership, ammo, range, clear line of sight, accuracy, damage, death, fallback, and relationship changes |

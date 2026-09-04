@@ -37,6 +37,7 @@ public sealed partial class RealityWorld
     private long? _lastBrontosaurusCycle;
     private long? _lastStegosaurusCycle;
     private long? _lastRaptorCycle;
+    private long? _lastLandOfGiantsCycle;
     private readonly ConcurrentDictionary<string, byte> _ufoHits = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _eventAttackCooldowns = new();
     private volatile string _activeMapOperation = "Idle";
@@ -469,7 +470,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (!player.GodMode) throw new InvalidOperationException("God Mode must be enabled to trigger world events.");
-        var key = (eventType ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        var key = (eventType ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
         var anchor = player.LocationId == "outdoor" ? player.Position : _returnPositions.GetValueOrDefault(characterId, new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         var now = DateTimeOffset.UtcNow;
         var actors = new List<ActorState>();
@@ -497,13 +498,17 @@ public sealed partial class RealityWorld
                 for (var index = 0; index < 3; index++)
                     actors.Add(CreateEventDinosaur($"raptor:manual:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now));
             }
+            else if (key is "giant" or "landofgiants" or "landofthegiants")
+            {
+                actors.Add(CreateEventDinosaur("giant:manual", "giant", "The Giant", anchor, 20, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now));
+            }
             else if (key is "bear" or "greatbear")
             {
                 var angle = _actorRandom.NextDouble() * Math.PI * 2;
                 var position = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * 14, Y = anchor.Y + Math.Sin(angle) * 14 });
                 actors.Add(new ActorState("event-bear:manual", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes)));
             }
-            else throw new InvalidOperationException("Choose UFO, T-Rex, brontosaurus, stegosaurus, raptors, or bear.");
+            else throw new InvalidOperationException("Choose UFO, T-Rex, brontosaurus, stegosaurus, raptors, Land of the Giants, or bear.");
 
             foreach (var actor in actors)
             {
@@ -575,6 +580,13 @@ public sealed partial class RealityWorld
                         var raptor = CreateEventDinosaur($"raptor:{raptorCycle}:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now);
                         _actors[raptor.Id] = raptor; changed.Add(raptor);
                     }
+                }
+                var landOfGiantsCycle = ScheduledEventCycle(now, "land-of-the-giants", _eventConfiguration.LandOfGiantsIntervalHours);
+                if (_lastLandOfGiantsCycle != landOfGiantsCycle)
+                {
+                    _lastLandOfGiantsCycle = landOfGiantsCycle;
+                    var giant = CreateEventDinosaur($"giant:{landOfGiantsCycle}", "giant", "The Giant", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now);
+                    _actors[giant.Id] = giant; changed.Add(giant);
                 }
                 var bearCycle = ScheduledEventCycle(now, "event-bear", _eventConfiguration.BearIntervalHours);
                 if (_lastEventBearCycle != bearCycle)
@@ -662,6 +674,7 @@ public sealed partial class RealityWorld
         _lastBrontosaurusCycle = ScheduledEventCycle(now, "brontosaurus", _eventConfiguration.BrontosaurusIntervalHours);
         _lastStegosaurusCycle = ScheduledEventCycle(now, "stegosaurus", _eventConfiguration.StegosaurusIntervalHours);
         _lastRaptorCycle = ScheduledEventCycle(now, "raptors", _eventConfiguration.RaptorIntervalHours);
+        _lastLandOfGiantsCycle = ScheduledEventCycle(now, "land-of-the-giants", _eventConfiguration.LandOfGiantsIntervalHours);
     }
 
     public IReadOnlyList<ChatMessage> AdvanceActorSpeech(DateTimeOffset now)
@@ -1056,7 +1069,7 @@ public sealed partial class RealityWorld
     {
         "rabbit" => 2.2, "dog" => 1.8, "cat" => 1.4, "bird" => 2.6,
         "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, "eventBear" => 4, "tRex" => 6,
-        "brontosaurus" => 3, "stegosaurus" => 3.5, "raptor" => 8, "storeEmployee" => 1.1, _ => 1.25
+        "brontosaurus" => 3, "stegosaurus" => 3.5, "raptor" => 8, "giant" => 4.5, "storeEmployee" => 1.1, _ => 1.25
     };
 
     private string ActorSpeech(ActorState actor)
@@ -1066,6 +1079,7 @@ public sealed partial class RealityWorld
         if (actor.Subtype == "brontosaurus") return "BWOOOOOM!";
         if (actor.Subtype == "stegosaurus") return "HRRROOOH!";
         if (actor.Subtype == "raptor") return "SKREEEE!";
+        if (actor.Subtype == "giant") return "FEE-FI-FO-FUM!";
         if (actor.Kind == EntityKind.Npc)
         {
             if (actor.Subtype == "policeOfficer") return "Stop! You're under arrest!";

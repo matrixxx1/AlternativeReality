@@ -1082,7 +1082,9 @@ public sealed partial class RealityWorld
             InRange(request.StegosaurusIntervalHours, 1, 168, "Stegosaurus interval"),
             InRange(request.StegosaurusDurationMinutes, 1, 120, "Stegosaurus duration"),
             InRange(request.RaptorIntervalHours, 1, 168, "Raptor interval"),
-            InRange(request.RaptorDurationMinutes, 1, 120, "Raptor duration"));
+            InRange(request.RaptorDurationMinutes, 1, 120, "Raptor duration"),
+            InRange(request.LandOfGiantsIntervalHours, 1, 168, "Land of the Giants interval"),
+            InRange(request.LandOfGiantsDurationMinutes, 1, 120, "Land of the Giants duration"));
         if (updated.StreetLightsOnHour == updated.StreetLightsOffHour) throw new InvalidOperationException("Street-light on and off hours must differ.");
         if (updated.WeatherMode is not ("live" or "clear" or "rain" or "snow" or "fog" or "storm")) throw new InvalidOperationException("Weather mode must be live, clear, rain, snow, fog, or storm.");
         if (updated.TemperatureCelsius is < -90 or > 60) throw new InvalidOperationException("Temperature must be between -90 and 60 °C.");
@@ -1302,7 +1304,7 @@ public sealed partial class RealityWorld
         return new HostileTick(changedActors.Values.ToArray(), changedPlayers, combat);
     }
 
-    private static bool IsEventPredator(string subtype) => subtype is "tRex" or "eventBear" or "brontosaurus" or "stegosaurus" or "raptor";
+    private static bool IsEventPredator(string subtype) => subtype is "tRex" or "eventBear" or "brontosaurus" or "stegosaurus" or "raptor" or "giant";
 
     private static double EventPredatorMaximumAttackRange(string subtype) => subtype switch
     {
@@ -1310,6 +1312,7 @@ public sealed partial class RealityWorld
         "tRex" => 7,
         "stegosaurus" => 5,
         "raptor" => 1.8,
+        "giant" => 4.5,
         _ => 2.5
     };
 
@@ -1318,6 +1321,7 @@ public sealed partial class RealityWorld
         "brontosaurus" => new[] { ("brontosaurusTail", 5d, 10d), ("brontosaurusStomp", 10d, 3.5d) },
         "stegosaurus" => new[] { ("stegosaurusTail", 4d, 5d) },
         "raptor" => new[] { ("raptorBite", 3d, 1.8d) },
+        "giant" => new[] { ("giantStomp", 4d, 4.5d) },
         "tRex" => new[] { ("trexBite", 7d, 4.5d), ("trexTail", 3d, 7d) },
         _ => new[] { ("bite", 10d, 2.5d) }
     };
@@ -1332,6 +1336,7 @@ public sealed partial class RealityWorld
             "brontosaurusStomp" => "stomped",
             "stegosaurusTail" => "whipped",
             "trexTail" => "tail-whipped",
+            "giantStomp" => "stepped on",
             _ => "bit"
         };
         return (selected.Weapon, selected.Damage, description);

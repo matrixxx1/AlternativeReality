@@ -110,6 +110,7 @@ public sealed class RealitySocketHub
                             "brontosaurus" => "brontosaurus portal",
                             "stegosaurus" => "stegosaurus portal",
                             "raptor" => "raptor-pack portal",
+                            "giant" => "Land of the Giants portal",
                             "eventBear" => "great bear",
                             _ => "UFO flyover"
                         };

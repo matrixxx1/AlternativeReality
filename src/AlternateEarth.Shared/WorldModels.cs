@@ -170,7 +170,9 @@ public sealed record ServerEventConfiguration(
     int StegosaurusIntervalHours = 24,
     int StegosaurusDurationMinutes = 10,
     int RaptorIntervalHours = 24,
-    int RaptorDurationMinutes = 10);
+    int RaptorDurationMinutes = 10,
+    int LandOfGiantsIntervalHours = 24,
+    int LandOfGiantsDurationMinutes = 10);
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,
