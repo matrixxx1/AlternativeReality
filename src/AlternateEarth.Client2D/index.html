@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=28">
+  <link rel="stylesheet" href="styles.css?v=29">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
   <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
   <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
   <aside id="rightRail" class="right-rail" aria-label="Game panels">
-  <div class="right-rail-heading"><strong>AlternativeReality</strong><span>Control rail</span></div>
+  <div class="right-rail-heading"><div><strong>AlternativeReality</strong><span>Control rail</span></div><button id="rightRailToggle" type="button" aria-label="Collapse control rail" aria-expanded="true">›</button></div>
   <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link">
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
     <h1>AlternativeReality</h1>
@@ -193,6 +193,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=54"></script>
+  <script src="app.js?v=56"></script>
 </body>
 </html>
