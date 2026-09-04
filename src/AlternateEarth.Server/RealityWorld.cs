@@ -174,7 +174,7 @@ public sealed partial class RealityWorld
             Math.Clamp(existing?.BodyHeat ?? 50, 0, 100), 100,
             existing is { EquippedHat: not "none" } ? existing.EquippedHat : existing?.HatOn == true ? "hat" : "none",
             existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none", existing?.WantedLevel ?? 0, existing?.EBikeRemainingMeters ?? 1609.344,
-            existing?.EnergyDrinkBoostUntilUtc, existing?.EnergyDrinkCrashUntilUtc);
+            existing?.EnergyDrinkBoostUntilUtc, existing?.EnergyDrinkCrashUntilUtc, existing?.ProbedUntilUtc);
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
         var offhand = ActiveOffhand(player);
         player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser" };
@@ -400,6 +400,7 @@ public sealed partial class RealityWorld
     public async Task<PlayerState> SetTravelModeAsync(string characterId, TravelMode mode, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (ProbedActive(player) && mode != TravelMode.Walk) throw new InvalidOperationException("While Probed, you can only walk. Sleep or wait for the effect to end.");
         if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle)
             throw new InvalidOperationException("Bikes, e-bikes, dirt bikes, and motorcycles cannot be used inside a dungeon or Home.");
         if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
@@ -1136,12 +1137,12 @@ public sealed partial class RealityWorld
             SetBaseReturnPosition(player.Id, home.BuildingId);
             return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
                 HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = home.Id,
-                FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, Version = player.Version + 1 };
+                FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, Version = player.Version + 1 };
         }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
             HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = "outdoor",
-            FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, Version = player.Version + 1 };
+            FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, Version = player.Version + 1 };
     }
 
     private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken)

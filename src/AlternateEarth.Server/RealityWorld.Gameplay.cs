@@ -737,7 +737,7 @@ public sealed partial class RealityWorld
         var now=DateTimeOffset.UtcNow;
         if(EnergyDrinkBoostActive(player,now))throw new InvalidOperationException("You are too energized to sleep. Wait for the 15-minute boost to end.");
         if(player.Position.Distance2D(bed.Position)>4)throw new InvalidOperationException("Move closer to the bed.");var until=now.AddMinutes(5);
-        var updated=player with{HealthHearts=player.MaximumHealthHearts,Stamina=player.MaximumStamina,Water=player.MaximumWater,FoodProtectedUntilUtc=until,WaterProtectedUntilUtc=until,EnergyDrinkBoostUntilUtc=null,EnergyDrinkCrashUntilUtc=null,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated;
+        var updated=player with{HealthHearts=player.MaximumHealthHearts,Stamina=player.MaximumStamina,Water=player.MaximumWater,FoodProtectedUntilUtc=until,WaterProtectedUntilUtc=until,EnergyDrinkBoostUntilUtc=null,EnergyDrinkCrashUntilUtc=null,ProbedUntilUtc=null,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated;
     }
 
     public TradeQuote RequestTrade(string playerId, string merchantId)
@@ -1011,7 +1011,7 @@ public sealed partial class RealityWorld
             if (_itemConfigurations.TryGetValue(itemType, out var item)) mph += item.SpeedModifierMph ?? 0;
         mph = Math.Max(.1, mph);
         var loadMultiplier = player.GodMode ? 1 : Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / (MaximumBackpackWeightPounds * 2), .5, 1);
-        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * EnergyDrinkSpeedMultiplier(player) * loadMultiplier;
+        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * EnergyDrinkSpeedMultiplier(player) * (ProbedActive(player) ? .5 : 1) * loadMultiplier;
     }
 
     private static bool EnergyDrinkBoostActive(PlayerState player, DateTimeOffset? at = null) => player.EnergyDrinkBoostUntilUtc is { } boostUntil && boostUntil > (at ?? DateTimeOffset.UtcNow);
@@ -1023,6 +1023,7 @@ public sealed partial class RealityWorld
     private static double EnergyDrinkSpeedMultiplier(PlayerState player) => EnergyDrinkBoostActive(player) ? 2 : EnergyDrinkCrashActive(player) ? .2 : 1;
     private static double EnergyDrinkCarryingCapacity(PlayerState player) => MaximumBackpackWeightPounds * (EnergyDrinkBoostActive(player) ? 2 : EnergyDrinkCrashActive(player) ? .2 : 1);
     private double PlayerCarryingCapacity(string playerId) => _players.TryGetValue(playerId, out var player) ? EnergyDrinkCarryingCapacity(player) : MaximumBackpackWeightPounds;
+    private static bool ProbedActive(PlayerState player, DateTimeOffset? at = null) => player.ProbedUntilUtc is { } until && until > (at ?? DateTimeOffset.UtcNow);
 
     private static IEnumerable<string> ActiveMovementItems(PlayerState player, bool? magicHikingShoes = null, bool? magicRunningShoes = null)
     {
@@ -1248,11 +1249,27 @@ public sealed partial class RealityWorld
         foreach (var target in _players.Values.Where(player => player.LocationId == "outdoor").ToArray())
         {
             if (ufo.Position.Distance2D(target.Position) > 8 || !_ufoHits.TryAdd($"{ufo.Id}:{target.Id}", 0)) continue;
-            var remaining = target.GodMode ? Math.Max(1, target.HealthHearts - 10) : Math.Max(0, target.HealthHearts - 10);
-            var died = !target.GodMode && remaining <= 0;
-            var updatedTarget = died ? ResetPlayer(target with { HealthHearts = 0, Version = target.Version + 1 }) : target with { HealthHearts = remaining, Version = target.Version + 1 };
-            await SavePlayerAsync(updatedTarget, cancellationToken); changedPlayers.Add(updatedTarget);
-            combat.Add(new CombatEvent(ufo.Id, target.Id, "greenBeam", ufo.Position, target.Position, true, 10, died, $"A UFO struck {target.Name} with a green beam for 10 hearts.", updatedTarget.HealthHearts));
+            var dropPosition = FindNearbyProbedDrop(target, ufo);
+            var probedUntil = now.AddMinutes(5);
+            var updatedTarget = target with
+            {
+                Position = dropPosition,
+                Terrain = Navigation.TerrainAt(dropPosition.X, dropPosition.Y),
+                TravelMode = TravelMode.Walk,
+                SpeedMetersPerSecond = 0,
+                ProbedUntilUtc = probedUntil,
+                Version = target.Version + 1
+            };
+            if (!await SavePlayerAsync(updatedTarget, cancellationToken))
+            {
+                _ufoHits.TryRemove($"{ufo.Id}:{target.Id}", out _);
+                continue;
+            }
+            _lastMovement[target.Id] = now;
+            changedPlayers.Add(updatedTarget);
+            combat.Add(new CombatEvent(ufo.Id, target.Id, "greenBeam", ufo.Position, target.Position, true, 0, false,
+                $"A UFO abducted {target.Name}, dropped them nearby, and left them Probed for five minutes.", updatedTarget.HealthHearts,
+                dropPosition, "Probed", probedUntil));
         }
         foreach (var ufo in _actors.Values.Where(actor => actor.Subtype == "ufo").ToArray())
         foreach (var victim in _actors.Values.Where(actor => actor.Subtype != "ufo" && actor.LocationId == "outdoor").ToArray())
@@ -1333,6 +1350,30 @@ public sealed partial class RealityWorld
                 died ? $"{actor.Name} defeated {player.Name}." : $"{actor.Name} hit {player.Name} for {damage:0.##} heart{(damage == 1 ? "" : "s")} damage.", updated.HealthHearts));
         }
         return new HostileTick(changedActors.Values.ToArray(), changedPlayers, combat);
+    }
+
+    private WorldPosition FindNearbyProbedDrop(PlayerState target, ActorState ufo)
+    {
+        var bounds = _loadedBounds ?? Configuration.Area.Bounds;
+        var initialAngle = (StableInt($"probed-drop:{ufo.Id}:{target.Id}") & int.MaxValue) / (double)int.MaxValue * Math.PI * 2;
+        foreach (var distance in new[] { 8d, 6d, 10d, 4d })
+        for (var offset = 0; offset < 8; offset++)
+        {
+            var angle = initialAngle + offset * Math.PI / 4;
+            var requested = bounds.Clamp(target.Position with
+            {
+                X = target.Position.X + Math.Cos(angle) * distance,
+                Y = target.Position.Y + Math.Sin(angle) * distance
+            });
+            var safe = Navigation.IsBlocked(requested.X, requested.Y) || Navigation.TerrainAt(requested.X, requested.Y) == TerrainType.DeepWater
+                ? Navigation.FindNearestWalkable(requested)
+                : requested with { Z = Navigation.ElevationAt(requested.X, requested.Y) };
+            if (safe.Distance2D(target.Position) >= 2 && safe.Distance2D(target.Position) <= 20 &&
+                !Navigation.IsBlocked(safe.X, safe.Y) && Navigation.TerrainAt(safe.X, safe.Y) != TerrainType.DeepWater)
+                return safe with { Z = Navigation.ElevationAt(safe.X, safe.Y) };
+        }
+        var fallback = Navigation.FindNearestWalkable(target.Position);
+        return fallback with { Z = Navigation.ElevationAt(fallback.X, fallback.Y) };
     }
 
     private static bool IsEventPredator(string subtype) => subtype is "tRex" or "eventBear" or "brontosaurus" or "stegosaurus" or "raptor" or "giant";

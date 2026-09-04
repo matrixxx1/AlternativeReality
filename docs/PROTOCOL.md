@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v34
+# Renderer-neutral protocol v35
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -17,14 +17,14 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `updateServerEvents` | simulated clock offset, weather mode/temperature, light/merchant/door refreshes, and a display name, frequency, and duration for each UFO/T-Rex/brontosaurus/stegosaurus/raptor-pack/Land-of-the-Giants/bear event | requires authoritative God Mode, validates bounded values and 3-60 character event names, persists the reality-wide schedule, and never changes the host operating-system clock |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `triggerWorldEvent` | UFO, T-Rex, brontosaurus, stegosaurus, raptor-pack, Land of the Giants, or bear event type | requires authoritative God Mode and creates or resets bounded manual event actors near the triggering player's outdoor position; the raptor event creates a pack of three |
-| `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, current location, the active configured door-lock cycle, and energy-drink sleep restrictions; dungeon session state is fresh on entry and discarded on exit |
+| `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, current location, the active configured door-lock cycle, and energy-drink sleep restrictions; successful bed rest clears energy-drink crash and `Probed`; dungeon session state is fresh on entry and discarded on exit |
 | `changeDungeonLevel` | stair direction `-1` up or `1` down | requires a multi-level dungeon, valid floor boundary, and proximity to the shared stairwell |
 | `moveFurniture`, `placeFurniture`, `rotateFurniture`, `storeFurniture` | furniture instance and requested logical Home position/action | requires the owner's Home; validates walls, doors, exit clearance, other furniture, rotation, and storage rules before persisting |
 | `requestQuest`, `acceptQuest`, `completeQuest`, `abandonQuest`, `captureQuestPet` | actor/quest identifiers only | quest generation, objectives, inventory transfer, and rewards remain server-authoritative |
 | `chopVegetation`, `attackWorldObject` | logical world entity identifier | validates weapon, range, rewards, persistent vegetation deltas, crimes, wanted level, and delayed police response |
 | `pickLock` | door ID | requires a lock-pick set (or God Mode), validates 3 m range, rolls 15% success, and applies witnessed-crime / 10% police-call rules server-side |
 
-Daily UFOs are ordinary logical actors with subtype `ufo`; green-beam strikes use the existing authoritative `combatEvent` shape with weapon `greenBeam` and 10-heart damage.
+Daily UFOs are ordinary logical actors with subtype `ufo`. A green-beam hit on a player emits a `combatEvent` with weapon `greenBeam`, the pickup point, authoritative safe `relocatedTo` position, `Probed` status name, and five-minute UTC deadline. The player is forced to walking, moved to that nearby outdoor point, and slowed to one-half final speed until the deadline or bed rest. The beam remains lethal to NPCs and animals.
 
 Event dinosaurs are authoritative logical actors. T-Rex attacks are `trexBite` (7 hearts) or `trexTail` (3), brontosaurus attacks are `brontosaurusTail` (5) or `brontosaurusStomp` (10), stegosaurus attacks are `stegosaurusTail` (4), and raptor attacks are `raptorBite` (3). The browser derives its matching attack animation from that weapon identifier.
 
@@ -73,7 +73,7 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | `error` | rejected command with safe message |
 | `pong` | liveness response |
 
-Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. Event actors additionally carry the configured logical `eventName`, `eventStartedAtUtc`, and `eventEndsAtUtc`; clients use those values to show a grouped live countdown and direction without becoming authoritative. Messages never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.
+Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. Event actors additionally carry the configured logical `eventName`, `eventStartedAtUtc`, and `eventEndsAtUtc`; clients use those values to show a grouped live countdown and direction without becoming authoritative. Combat events may carry renderer-neutral relocation and timed-status outcomes, while each client decides how to animate them. Messages never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.
 
 Interior state carries the normalized source-building footprint, exterior-wall count, doorway, current level, total level count, optional shared stair position, and footprint-derived difficulty. Buildings up to about 2,000 square feet start at Difficulty 1, buildings near 10,000 square feet reach about Difficulty 50, and anything above Difficulty 50 is a Stronghold. Difficulty biases floor count, inhabitant population, health, and weapon loadouts; Homes and stores remain safe, single-level exceptions.
 

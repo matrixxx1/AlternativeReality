@@ -102,7 +102,8 @@ public sealed record PlayerState(
     int WantedLevel = 0,
     double EBikeRemainingMeters = 1609.344,
     DateTimeOffset? EnergyDrinkBoostUntilUtc = null,
-    DateTimeOffset? EnergyDrinkCrashUntilUtc = null);
+    DateTimeOffset? EnergyDrinkCrashUntilUtc = null,
+    DateTimeOffset? ProbedUntilUtc = null);
 
 public sealed record ActorState(
     string Id,
@@ -238,7 +239,8 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<CanonicalEntity>? HomeStorage = null,
     InventoryState? HomeItemStorage = null,
     IReadOnlyList<QuestState>? Quests = null);
-public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
+public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
+    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null);
 
 public sealed record ChatMessage(
     string Id,

@@ -170,7 +170,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         {
             GodMode = false,
             EnergyDrinkBoostUntilUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
-            EnergyDrinkCrashUntilUtc = DateTimeOffset.UtcNow.AddMinutes(4)
+            EnergyDrinkCrashUntilUtc = DateTimeOffset.UtcNow.AddMinutes(4),
+            ProbedUntilUtc = DateTimeOffset.UtcNow.AddMinutes(4)
         };
         await store.SaveCharacterAsync(configuration.Id, crashedState);
         world.Leave(player.Id);
@@ -203,7 +204,44 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var rested = await world.RestAtBedAsync(player.Id, bed.Id);
         Assert.Null(rested.EnergyDrinkBoostUntilUtc);
         Assert.Null(rested.EnergyDrinkCrashUntilUtc);
+        Assert.Null(rested.ProbedUntilUtc);
         Assert.Equal(50, world.GetPrivateState(player.Id).Inventory.MaximumWeightPounds);
+    }
+
+    [Fact]
+    public async Task UfoAbductsPlayerToSafeNearbyPointAndAppliesProbed()
+    {
+        var configuration = new RealityConfiguration("ufo-probed-test", "UFO Probed Test", 219, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "ufo-probed.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("ufo-target", "UfoTarget");
+        await world.SetGodModeAsync(player.Id, true);
+        var original = world.CreateSnapshot().Players.Single(item => item.Id == player.Id);
+        world.TriggerWorldEvent(player.Id, "ufo");
+        world.AdvanceActors(TimeSpan.FromSeconds(.875));
+
+        var tick = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+
+        var updated = Assert.Single(tick.Players, item => item.Id == player.Id);
+        var abduction = Assert.Single(tick.Combat, item => item.TargetId == player.Id && item.Weapon == "greenBeam");
+        Assert.Equal("Probed", abduction.StatusEffect);
+        Assert.Equal(updated.Position, abduction.RelocatedTo);
+        Assert.Equal(updated.ProbedUntilUtc, abduction.StatusEffectUntilUtc);
+        Assert.Equal(0, abduction.Damage);
+        Assert.False(abduction.TargetDied);
+        Assert.Equal(original.HealthHearts, updated.HealthHearts);
+        Assert.Equal(TravelMode.Walk, updated.TravelMode);
+        Assert.InRange(updated.Position.Distance2D(original.Position), 2, 20);
+        Assert.NotEqual(TerrainType.DeepWater, updated.Terrain);
+        Assert.InRange(updated.ProbedUntilUtc!.Value, DateTimeOffset.UtcNow.AddMinutes(4.9), DateTimeOffset.UtcNow.AddMinutes(5.1));
+        var ordinary = updated with { GodMode = false, ProbedUntilUtc = null };
+        var probed = updated with { GodMode = false };
+        Assert.Equal(world.ConfiguredSpeedMetersPerSecond(ordinary, TerrainType.Pavement) * .5,
+            world.ConfiguredSpeedMetersPerSecond(probed, TerrainType.Pavement), 6);
+        var blocked = await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.Run));
+        Assert.Contains("only walk", blocked.Message);
     }
 
     [Fact]
