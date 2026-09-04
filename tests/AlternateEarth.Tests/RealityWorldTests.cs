@@ -137,6 +137,76 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EnergyDrinkBoostsThenCrashesAndBedRestClearsTheCrash()
+    {
+        var configuration = new RealityConfiguration("energy-drink-test", "Energy Drink Test", 218, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var building = Building("energy-home", configuration.Area.Region, 20, 20);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "energy-drink.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("energy-account", "EnergyUser", "hash", "salt", "token", "energy-player"), "EnergyUser");
+        await store.SaveInventoryAsync(new InventoryState("energy-player", new[] { new ItemStack("energyDrink", 1) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("energy-player", "EnergyUser", "energy-account");
+
+        var boosted = await world.ConsumeItemAsync(player.Id, "energyDrink");
+        var now = DateTimeOffset.UtcNow;
+        Assert.InRange(boosted.EnergyDrinkBoostUntilUtc!.Value, now.AddMinutes(14.9), now.AddMinutes(15.1));
+        Assert.InRange(boosted.EnergyDrinkCrashUntilUtc!.Value, now.AddMinutes(19.9), now.AddMinutes(20.1));
+        Assert.Equal(100, world.GetPrivateState(player.Id).Inventory.MaximumWeightPounds);
+        var withoutEffect = boosted with { EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null };
+        Assert.Equal(world.ConfiguredSpeedMetersPerSecond(withoutEffect, TerrainType.Pavement) * 2,
+            world.ConfiguredSpeedMetersPerSecond(boosted, TerrainType.Pavement), 6);
+
+        await world.SetGodModeAsync(player.Id, true);
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+        var bed = entered.Dungeon.Furnishings!.Single(item => item.Properties.GetValueOrDefault("objectType") == "bed");
+        var blocked = await Assert.ThrowsAsync<InvalidOperationException>(() => world.RestAtBedAsync(player.Id, bed.Id));
+        Assert.Contains("too energized", blocked.Message);
+
+        var crashedState = entered.Player with
+        {
+            GodMode = false,
+            EnergyDrinkBoostUntilUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+            EnergyDrinkCrashUntilUtc = DateTimeOffset.UtcNow.AddMinutes(4)
+        };
+        await store.SaveCharacterAsync(configuration.Id, crashedState);
+        world.Leave(player.Id);
+        var crashed = await world.JoinAsync(player.Id, "EnergyUser", "energy-account");
+        Assert.Equal(10, world.GetPrivateState(player.Id).Inventory.MaximumWeightPounds);
+        var noCrash = crashed with { EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null };
+        Assert.Equal(world.ConfiguredSpeedMetersPerSecond(noCrash, TerrainType.Pavement) * .2,
+            world.ConfiguredSpeedMetersPerSecond(crashed, TerrainType.Pavement), 6);
+
+        var refreshedHome = world.GetPrivateState(player.Id).Dungeon!;
+        bed = refreshedHome.Furnishings!.Single(item => item.Id == bed.Id);
+        if (crashed.Position.Distance2D(bed.Position) > 4)
+        {
+            DungeonState? movedHome = null;
+            for (var radius = 2.4; radius <= 3.8 && movedHome is null; radius += .35)
+            for (var angle = 0; angle < 360 && movedHome is null; angle += 30)
+            {
+                var radians = angle * Math.PI / 180;
+                try
+                {
+                    movedHome = await world.MoveFurnitureAsync(player.Id, new MoveFurnitureRequest(bed.Id,
+                        crashed.Position.X + Math.Cos(radians) * radius, crashed.Position.Y + Math.Sin(radians) * radius));
+                }
+                catch (InvalidOperationException) { }
+            }
+            Assert.NotNull(movedHome);
+            bed = movedHome!.Furnishings!.Single(item => item.Id == bed.Id);
+        }
+
+        var rested = await world.RestAtBedAsync(player.Id, bed.Id);
+        Assert.Null(rested.EnergyDrinkBoostUntilUtc);
+        Assert.Null(rested.EnergyDrinkCrashUntilUtc);
+        Assert.Equal(50, world.GetPrivateState(player.Id).Inventory.MaximumWeightPounds);
+    }
+
+    [Fact]
     public async Task GodModeTeleportAimedInsideBuildingUsesSafeLandingPoint()
     {
         var configuration = new RealityConfiguration("teleport-test", "Teleport Test", 19, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

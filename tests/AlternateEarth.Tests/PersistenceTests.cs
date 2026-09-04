@@ -51,8 +51,11 @@ public sealed class PersistenceTests : IAsyncLifetime
     {
         var store = new SqliteRealityStore(Path.Combine(_directory, "characters.db"));
         await store.InitializeAsync(_reality);
+        var energyBoostUntil = DateTimeOffset.UtcNow.AddMinutes(10);
+        var energyCrashUntil = energyBoostUntil.AddMinutes(5);
         var player = new PlayerState("character-1", "Ada", new WorldPosition(_reality.Area.Region, 15, 25), 7,
-            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard, 6.5, 10, FlashlightOn:true,MagicRunningShoesOn:true,HatOn:false,DirtBikeGasGallons:1.25,MotorcycleGasGallons:3.5,EquippedWeapon:"crossbow",BodyHeat:72.5,EquippedHat:"warmHat",EquippedShirt:"winterJacket",EquippedPants:"warmingPants");
+            TerrainType.Sidewalk, 1.5, 9.75, 10, TravelMode.Skateboard, 6.5, 10, FlashlightOn:true,MagicRunningShoesOn:true,HatOn:false,DirtBikeGasGallons:1.25,MotorcycleGasGallons:3.5,EquippedWeapon:"crossbow",BodyHeat:72.5,EquippedHat:"warmHat",EquippedShirt:"winterJacket",EquippedPants:"warmingPants",
+            EnergyDrinkBoostUntilUtc:energyBoostUntil,EnergyDrinkCrashUntilUtc:energyCrashUntil);
 
         await store.SaveCharacterAsync(_reality.Id, player);
         var loaded = await new SqliteRealityStore(Path.Combine(_directory, "characters.db")).LoadCharacterAsync(_reality.Id, player.Id);
@@ -69,6 +72,7 @@ public sealed class PersistenceTests : IAsyncLifetime
         Assert.Equal(1.25, loaded.DirtBikeGasGallons);Assert.Equal(3.5, loaded.MotorcycleGasGallons);
         Assert.Equal("crossbow", loaded.EquippedWeapon);
         Assert.Equal(72.5, loaded.BodyHeat);Assert.Equal("warmHat", loaded.EquippedHat);Assert.Equal("winterJacket", loaded.EquippedShirt);Assert.Equal("warmingPants", loaded.EquippedPants);
+        Assert.Equal(energyBoostUntil, loaded.EnergyDrinkBoostUntilUtc);Assert.Equal(energyCrashUntil, loaded.EnergyDrinkCrashUntilUtc);
     }
 
     [Fact]

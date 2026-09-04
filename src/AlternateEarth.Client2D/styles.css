@@ -76,6 +76,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .backpack-handle { position:absolute; left:50%; top:-14px; width:55px; height:18px; transform:translateX(-50%); border:5px solid #74502d; border-bottom:0; border-radius:14px 14px 0 0; }
 .carried-title { display:block; color:#fff0bd; font-size:13px; text-align:center; }
 .backpack small { display:block; min-height:30px; margin:7px 0; color:#e0c99e; line-height:1.25; text-align:center; }
+.backpack small.over-capacity { color:#ff8d78; font-weight:700; }
 .backpack-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin:7px 0; }
 .backpack-tabs button { min-width:0; padding:5px 3px; color:#cfc4a0; background:#2c2117; border:1px solid #765a35; font-size:9px; }
 .backpack-tabs button span { display:block; margin-top:2px; color:#9f967c; font-size:8px; }

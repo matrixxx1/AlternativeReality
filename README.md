@@ -71,6 +71,8 @@ Real street names, airports, state borders/names, addresses, shops, gas stations
 
 Buildings cost at least $350,000, with the authoritative normal price growing exponentially from the footprint's estimated square footage. That normal price is always displayed. God Mode bypasses affordability and wallet deduction without changing the quoted price.
 
+Food, convenience, and gas merchants may stock energy drinks for a randomized $2–$10. Consuming one doubles final movement speed and raises carrying capacity from 50 to 100 pounds for 15 minutes, during which the character cannot sleep. A five-minute crash follows at one-fifth speed and 10-pound capacity; sleeping after the boost ends removes the crash immediately. The HUD shows the live phase and countdown, and the server persists both deadlines across reconnects and restarts.
+
 The reality configuration—including center, size, name, seed, and player limit—is in `src/AlternateEarth.Server/appsettings.json`. Runtime state is written under `data/` and is intentionally not committed.
 
 ## Verify

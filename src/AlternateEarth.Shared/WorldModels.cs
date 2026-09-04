@@ -100,7 +100,9 @@ public sealed record PlayerState(
     string EquippedShirt = "none",
     string EquippedPants = "none",
     int WantedLevel = 0,
-    double EBikeRemainingMeters = 1609.344);
+    double EBikeRemainingMeters = 1609.344,
+    DateTimeOffset? EnergyDrinkBoostUntilUtc = null,
+    DateTimeOffset? EnergyDrinkCrashUntilUtc = null);
 
 public sealed record ActorState(
     string Id,

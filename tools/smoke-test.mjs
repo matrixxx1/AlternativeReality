@@ -18,6 +18,8 @@ if (!clientHtml.includes('brontosaurusIntervalConfig') || !clientHtml.includes('
   throw new Error('Dinosaur event controls or renderers are missing.');
 if (!clientHtml.includes('activeEventsPanel') || !clientHtml.includes('ufoEventNameConfig') || !clientHtml.includes('landOfGiantsEventNameConfig') || !clientScript.includes('renderActiveEvents'))
   throw new Error('Active-event panel or configurable event-name controls are missing.');
+if (!clientScript.includes("energyDrink:'🥤'") || !clientScript.includes('updateEnergyDrinkTelemetry') || !clientScript.includes("item.itemType==='energyDrink'"))
+  throw new Error('Energy-drink inventory art, consumption control, or timed telemetry is missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -45,7 +47,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 33) throw new Error(`Expected protocol 33, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 34) throw new Error(`Expected protocol 34, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');

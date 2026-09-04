@@ -61,6 +61,7 @@ public sealed partial class RealityWorld
         new("warmingPants","Warming pants","Retain warmth and generate extra warmth while moving",0,0,4_500,12_000,true,true,WeightPounds:1.5),
         new("water","Water","One half-liter bottle; restores water and 2 hearts",0,0,50,200,WeightPounds:1.1),
         new("food","Food","Packed meal; restores stamina and 2 hearts",0,0,200,500,WeightPounds:.75),
+        new("energyDrink","Energy drink","15 minutes of 2× speed and carrying capacity, followed by a 5-minute ⅕-speed and capacity crash",0,0,200,1_000,WeightPounds:1.1),
         new("areaMap","Map of this block","Permanently reveals the current geographic block",0,0,100,100_000,true,true,WeightPounds:.05),
         new("personalFlag","Personal flag","Place and name one of up to five shared map flags",0,0,0,0,false,false,WeightPounds:.01),
         new("pencil","Pencil","A useful everyday writing tool",0,0,25,150,WeightPounds:.02),
@@ -379,7 +380,7 @@ public sealed partial class RealityWorld
     public async Task<PlayerState> ConsumeItemAsync(string playerId, string itemType, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
-        var normalized = itemType.Trim().ToLowerInvariant(); if (normalized is not ("food" or "water" or "gallonofgas")) throw new InvalidOperationException("That item cannot be consumed.");
+        var normalized = itemType.Trim().ToLowerInvariant(); if (normalized is not ("food" or "water" or "energydrink" or "gallonofgas")) throw new InvalidOperationException("That item cannot be consumed.");
         if (normalized == "gallonofgas")
         {
             if (player.TravelMode is not (TravelMode.DirtBike or TravelMode.Motorcycle)) throw new InvalidOperationException("Select your dirt bike or motorcycle before adding gas.");
@@ -387,12 +388,14 @@ public sealed partial class RealityWorld
             var capacity = player.TravelMode == TravelMode.DirtBike ? DirtBikeTankGallons : MotorcycleTankGallons;
             if (current >= capacity - .0001) throw new InvalidOperationException($"Your {VehicleName(player.TravelMode)} tank is already full.");
         }
-        if (!RemoveInventory(playerId, normalized, 1)) throw new InvalidOperationException($"You do not have any {normalized}.");
+        if (!RemoveInventory(playerId, normalized, 1)) throw new InvalidOperationException($"You do not have any {DisplayItem(normalized)}.");
         var now = DateTimeOffset.UtcNow;
         var updated = normalized == "food"
             ? player with { Stamina = player.MaximumStamina, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), FoodProtectedUntilUtc = now.AddMinutes(5), Version = player.Version + 1 }
             : normalized == "water"
                 ? player with { Water = player.MaximumWater, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), WaterProtectedUntilUtc = now.AddMinutes(5), Version = player.Version + 1 }
+                : normalized == "energydrink"
+                    ? player with { EnergyDrinkBoostUntilUtc = now.AddMinutes(15), EnergyDrinkCrashUntilUtc = now.AddMinutes(20), Version = player.Version + 1 }
                 : player.TravelMode == TravelMode.DirtBike
                     ? player with { DirtBikeGasGallons = Math.Min(DirtBikeTankGallons, player.DirtBikeGasGallons + 1), Version = player.Version + 1 }
                     : player with { MotorcycleGasGallons = Math.Min(MotorcycleTankGallons, player.MotorcycleGasGallons + 1), Version = player.Version + 1 };
@@ -731,8 +734,10 @@ public sealed partial class RealityWorld
     {
         if(!_players.TryGetValue(playerId,out var player)||!_dungeons.TryGetValue(player.LocationId,out var home)||!home.IsHome)throw new InvalidOperationException("You can only rest in your own bed.");
         var bed=home.Furnishings?.FirstOrDefault(item=>item.Id==bedId&&item.Properties.GetValueOrDefault("objectType")=="bed")??throw new InvalidOperationException("Bed not found.");
-        if(player.Position.Distance2D(bed.Position)>4)throw new InvalidOperationException("Move closer to the bed.");var until=DateTimeOffset.UtcNow.AddMinutes(5);
-        var updated=player with{HealthHearts=player.MaximumHealthHearts,Stamina=player.MaximumStamina,Water=player.MaximumWater,FoodProtectedUntilUtc=until,WaterProtectedUntilUtc=until,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated;
+        var now=DateTimeOffset.UtcNow;
+        if(EnergyDrinkBoostActive(player,now))throw new InvalidOperationException("You are too energized to sleep. Wait for the 15-minute boost to end.");
+        if(player.Position.Distance2D(bed.Position)>4)throw new InvalidOperationException("Move closer to the bed.");var until=now.AddMinutes(5);
+        var updated=player with{HealthHearts=player.MaximumHealthHearts,Stamina=player.MaximumStamina,Water=player.MaximumWater,FoodProtectedUntilUtc=until,WaterProtectedUntilUtc=until,EnergyDrinkBoostUntilUtc=null,EnergyDrinkCrashUntilUtc=null,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated;
     }
 
     public TradeQuote RequestTrade(string playerId, string merchantId)
@@ -817,10 +822,10 @@ public sealed partial class RealityWorld
         }
         var allowed = merchant.MerchantCategory switch
         {
-            "gas" => new HashSet<string>(["gallonOfGas", "food", "water"], StringComparer.OrdinalIgnoreCase),
+            "gas" => new HashSet<string>(["gallonOfGas", "food", "water", "energyDrink"], StringComparer.OrdinalIgnoreCase),
             "clothing" => new HashSet<string>(["hat", "coolingHat", "warmHat", "tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket", "coolingShorts", "warmingPants", "magicHikingShoes", "magicRunningShoes"], StringComparer.OrdinalIgnoreCase),
-            "food" => new HashSet<string>(["food", "water"], StringComparer.OrdinalIgnoreCase),
-            "convenience" => new HashSet<string>(["food", "water"], StringComparer.OrdinalIgnoreCase),
+            "food" => new HashSet<string>(["food", "water", "energyDrink"], StringComparer.OrdinalIgnoreCase),
+            "convenience" => new HashSet<string>(["food", "water", "energyDrink"], StringComparer.OrdinalIgnoreCase),
             "weapons" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet"], StringComparer.OrdinalIgnoreCase),
             "hardware" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "bike", "flashlight", "lantern", "laser", "lockPickSet"], StringComparer.OrdinalIgnoreCase),
             "sportingGoods" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "skateboard", "bike", "magicHikingShoes", "magicRunningShoes", "inflatableRaft"], StringComparer.OrdinalIgnoreCase),
@@ -859,6 +864,8 @@ public sealed partial class RealityWorld
         "warmHat" => "a warm knit hat",
         "dirtBike" => "a dirt bike",
         "gallonOfGas" => "a gallon of gas",
+        "energydrink" => "an energy drink",
+        "energyDrink" => "an energy drink",
         "ballBearing" => "a ball bearing",
         "fist" => "your fist",
         "none" => "no weapon",
@@ -1003,9 +1010,19 @@ public sealed partial class RealityWorld
         foreach (var itemType in ActiveMovementItems(player, magicHikingShoes, magicRunningShoes))
             if (_itemConfigurations.TryGetValue(itemType, out var item)) mph += item.SpeedModifierMph ?? 0;
         mph = Math.Max(.1, mph);
-        var loadMultiplier = player.GodMode ? 1 : Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / 100d, .5, 1);
-        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * loadMultiplier;
+        var loadMultiplier = player.GodMode ? 1 : Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / (MaximumBackpackWeightPounds * 2), .5, 1);
+        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * EnergyDrinkSpeedMultiplier(player) * loadMultiplier;
     }
+
+    private static bool EnergyDrinkBoostActive(PlayerState player, DateTimeOffset? at = null) => player.EnergyDrinkBoostUntilUtc is { } boostUntil && boostUntil > (at ?? DateTimeOffset.UtcNow);
+    private static bool EnergyDrinkCrashActive(PlayerState player, DateTimeOffset? at = null)
+    {
+        var now = at ?? DateTimeOffset.UtcNow;
+        return player.EnergyDrinkBoostUntilUtc is { } boostUntil && boostUntil <= now && player.EnergyDrinkCrashUntilUtc is { } crashUntil && crashUntil > now;
+    }
+    private static double EnergyDrinkSpeedMultiplier(PlayerState player) => EnergyDrinkBoostActive(player) ? 2 : EnergyDrinkCrashActive(player) ? .2 : 1;
+    private static double EnergyDrinkCarryingCapacity(PlayerState player) => MaximumBackpackWeightPounds * (EnergyDrinkBoostActive(player) ? 2 : EnergyDrinkCrashActive(player) ? .2 : 1);
+    private double PlayerCarryingCapacity(string playerId) => _players.TryGetValue(playerId, out var player) ? EnergyDrinkCarryingCapacity(player) : MaximumBackpackWeightPounds;
 
     private static IEnumerable<string> ActiveMovementItems(PlayerState player, bool? magicHikingShoes = null, bool? magicRunningShoes = null)
     {
@@ -1428,7 +1445,7 @@ public sealed partial class RealityWorld
         var items = GetInventoryItems(playerId);
         var carried = items.Where(item => item.CarriedInBackpack).ToArray();
         return new InventoryState(playerId, items,
-            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), MaximumBackpackWeightPounds,
+            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), PlayerCarryingCapacity(playerId),
             carried.Count(item => item.Category == InventoryCategory.Weapon), MaximumWeaponSlots,
             carried.Count(item => item.Category == InventoryCategory.Quest), MaximumQuestSlots,
             carried.Count(item => item.Category == InventoryCategory.Other && !item.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)), MaximumOtherSlots);
@@ -1446,8 +1463,12 @@ public sealed partial class RealityWorld
         if (weaponSlots > MaximumWeaponSlots) message = $"Your backpack only has {MaximumWeaponSlots} weapon slots (your fist is always free).";
         else if (questSlots > MaximumQuestSlots) message = $"Your backpack only has {MaximumQuestSlots} quest-item slots.";
         else if (otherSlots > MaximumOtherSlots) message = $"Your backpack only has {MaximumOtherSlots} other-item slots.";
-        else if (weight > MaximumBackpackWeightPounds + .0001) message = $"That would make your backpack weigh {weight:0.##} lb; the absolute maximum is {MaximumBackpackWeightPounds:0} lb.";
-        else { message = string.Empty; return true; }
+        else
+        {
+            var capacity = PlayerCarryingCapacity(playerId);
+            if (weight > capacity + .0001) message = $"That would make your backpack weigh {weight:0.##} lb; your maximum current carrying capacity is {capacity:0} lb.";
+            else { message = string.Empty; return true; }
+        }
         return false;
     }
 
