@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=30">
+  <link rel="stylesheet" href="styles.css?v=32">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -12,7 +12,7 @@
   <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
   <aside id="rightRail" class="right-rail" aria-label="Game panels">
   <div class="right-rail-heading"><div><strong>AlternativeReality</strong><span>Control rail</span></div><button id="rightRailToggle" type="button" aria-label="Collapse control rail" aria-expanded="true">›</button></div>
-  <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link">
+  <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link" hidden>
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
     <h1>AlternativeReality</h1>
     <div id="realityName" class="reality-name">Connecting reality…</div>
@@ -51,12 +51,9 @@
       <button type="button" data-mode="raft">Raft</button>
     </div>
   </section>
-  <section id="helpPanel" class="panel help-panel" data-collapsible="Controls">
-    <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
-    <div><kbd>Left click</kbd> travel / use weapon</div>
-    <div><kbd>Left / right drag</kbd> pan</div>
-    <div><kbd>Right click</kbd> / <kbd>double-click</kbd> actions</div>
-    <div><kbd>Wheel</kbd> zoom</div>
+  <section id="helpPanel" class="panel help-panel" data-collapsible="Help and reality">
+    <strong>Help &amp; reality</strong>
+    <button id="openHelpWindowButton" type="button">Open window</button>
   </section>
   <section id="godPanel" class="panel god-panel" data-collapsible="Game controls">
     <button id="toggleChatButton" type="button">Show chat</button>
@@ -193,6 +190,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=57"></script>
+  <script src="app.js?v=59"></script>
 </body>
 </html>

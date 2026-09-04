@@ -3,6 +3,14 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #13231d; }
 .server-config-popup-body { min-width: 720px; min-height: 100%; padding: 14px; overflow: auto; background: #13231d; }
 .server-config-popup-body .server-config-window { position:relative; inset:auto; width:min(1180px,calc(100vw - 28px)); max-height:none; margin:0 auto; transform:none; }
+.help-popup-body { min-height:100%; padding:18px; overflow:auto; background:radial-gradient(circle at top,#294b34,#101e18 70%); }
+.help-popup-host { width:min(560px,100%); margin:0 auto; display:grid; gap:14px; }
+.help-popup-body .title-panel,.help-popup-body .help-popup-controls { position:relative; inset:auto; width:100%; min-width:0; margin:0; transform:none; padding:16px 18px; }
+.help-popup-header { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.help-popup-header h2 { margin:0; color:#fff3b0; }
+.help-control-list { display:grid; gap:9px; margin-top:14px; }
+.help-control-list div { display:grid; grid-template-columns:180px 1fr; gap:14px; padding:9px 10px; background:rgba(5,13,9,.42); border-left:3px solid #b99345; }
+.help-control-list kbd { font-size:12px; }
 #world { width: 100%; height: 100%; display: block; image-rendering: pixelated; cursor: crosshair; }
 .panel { position: fixed; z-index: 2; color: #fff8d8; background: linear-gradient(145deg, rgba(38,53,42,.94), rgba(18,29,24,.94)); border: 3px solid #d9b55c; box-shadow: 0 0 0 2px #533c1e, 4px 5px 0 rgba(0,0,0,.35); border-radius: 4px; text-shadow: 1px 1px #17110a; }
 .collapsible-panel:not(.panel-collapsed) { padding-right: 38px; }
@@ -226,7 +234,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .right-rail .title-panel { min-width: 0; padding: 10px 12px; }
 .right-rail .telemetry-panel { padding: 10px 12px; }
 .right-rail .mode-buttons { flex-wrap: wrap; }
-.right-rail .help-panel { display: grid; }
+.right-rail .help-panel { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .right-rail .god-panel { display: flex; flex-wrap: wrap; align-items: center; }
 .right-rail .inventory-panel { overflow: hidden; padding: 9px 10px; }
 .right-rail .equipment-layout { grid-template-columns: 1fr; }
