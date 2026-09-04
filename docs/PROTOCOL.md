@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v29
+# Renderer-neutral protocol v30
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -12,7 +12,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `setEquipment` | logical hat, shirt, pants, shoes, offhand, or weapon slot and item; null to unequip | validates ownership and slot compatibility; offhand light equipment is mutually exclusive, and the weapon slot supports a true empty state while fists remain permanently available |
 | `updateItemConfiguration` | item ID, damage, range, additive speed/visibility modifiers, minimum price, maximum price | requires authoritative God Mode, validates safe bounds, persists server-wide rules, and invalidates existing merchant quotes |
 | `configureInventoryItem` | item ID and `take` or `give` action | requires authoritative God Mode; `take` adds one to account-wide Home inventory, while `give` removes one from Home first and falls back to the backpack |
-| `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist cannot be dropped |
+| `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist and personal flags cannot be dropped |
 | `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
 | `updateServerEvents` | simulated clock offset, weather mode/temperature, light/merchant/door refreshes, and UFO/T-Rex/bear intervals/durations | requires authoritative God Mode, validates bounded values, persists the reality-wide schedule, and never changes the host operating-system clock |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
@@ -37,6 +37,7 @@ Authenticated HTTP `POST /api/world/prefetch` accepts a target block and movemen
 | `teleport` | destination `x`, `y`; legacy `godMode` acknowledgement | checks only authoritative God Mode, generates an unloaded destination first, then resolves it to a safe canonical point |
 | `say` | `message` text | derives username/player ID and UTC time on the server; rejects blank, rapid, or over-180-character messages |
 | `placeObject` | reserved logical `objectType`, `x`, `y`, `rotationDegrees` | currently rejected unless an administrator enables object placement |
+| `placeFlag` | `x`, `y`, and a player-authored `label` | consumes one of the character's five personal flags and creates a persistent logical flag on the main map |
 | `removeObject` | reserved `entityId` | currently rejected unless an administrator enables object placement |
 | `requestChunk` | chunk `x`, `y` | prototype returns the area snapshot; chunk filtering is next |
 | `ping` | none | no state mutation |
@@ -48,6 +49,8 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | Type | Purpose |
 |---|---|
 | `welcome` | protocol version, assigned player, complete initial snapshot |
+| `flagPlaced` | placed logical flag plus refreshed private inventory state |
+| `objectCreated` / `objectRemoved` | shared reality-delta visibility changes, including showing an owner's flags on join and hiding them on disconnect |
 | `chunkSnapshot` | authoritative base and reality state for requested scope |
 | `playerJoined`, `playerMoved`, `playerUpdated`, `playerLeft` | multiplayer presence, health, and travel mode |
 | `actorsMoved` | server-simulated wildlife and NPC position/state changes |
@@ -63,7 +66,6 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | `worldRebuilt` | regenerated base snapshot and safe positions after a God Mode refresh |
 | `playerTeleported` | authoritative instant relocation visible to every connected client |
 | `chatSaid` | server-authored player ID, username, text, and timestamp for ephemeral speech and local history |
-| `objectCreated`, `objectRemoved` | accepted reality delta events |
 | `error` | rejected command with safe message |
 | `pong` | liveness response |
 

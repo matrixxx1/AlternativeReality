@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 29;
+    public const int Version = 30;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -59,6 +59,7 @@ public sealed record UpdateServerEventsRequest(
     int BearIntervalHours, int BearDurationMinutes,
     int ServerTimeOffsetMinutes = 0, string WeatherMode = "live", double? TemperatureCelsius = null);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
+public sealed record PlaceFlagRequest(double X, double Y, string Label);
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);
 public sealed record RequestAreaRequest(double X,double Y);

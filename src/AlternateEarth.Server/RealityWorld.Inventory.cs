@@ -51,7 +51,7 @@ public sealed partial class RealityWorld
     {
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
-        if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("That item cannot be transferred.");
+        if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("That item cannot be transferred.");
         if (!InventoryDefinition(itemType).CarriedInBackpack) throw new InvalidOperationException("Parked vehicles are kept outside the backpack and storage chest.");
         var access = ValidateHomeStorageAccess(playerId, request.ChestId);
         await EnsureHomeItemStorageAsync(access.AccountId, cancellationToken);
@@ -153,7 +153,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var currentPlayer)) throw new InvalidOperationException("Unknown player.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
-        if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase))
+        if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("That item cannot be dropped.");
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
         if (!_itemConfigurations.ContainsKey(itemType)) throw new InvalidOperationException("Unknown inventory item.");

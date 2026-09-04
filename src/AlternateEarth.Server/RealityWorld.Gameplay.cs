@@ -62,6 +62,7 @@ public sealed partial class RealityWorld
         new("water","Water","One half-liter bottle; restores water and 2 hearts",0,0,50,200,WeightPounds:1.1),
         new("food","Food","Packed meal; restores stamina and 2 hearts",0,0,200,500,WeightPounds:.75),
         new("areaMap","Map of this block","Permanently reveals the current geographic block",0,0,100,100_000,true,true,WeightPounds:.05),
+        new("personalFlag","Personal flag","Place and name one of up to five shared map flags",0,0,0,0,false,false,WeightPounds:.01),
         new("pencil","Pencil","A useful everyday writing tool",0,0,25,150,WeightPounds:.02),
         new("pen","Pen","A dependable ink pen",0,0,50,300,WeightPounds:.03),
         new("marker","Marker","A permanent marker",0,0,100,500,WeightPounds:.05),
@@ -751,7 +752,7 @@ public sealed partial class RealityWorld
         if (requested.Length == 0 && sales.Length == 0) throw new InvalidOperationException("Select at least one item to buy or sell.");
         if (requested.Length > 0 && sales.Length > 0) throw new InvalidOperationException("Complete purchases and sales as separate transactions.");
         long total = 0; foreach (var line in requested) { var offer = quote.Offers.FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("Item not offered."); if (line.Quantity > offer.Quantity) throw new InvalidOperationException("Not enough stock."); checked { total += offer.UnitPriceCents * line.Quantity; } }
-        long proceeds = 0; foreach (var line in sales) { var offer = (quote.BuyOffers ?? Array.Empty<MerchantOffer>()).FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("The merchant will not buy that item."); if (line.Quantity > offer.Quantity || InventoryQuantity(playerId, line.ItemType) < line.Quantity) throw new InvalidOperationException("You do not have that many to sell."); checked { proceeds += offer.UnitPriceCents * line.Quantity; } }
+        long proceeds = 0; foreach (var line in sales) { if (line.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Personal flags cannot be sold."); var offer = (quote.BuyOffers ?? Array.Empty<MerchantOffer>()).FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("The merchant will not buy that item."); if (line.Quantity > offer.Quantity || InventoryQuantity(playerId, line.ItemType) < line.Quantity) throw new InvalidOperationException("You do not have that many to sell."); checked { proceeds += offer.UnitPriceCents * line.Quantity; } }
         if (!player.GodMode && total > player.WalletCents) throw new InvalidOperationException("You cannot spend more than you have.");
         var backpackPurchases = requested.Where(line => !line.ItemType.Equals("areaMap", StringComparison.OrdinalIgnoreCase) && !FurnitureCatalog.TryParse(line.ItemType, out _, out _, out _))
             .Select(line => InventoryStack(line.ItemType, line.Quantity)).ToArray();
@@ -791,7 +792,7 @@ public sealed partial class RealityWorld
             return offer with { UnitPriceCents = (long)Math.Clamp(Math.Round(offer.UnitPriceCents * factor), range.MinimumPriceCents, range.MaximumPriceCents) };
         }).ToArray();
         var buyOffers = GetInventoryState(playerId).Items
-            .Where(item => item.ItemType != "fist" && !item.ItemType.StartsWith("quest:", StringComparison.OrdinalIgnoreCase) && item.ItemType != "areaMap")
+            .Where(item => item.ItemType != "fist" && !item.ItemType.StartsWith("quest:", StringComparison.OrdinalIgnoreCase) && item.ItemType != "areaMap" && item.ItemType != "personalFlag")
             .Select(item =>
             {
                 var definition = InventoryDefinition(item.ItemType);
@@ -1361,7 +1362,7 @@ public sealed partial class RealityWorld
             Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), MaximumBackpackWeightPounds,
             carried.Count(item => item.Category == InventoryCategory.Weapon), MaximumWeaponSlots,
             carried.Count(item => item.Category == InventoryCategory.Quest), MaximumQuestSlots,
-            carried.Count(item => item.Category == InventoryCategory.Other), MaximumOtherSlots);
+            carried.Count(item => item.Category == InventoryCategory.Other && !item.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)), MaximumOtherSlots);
     }
 
     private bool CanAddToBackpack(string playerId, IEnumerable<ItemStack> additions, out string message)
@@ -1371,7 +1372,7 @@ public sealed partial class RealityWorld
         var items = combined.Select(pair => InventoryStack(pair.Key, pair.Value)).Where(item => item.CarriedInBackpack).ToArray();
         var weaponSlots = items.Count(item => item.Category == InventoryCategory.Weapon);
         var questSlots = items.Count(item => item.Category == InventoryCategory.Quest);
-        var otherSlots = items.Count(item => item.Category == InventoryCategory.Other);
+        var otherSlots = items.Count(item => item.Category == InventoryCategory.Other && !item.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase));
         var weight = items.Sum(item => item.UnitWeightPounds * item.Quantity);
         if (weaponSlots > MaximumWeaponSlots) message = $"Your backpack only has {MaximumWeaponSlots} weapon slots (your fist is always free).";
         else if (questSlots > MaximumQuestSlots) message = $"Your backpack only has {MaximumQuestSlots} quest-item slots.";

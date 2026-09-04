@@ -36,6 +36,8 @@ public sealed class RealitySocketHub
             _clients[characterId] = connection;
             await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateSnapshot(), privateState = _world.GetPrivateState(characterId) }, context.RequestAborted);
             await BroadcastAsync(new { type = "playerJoined", player }, characterId, context.RequestAborted);
+            foreach (var flag in _world.PersonalFlagsForOwner(characterId))
+                await BroadcastAsync(new { type = "objectCreated", entity = flag }, characterId, context.RequestAborted);
             await ReceiveLoopAsync(characterId, connection, context.RequestAborted);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
@@ -44,8 +46,11 @@ public sealed class RealitySocketHub
         {
             if (_clients.TryGetValue(characterId, out var active) && ReferenceEquals(active, connection) && _clients.TryRemove(characterId, out _))
             {
+                var hiddenFlags = _world.PersonalFlagsForOwner(characterId);
                 _world.Leave(characterId);
                 await BroadcastAsync(new { type = "playerLeft", playerId = characterId }, characterId, CancellationToken.None);
+                foreach (var flag in hiddenFlags)
+                    await BroadcastAsync(new { type = "objectRemoved", entityId = flag.Id }, characterId, CancellationToken.None);
             }
         }
     }
@@ -316,6 +321,11 @@ public sealed class RealitySocketHub
                     case "placeObject":
                         var created = await _world.PlaceObjectAsync(characterId, root.Deserialize<PlaceObjectRequest>(SharedJson.Options)!, cancellationToken);
                         await BroadcastAsync(new { type = "objectCreated", entity = created }, null, cancellationToken);
+                        break;
+                    case "placeFlag":
+                        var placedFlag = await _world.PlaceFlagAsync(characterId, root.Deserialize<PlaceFlagRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "objectCreated", entity = placedFlag }, characterId, cancellationToken);
+                        await connection.SendAsync(new { type = "flagPlaced", entity = placedFlag, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "removeObject":
                         var removedRequest = root.Deserialize<RemoveObjectRequest>(SharedJson.Options)!;

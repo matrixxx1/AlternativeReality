@@ -21,6 +21,7 @@ public sealed partial class RealityWorld
     private readonly SemaphoreSlim _areaLoadLock = new(1, 1);
     private readonly SemaphoreSlim _areaPrefetchLock = new(1, 1);
     private readonly SemaphoreSlim _basePurchaseLock = new(1, 1);
+    private readonly SemaphoreSlim _flagPlacementLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _playerSaveLocks = new();
     private readonly Random _actorRandom;
     private GeographicDataset? _geographic;
@@ -177,6 +178,7 @@ public sealed partial class RealityWorld
         _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
         var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+        await EnsurePersonalFlagAllowanceAsync(characterId, cancellationToken);
         foreach (var relationship in await _store.LoadRelationshipsAsync(Configuration.Id, characterId, cancellationToken))
             _relationships[(characterId, relationship.ActorId)] = relationship.FriendRating;
         foreach (var quest in await _store.LoadQuestsAsync(Configuration.Id, characterId, cancellationToken))
@@ -640,6 +642,7 @@ public sealed partial class RealityWorld
             foreach (var pair in _players.ToArray())
             {
                 if (_playerAccounts.TryGetValue(pair.Key, out var accountId)) await EnsureHomeAsync(pair.Key, accountId, cancellationToken);
+                await EnsurePersonalFlagAllowanceAsync(pair.Key, cancellationToken);
                 await SavePlayerAsync(ResetPlayer(pair.Value), cancellationToken);
             }
             return CreateSnapshot();
@@ -663,6 +666,65 @@ public sealed partial class RealityWorld
         return entity;
     }
 
+    public IReadOnlyList<CanonicalEntity> PersonalFlagsForOwner(string characterId) => _realityEntities.Values
+        .Where(entity => IsPersonalFlag(entity) && entity.Properties.GetValueOrDefault("owner") == characterId)
+        .OrderBy(entity => entity.Id)
+        .ToArray();
+
+    private async Task EnsurePersonalFlagAllowanceAsync(string characterId, CancellationToken cancellationToken)
+    {
+        var availableAllowance = Math.Max(0, 5 - PersonalFlagsForOwner(characterId).Count);
+        var availableInventory = InventoryQuantity(characterId, "personalFlag");
+        if (availableInventory >= availableAllowance) return;
+        AddInventory(characterId, "personalFlag", availableAllowance - availableInventory);
+        await SaveInventoryAsync(characterId, cancellationToken);
+    }
+
+    public async Task<CanonicalEntity> PlaceFlagAsync(string characterId, PlaceFlagRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (player.LocationId != "outdoor") throw new InvalidOperationException("Flags can only be placed on the main map.");
+        var label = new string((request.Label ?? string.Empty).Where(character => !char.IsControl(character)).ToArray()).Trim();
+        if (label.Length == 0) throw new InvalidOperationException("Enter a name for the flag.");
+        if (label.Length > 60) throw new InvalidOperationException("Flag names are limited to 60 characters.");
+        var requestedPosition = new WorldPosition(player.Position.Region, request.X, request.Y, player.Position.Z);
+        if (player.Position.Distance2D(requestedPosition) > 6) throw new InvalidOperationException("Move within six meters to place a flag.");
+        if (!(_loadedBounds ?? Configuration.Area.Bounds).Contains(request.X, request.Y)) throw new InvalidOperationException("That location has not loaded yet.");
+        var snapped = requestedPosition with { X = Math.Round(request.X * 2) / 2d, Y = Math.Round(request.Y * 2) / 2d };
+        if (Navigation.IsBlocked(snapped.X, snapped.Y) || Navigation.TerrainAt(snapped.X, snapped.Y) == TerrainType.DeepWater)
+            throw new InvalidOperationException("Choose an open location that is not deep water.");
+
+        await _flagPlacementLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (PersonalFlagsForOwner(characterId).Count >= 5) throw new InvalidOperationException("You can place no more than five flags.");
+            if (!RemoveInventory(characterId, "personalFlag", 1)) throw new InvalidOperationException("You do not have a personal flag available.");
+            var position = snapped with { Z = Navigation.ElevationAt(snapped.X, snapped.Y) };
+            var entity = new CanonicalEntity($"flag:{Guid.NewGuid():N}", EntityKind.PlayerStructure, position, Array.Empty<GeometryPoint>(),
+                new Dictionary<string, string>
+                {
+                    ["objectType"] = "personalFlag",
+                    ["owner"] = characterId,
+                    ["ownerName"] = player.Name,
+                    ["label"] = label
+                }, IsBaseEntity: false);
+            try
+            {
+                await SaveInventoryAsync(characterId, cancellationToken);
+                await _store.SaveEntityAsync(Configuration.Id, entity, cancellationToken);
+            }
+            catch
+            {
+                AddInventory(characterId, "personalFlag", 1);
+                await SaveInventoryAsync(characterId, CancellationToken.None);
+                throw;
+            }
+            _realityEntities[entity.Id] = entity;
+            return entity;
+        }
+        finally { _flagPlacementLock.Release(); }
+    }
+
     public async Task<CanonicalEntity> RemoveObjectAsync(string characterId, string entityId, CancellationToken cancellationToken = default)
     {
         if (!Configuration.ObjectPlacementEnabled) throw new InvalidOperationException("Object modification is disabled in this exploration-only reality.");
@@ -678,12 +740,19 @@ public sealed partial class RealityWorld
     public WorldSnapshot CreateSnapshot()
     {
         var lockSchedule = GetDoorLockSchedule();
+        var activePlayerIds = _players.Keys.ToHashSet(StringComparer.Ordinal);
+        var visibleRealityEntities = _realityEntities.Values
+            .Where(entity => !IsPersonalFlag(entity) || activePlayerIds.Contains(entity.Properties.GetValueOrDefault("owner") ?? string.Empty))
+            .OrderBy(entity => entity.Id).ToArray();
         return new(Configuration, _loadedBounds ?? Configuration.Area.Bounds,
-            _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
+            _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), visibleRealityEntities,
             _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
             Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray(),
             lockSchedule.Doors, lockSchedule.EndsAtUtc);
     }
+
+    private static bool IsPersonalFlag(CanonicalEntity entity) => entity.Kind == EntityKind.PlayerStructure &&
+        string.Equals(entity.Properties.GetValueOrDefault("objectType"), "personalFlag", StringComparison.OrdinalIgnoreCase);
 
     private void ApplyGeneratedWorld(GeographicDataset generated)
     {

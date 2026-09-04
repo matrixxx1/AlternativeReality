@@ -509,13 +509,13 @@ public sealed class RealityWorldTests : IAsyncLifetime
 
         var inventory = world.GetPrivateState(loaded.Id).Inventory;
         Assert.Equal(2, inventory.WeaponSlotsUsed);
-        Assert.Equal(26.2, inventory.WeightPounds, 3);
+        Assert.Equal(26.25, inventory.WeightPounds, 3);
         var loadedSpeed = world.ConfiguredSpeedMetersPerSecond(loaded, TerrainType.Pavement);
         var emptySpeed = world.ConfiguredSpeedMetersPerSecond(empty, TerrainType.Pavement);
         Assert.Equal(.738, loadedSpeed / emptySpeed, 3);
 
         var god = await world.SetGodModeAsync(loaded.Id, true);
-        Assert.Equal(5, world.ConfiguredSpeedMetersPerSecond(god, TerrainType.Pavement) / emptySpeed, 3);
+        Assert.Equal(5.003, world.ConfiguredSpeedMetersPerSecond(god, TerrainType.Pavement) / emptySpeed, 3);
     }
 
     [Fact]
@@ -534,7 +534,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
 
         var inventory = world.GetPrivateState(player.Id).Inventory;
 
-        Assert.Equal(1, inventory.WeightPounds, 3);
+        Assert.Equal(1.05, inventory.WeightPounds, 3);
         Assert.Equal(0, inventory.Items.Single(item => item.ItemType == "bike").UnitWeightPounds);
         Assert.Equal(0, inventory.Items.Single(item => item.ItemType == "inflatableRaft").UnitWeightPounds);
         Assert.Equal(0, inventory.Items.Single(item => item.ItemType == "motorcycle").UnitWeightPounds);
@@ -567,6 +567,39 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var persisted = await store.LoadInventoryAsync(player.Id);
         Assert.Equal(1, persisted.Items.Single(item => item.ItemType == "knife").Quantity);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.DropInventoryItemAsync(player.Id, new DropItemRequest("fist")));
+    }
+
+    [Fact]
+    public async Task PersonalFlagsAreLimitedPersistentAndVisibleOnlyWhileOwnerIsConnected()
+    {
+        var configuration = new RealityConfiguration("personal-flags", "Personal Flags", 226, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "personal-flags.db"));
+        await store.InitializeAsync(configuration);
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("flag-owner", "Flag Owner");
+        var initialFlags = world.GetPrivateState(player.Id).Inventory.Items.Single(item => item.ItemType == "personalFlag");
+        Assert.Equal(5, initialFlags.Quantity);
+        Assert.Equal(.01, initialFlags.UnitWeightPounds, 3);
+        Assert.Equal(.05, world.GetPrivateState(player.Id).Inventory.WeightPounds, 3);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.DropInventoryItemAsync(player.Id, new DropItemRequest("personalFlag")));
+
+        for (var index = 1; index <= 5; index++)
+            await world.PlaceFlagAsync(player.Id, new PlaceFlagRequest(player.Position.X, player.Position.Y, $"Flag {index}"));
+
+        Assert.Equal(5, world.PersonalFlagsForOwner(player.Id).Count);
+        Assert.Equal(5, world.CreateSnapshot().RealityEntities.Count(entity => entity.Properties.GetValueOrDefault("objectType") == "personalFlag"));
+        Assert.DoesNotContain(world.GetPrivateState(player.Id).Inventory.Items, item => item.ItemType == "personalFlag");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.PlaceFlagAsync(player.Id, new PlaceFlagRequest(player.Position.X, player.Position.Y, "Sixth")));
+
+        world.Leave(player.Id);
+        Assert.DoesNotContain(world.CreateSnapshot().RealityEntities, entity => entity.Properties.GetValueOrDefault("objectType") == "personalFlag");
+        var reloadedWorld = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await reloadedWorld.InitializeAsync();
+        Assert.DoesNotContain(reloadedWorld.CreateSnapshot().RealityEntities, entity => entity.Properties.GetValueOrDefault("objectType") == "personalFlag");
+        await reloadedWorld.JoinAsync(player.Id, "Flag Owner");
+        Assert.Equal(5, reloadedWorld.CreateSnapshot().RealityEntities.Count(entity => entity.Properties.GetValueOrDefault("objectType") == "personalFlag"));
+        Assert.DoesNotContain(reloadedWorld.GetPrivateState(player.Id).Inventory.Items, item => item.ItemType == "personalFlag");
     }
 
     [Fact]
@@ -712,9 +745,9 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await world.UpdateItemConfigurationAsync(player.Id, new UpdateItemConfigurationRequest("magicHikingShoes", 0, 0, 10_000, 40_000, 4, 25));
 
         var synthetic = player with { GodMode = false, Water = 10, TravelMode = TravelMode.Run, MagicHikingShoesOn = true, Stamina = 5, MaximumStamina = 10 };
-        Assert.Equal(8, world.ConfiguredSpeedMetersPerSecond(synthetic, TerrainType.Grass) * 2.236936, 3);
+        Assert.Equal(7.996, world.ConfiguredSpeedMetersPerSecond(synthetic, TerrainType.Grass) * 2.236936, 3);
         var stacked = synthetic with { TravelMode = TravelMode.Bike };
-        Assert.Equal(17.5, world.ConfiguredSpeedMetersPerSecond(stacked, TerrainType.Grass) * 2.236936, 3);
+        Assert.Equal(17.491, world.ConfiguredSpeedMetersPerSecond(stacked, TerrainType.Grass) * 2.236936, 3);
         Assert.Equal(120, movement.BaseVisibilityMeters);
         var persisted = await store.LoadMovementConfigurationAsync(configuration.Id);
         Assert.NotNull(persisted);

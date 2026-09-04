@@ -159,7 +159,7 @@ public sealed class WorldNavigation
                 case EntityKind.Vehicle:
                     if (InsideVehicle(entity, x, y, radius)) return true;
                     break;
-                case EntityKind.PlayerStructure:
+                case EntityKind.PlayerStructure when !string.Equals(entity.Properties.GetValueOrDefault("objectType"), "personalFlag", StringComparison.OrdinalIgnoreCase):
                     if (Distance(x, y, entity.Position.X, entity.Position.Y) <= radius + 1) return true;
                     break;
             }

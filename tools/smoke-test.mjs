@@ -12,6 +12,8 @@ if (!clientHtml.includes('Inventory</strong>') || !clientScript.includes("config
   throw new Error('Server-config inventory controls are missing.');
 if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('Drop 1'))
   throw new Error('Inventory drop controls are missing.');
+if (!clientHtml.includes('miniMap') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'"))
+  throw new Error('Personal flag or mini-map client controls are missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -39,7 +41,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 25) throw new Error(`Expected protocol 25, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 30) throw new Error(`Expected protocol 30, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
@@ -50,6 +52,15 @@ try {
   const [seenByA, seenByB] = await Promise.all([first.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId), second.waitFor(message => message.type === 'playerMoved' && message.player.id === welcomeA.playerId)]);
   if (seenByA.player.position.x !== seenByB.player.position.x || seenByA.player.position.x <= playerA.position.x) throw new Error('Authoritative movement did not synchronize.');
   if (seenByA.player.stamina >= playerA.stamina) throw new Error('Running did not drain stamina.');
+  const personalFlags=welcomeA.privateState?.inventory?.items?.find(item=>item.itemType==='personalFlag');
+  if(personalFlags?.quantity!==5||Math.abs(personalFlags.unitWeightPounds-.01)>.0001)throw new Error('Player did not receive five 0.01 lb personal flags.');
+  const flagLabel=`${first.username} marker`,flagStartA=first.messageCount()-1,flagStartB=second.messageCount()-1;
+  first.socket.send(JSON.stringify({type:'placeFlag',x:seenByA.player.position.x,y:seenByA.player.position.y,label:flagLabel}));
+  const [ownFlag,sharedFlag]=await Promise.all([
+    first.waitFor(message=>message.type==='flagPlaced'&&message.entity?.properties?.label===flagLabel,10000,flagStartA),
+    second.waitFor(message=>message.type==='objectCreated'&&message.entity?.properties?.label===flagLabel,10000,flagStartB)
+  ]);
+  if(ownFlag.entity.properties.ownerName!==first.username||sharedFlag.entity.properties.owner!==welcomeA.playerId)throw new Error('Personal flag ownership was not synchronized.');
   let path = null;
   const playerArea=welcomeA.snapshot.loadedAreas.find(area=>playerA.position.x>=area.minimumX&&playerA.position.x<=area.maximumX&&playerA.position.y>=area.minimumY&&playerA.position.y<=area.maximumY);
   if(!playerArea)throw new Error(`The starting player (${playerA.position.x}, ${playerA.position.y}) was not inside a loaded area: ${JSON.stringify(welcomeA.snapshot.loadedAreas)}.`);
@@ -152,5 +163,6 @@ try {
   if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== first.username) throw new Error('Chat did not synchronize.');
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
-  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+  const flagRemovedStart=second.messageCount()-1;first.socket.close();await second.waitFor(message=>message.type==='objectRemoved'&&message.entityId===ownFlag.entity.id,10000,flagRemovedStart);
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
 } finally { first.socket.close(); second.socket.close(); }

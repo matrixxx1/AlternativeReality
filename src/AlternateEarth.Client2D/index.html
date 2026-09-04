@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=40">
+  <link rel="stylesheet" href="styles.css?v=41">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -42,6 +42,11 @@
       <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
       <button id="serverConfigButton" type="button" hidden>Server config</button>
     </div>
+  </section>
+  <section id="miniMapPanel" class="panel minimap-panel" data-collapsible="Mini map">
+    <strong>Mini map</strong>
+    <canvas id="miniMap" width="372" height="220" aria-label="Nearby stores, players, personal flags, and Home"></canvas>
+    <div class="minimap-legend"><span class="store">◆ Store</span><span class="player">● Player</span><span class="flag">⚑ Your flag</span><span class="home">⌂ Home</span></div>
   </section>
   <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
     <strong>Performance</strong>
@@ -130,6 +135,7 @@
     <button id="goDownstairsButton" type="button" hidden>Go downstairs</button>
     <button id="leaveDungeonButton" type="button" hidden>Leave dungeon</button>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
+    <button id="placeFlagButton" type="button" hidden>Place flag</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
     <button id="questButton" type="button" hidden>Quest</button>
     <button id="capturePetButton" type="button" hidden>Capture pet</button>
@@ -232,6 +238,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=70"></script>
+  <script src="app.js?v=71"></script>
 </body>
 </html>

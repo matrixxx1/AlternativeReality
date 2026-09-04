@@ -124,6 +124,11 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .safe-exit-button[hidden] { display:none; }
 @keyframes task-spin { to { transform:rotate(360deg); } }
 .compass-row strong { color:#fff3a4; }
+.minimap-panel { padding:10px 12px; }
+.minimap-panel > strong { display:block; margin-bottom:7px; color:#f0d475; }
+.minimap-panel canvas { display:block; width:100%; height:auto; max-height:220px; background:#07120f; border:2px solid #6e5730; image-rendering:auto; }
+.minimap-legend { display:flex; flex-wrap:wrap; gap:5px 12px; margin-top:7px; color:#bfcabd; font:700 9px monospace; }
+.minimap-legend .store { color:#f2ce65; }.minimap-legend .player { color:#65d9ef; }.minimap-legend .flag { color:#ef6258; }.minimap-legend .home { color:#8ff09f; }
 .account-setup { position:fixed; inset:0; z-index:20; display:grid; place-items:center; background:radial-gradient(circle,rgba(40,73,48,.85),rgba(7,15,11,.98)); }
 .account-setup[hidden] { display:none; }
 .account-card { position:relative; width:min(430px,calc(100% - 30px)); padding:22px; }
