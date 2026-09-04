@@ -1,11 +1,14 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AlternateEarth.Shared;
 
 namespace AlternateEarth.Geo;
 
 public sealed class DeterministicWorldGenerator
 {
+    private const int GeneratedWorldCacheVersion = 1;
     private static readonly string[] HumanNames =
     [
         "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
@@ -20,25 +23,93 @@ public sealed class DeterministicWorldGenerator
         "Chairman Meow", "Purrlock Holmes", "Catrick Swayze", "Kitty Smalls", "Fuzz Aldrin", "Tuna Turner", "Cat Benatar", "Meowly Cyrus"
     ];
     private readonly IGeographicProvider _geographicProvider;
+    private readonly string? _generatedCacheDirectory;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _cacheLocks = new(StringComparer.OrdinalIgnoreCase);
 
-    public DeterministicWorldGenerator(IGeographicProvider geographicProvider) => _geographicProvider = geographicProvider;
+    public DeterministicWorldGenerator(IGeographicProvider geographicProvider, string? generatedCacheDirectory = null)
+    {
+        _geographicProvider = geographicProvider;
+        _generatedCacheDirectory = generatedCacheDirectory;
+        if (generatedCacheDirectory is not null) Directory.CreateDirectory(generatedCacheDirectory);
+    }
 
     public async Task<GeographicDataset> GenerateAsync(
         RealityConfiguration reality,
         CancellationToken cancellationToken = default)
     {
-        var geographic = await _geographicProvider.GetAreaAsync(reality.Area, cancellationToken);
-        var sidewalks = GenerateSidewalks(geographic.Features);
-        var withSidewalks = geographic.Features.Concat(sidewalks).ToArray();
-        var doors = GenerateDoors(withSidewalks);
-        var propertyFences = GeneratePropertyFences(withSidewalks);
-        var trees = GenerateResourceNodes(reality, 220, withSidewalks);
-        var bushes = GenerateBushes(reality, 360, withSidewalks);
-        var vehicles = GenerateVehicles(reality, withSidewalks, 20);
-        var streetLights = GenerateStreetLights(reality, withSidewalks);
-        var obstacles = withSidewalks.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
-        var actors = GenerateActors(reality, obstacles).Concat(GeneratePoiMerchants(reality, withSidewalks)).ToArray();
-        return geographic with { Features = withSidewalks.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray() };
+        var cachePath = GeneratedCachePath(reality);
+        SemaphoreSlim? cacheLock = null;
+        if (cachePath is not null)
+        {
+            cacheLock = _cacheLocks.GetOrAdd(cachePath, _ => new SemaphoreSlim(1, 1));
+            await cacheLock.WaitAsync(cancellationToken);
+        }
+        try
+        {
+            if (cachePath is not null && File.Exists(cachePath))
+            {
+                try
+                {
+                    var cachedJson = await File.ReadAllTextAsync(cachePath, cancellationToken);
+                    var cached = JsonSerializer.Deserialize<GeographicDataset>(cachedJson, SharedJson.Options);
+                    if (cached is not null) return cached;
+                }
+                catch (JsonException)
+                {
+                    // A partial/corrupt generated file is disposable and will be recreated below.
+                }
+            }
+
+            var geographic = await _geographicProvider.GetAreaAsync(reality.Area, cancellationToken);
+            var sidewalks = GenerateSidewalks(geographic.Features);
+            var withSidewalks = geographic.Features.Concat(sidewalks).ToArray();
+            var doors = GenerateDoors(withSidewalks);
+            var propertyFences = GeneratePropertyFences(withSidewalks);
+            var trees = GenerateResourceNodes(reality, 220, withSidewalks);
+            var bushes = GenerateBushes(reality, 360, withSidewalks);
+            var vehicles = GenerateVehicles(reality, withSidewalks, 20);
+            var streetLights = GenerateStreetLights(reality, withSidewalks);
+            var obstacles = withSidewalks.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
+            var actors = GenerateActors(reality, obstacles).Concat(GeneratePoiMerchants(reality, withSidewalks)).ToArray();
+            var generated = geographic with
+            {
+                Provider = $"Generated canonical world ({geographic.Provider})",
+                Features = withSidewalks.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray(),
+                CachedAtUtc = DateTimeOffset.UtcNow
+            };
+            if (cachePath is not null)
+            {
+                var temporaryPath = $"{cachePath}.{Guid.NewGuid():N}.tmp";
+                try
+                {
+                    await File.WriteAllTextAsync(temporaryPath, JsonSerializer.Serialize(generated, SharedJson.Options), cancellationToken);
+                    File.Move(temporaryPath, cachePath, true);
+                }
+                finally
+                {
+                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                }
+            }
+            return generated;
+        }
+        finally
+        {
+            cacheLock?.Release();
+        }
+    }
+
+    public bool IsGeneratedWorldCached(RealityConfiguration reality)
+    {
+        var path = GeneratedCachePath(reality);
+        return path is not null && File.Exists(path);
+    }
+
+    private string? GeneratedCachePath(RealityConfiguration reality)
+    {
+        if (_generatedCacheDirectory is null) return null;
+        var identity = FormattableString.Invariant($"v{GeneratedWorldCacheVersion}:{reality.Id}:{reality.Seed}:{reality.Area.Region.LatitudeBand}:{reality.Area.Region.LongitudeBand}:{reality.Area.Center.Latitude:F6}:{reality.Area.Center.Longitude:F6}:{reality.Area.SizeMeters}");
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..20];
+        return Path.Combine(_generatedCacheDirectory, $"world-{key}.json");
     }
 
     public static IReadOnlyList<CanonicalEntity> GeneratePropertyFences(IReadOnlyList<CanonicalEntity> features)

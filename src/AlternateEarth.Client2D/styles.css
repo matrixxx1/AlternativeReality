@@ -31,6 +31,14 @@ h1 { margin: 3px 0 4px; font-size: 20px; }
 .telemetry-panel span { color: #c8c6a8; }
 .telemetry-panel strong { text-align: right; }
 .telemetry-panel .gps-row { display: block; padding: 5px 0; }
+.performance-panel { padding:10px 12px; font-size:11px; }
+.performance-panel > strong { display:block; margin-bottom:5px; color:#f1d574; text-transform:uppercase; letter-spacing:.05em; }
+.performance-panel > div { display:flex; justify-content:space-between; gap:10px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.08); }
+.performance-panel span { color:#c8c6a8; }
+.performance-panel strong { max-width:68%; text-align:right; overflow-wrap:anywhere; }
+.performance-good { color:#9de29d; }
+.performance-warn { color:#f0d16c; }
+.performance-bad { color:#ff8d7e; }
 .gps-row strong { display: block; color: #fff4a8; font: 700 14px/1.35 monospace; text-align: left; }
 .hearts strong { color: #ff5b58; letter-spacing: 1px; }
 .stamina strong { color: #69d9e8; letter-spacing: 1px; }
@@ -213,6 +221,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .right-rail > .panel-collapsed { align-self: flex-end; }
 .right-rail .title-panel,
 .right-rail .telemetry-panel,
+.right-rail .performance-panel,
 .right-rail .travel-panel,
 .right-rail .god-panel,
 .right-rail .inventory-panel,
@@ -227,6 +236,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .right-rail .server-config-window { left:auto; right:auto; top:auto; bottom:auto; }
 .right-rail .title-panel { min-width: 0; padding: 10px 12px; }
 .right-rail .telemetry-panel { padding: 10px 12px; }
+.right-rail .performance-panel { padding: 10px 12px; }
 .right-rail .mode-buttons { flex-wrap: wrap; }
 .right-rail .god-panel { display: flex; flex-wrap: wrap; align-items: center; }
 .right-rail .inventory-panel { overflow: hidden; padding: 9px 10px; }

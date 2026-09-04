@@ -219,6 +219,30 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PrefetchPreparesDirectionalNeighborsWithoutActivatingThem()
+    {
+        var configuration = new RealityConfiguration("prefetch-cells", "Prefetch Cells", 38, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "prefetch-cells.db"));
+        await store.InitializeAsync(configuration);
+        var provider = new CountingGeographicProvider();
+        var cacheDirectory = Path.Combine(_directory, "prepared-worlds");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(provider, cacheDirectory), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        Assert.True(await world.LoadAreaAsync(600, 0));
+
+        var result = await world.PrefetchAreasAsync(new PrefetchAreaRequest(600, 0, 0, 0));
+
+        Assert.False(result.AlreadyRunning);
+        Assert.Equal(5, result.Prepared);
+        Assert.Equal(2, world.LoadedAreaCount);
+        Assert.Equal(7, provider.RequestCount);
+        Assert.Equal(7, Directory.GetFiles(cacheDirectory, "world-*.json").Length);
+        Assert.True(await world.LoadAreaAsync(1_100, 0));
+        Assert.Equal(7, provider.RequestCount);
+        Assert.Equal(3, world.LoadedAreaCount);
+    }
+
+    [Fact]
     public async Task GodModePurchasesBaseAtDisplayedPriceWithoutSpendingWalletFunds()
     {
         var configuration = new RealityConfiguration("base-purchase", "Base Purchase", 20, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -1015,6 +1039,18 @@ public sealed class RealityWorldTests : IAsyncLifetime
         public string Name => "test";
         public Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default) =>
             Task.FromResult(new GeographicDataset(Name, area, buildings, new[] { new ElevationSample(0, 0, 0) }, DateTimeOffset.UtcNow));
+    }
+
+    private sealed class CountingGeographicProvider : IGeographicProvider
+    {
+        public int RequestCount { get; private set; }
+        public string Name => "counting";
+        public Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
+        {
+            RequestCount++;
+            return Task.FromResult(new GeographicDataset(Name, area, Array.Empty<CanonicalEntity>(),
+                FlatElevationProvider.CreateGrid(area, 5), DateTimeOffset.UtcNow));
+        }
     }
 
     private sealed class FixedWeatherProvider(WeatherState? weather = null) : IWeatherProvider

@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 28;
+    public const int Version = 29;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -62,6 +62,7 @@ public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, d
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);
 public sealed record RequestAreaRequest(double X,double Y);
+public sealed record PrefetchAreaRequest(double X, double Y, double OriginX, double OriginY);
 
 public static class SharedJson
 {

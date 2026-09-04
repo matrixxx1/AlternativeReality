@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=38">
+  <link rel="stylesheet" href="styles.css?v=39">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -37,6 +37,17 @@
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
     <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
     <button id="centerButton" type="button">Center on player</button>
+  </section>
+  <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance">
+    <strong>Performance</strong>
+    <div><span>Activity</span><strong id="performanceActivity">Starting…</strong></div>
+    <div><span>Browser</span><strong id="performanceFps">—</strong></div>
+    <div><span>Frame work</span><strong id="performanceFrame">—</strong></div>
+    <div><span>World objects</span><strong id="performanceEntities">—</strong></div>
+    <div><span>Map blocks</span><strong id="performanceBlocks">—</strong></div>
+    <div><span>Network</span><strong id="performanceNetwork">—</strong></div>
+    <div><span>Server memory</span><strong id="performanceServer">—</strong></div>
+    <div><span>Last map load</span><strong id="performanceLoad">—</strong></div>
   </section>
   <section id="travelPanel" class="panel travel-panel" aria-label="Travel mode" data-collapsible="Travel">
     <strong>Travel mode</strong>
@@ -231,6 +242,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=68"></script>
+  <script src="app.js?v=69"></script>
 </body>
 </html>

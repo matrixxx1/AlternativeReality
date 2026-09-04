@@ -88,7 +88,7 @@ Ephemeral chat is server-authored and renderer-neutral. Player messages are vali
 
 ## Geographic abstraction
 
-`IGeographicProvider.GetAreaAsync` returns a canonical `GeographicDataset`, and `IElevationProvider` returns meter samples. The current adapters query OpenStreetMap through Overpass with endpoint failover and SRTM90m elevation through OpenTopoData. Raw and converted results are cached before play, so normal movement generates no public map API traffic.
+`IGeographicProvider.GetAreaAsync` returns a descriptive `GeographicDataset`, and `IElevationProvider` returns meter samples. The current adapters query OpenStreetMap through Overpass with endpoint failover and SRTM90m elevation through OpenTopoData. `DeterministicWorldGenerator` converts that input once and atomically stores the final canonical block. Every later activation reads the final generated block directly, so normal movement never reparses the provider dataset or generates public map API traffic.
 
 Provider data remains descriptive—road way, building polygon/address, water feature, airport, state/parcel boundary, business point, and elevation sample. `DeterministicWorldGenerator` performs the game conversion, converts supported businesses into categorized merchants, adds two-gate parcel fences, and adds seed-driven resource entities. Future providers can read regional PBF extracts, GeoPackage files, government parcel/state layers, elevation rasters, or offline packs without changing server or client code.
 
@@ -115,4 +115,4 @@ Generated resource IDs and positions are stable for the same inputs. Untouched b
 
 ## Near-term implementation order
 
-The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, authoritative collision/pathfinding, hourly weather, health, regenerating stamina and travel modes, wandering server actors, persistent characters, browser exploration, and two-client synchronization. Next: chunk-specific snapshots, authentication/admin controls, harvesting/inventory, structured building pieces, then a minimal browser WebGL 3D observer using the same protocol.
+The completed slice proves shared models, local-meter coordinates, real geographic import, deterministic terrain generation, rough elevation relief, authoritative collision/pathfinding, hourly weather, health, regenerating stamina and travel modes, wandering server actors, persistent characters, browser exploration, and two-client synchronization. Directional background preparation builds useful neighboring canonical blocks before activation, while viewport spatial indexing keeps per-frame work focused on visible entities. Next: chunk-specific network snapshots and inactive-block eviction, then a minimal browser WebGL 3D observer using the same protocol.

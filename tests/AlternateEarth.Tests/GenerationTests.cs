@@ -104,6 +104,25 @@ public sealed class GenerationTests
     }
 
     [Fact]
+    public async Task GeneratedWorldCacheAvoidsReprocessingGeographicData()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"alternative-reality-generated-{Guid.NewGuid():N}");
+        try
+        {
+            var provider = new CountingGeographicProvider();
+            var firstGenerator = new DeterministicWorldGenerator(provider, directory);
+            var first = await firstGenerator.GenerateAsync(Reality);
+            var secondGenerator = new DeterministicWorldGenerator(provider, directory);
+            var second = await secondGenerator.GenerateAsync(Reality);
+
+            Assert.Equal(1, provider.RequestCount);
+            Assert.Equal(first.Features.Select(entity => entity.Id), second.Features.Select(entity => entity.Id));
+            Assert.Single(Directory.GetFiles(directory, "world-*.json"));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task OverpassImporterIgnoresRelationNodesOutsideProjectionRegion()
     {
         const string response = """
@@ -183,5 +202,18 @@ public sealed class GenerationTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+    }
+
+    private sealed class CountingGeographicProvider : IGeographicProvider
+    {
+        public int RequestCount { get; private set; }
+        public string Name => "counting";
+
+        public Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
+        {
+            RequestCount++;
+            return Task.FromResult(new GeographicDataset(Name, area, Array.Empty<CanonicalEntity>(),
+                FlatElevationProvider.CreateGrid(area, 5), DateTimeOffset.UtcNow));
+        }
     }
 }

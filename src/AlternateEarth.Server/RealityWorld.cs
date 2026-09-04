@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using AlternateEarth.Geo;
 using AlternateEarth.Shared;
 
@@ -18,6 +19,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastChat = new();
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly SemaphoreSlim _areaLoadLock = new(1, 1);
+    private readonly SemaphoreSlim _areaPrefetchLock = new(1, 1);
     private readonly SemaphoreSlim _basePurchaseLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _playerSaveLocks = new();
     private readonly Random _actorRandom;
@@ -33,6 +35,10 @@ public sealed partial class RealityWorld
     private long? _lastEventBearCycle;
     private readonly ConcurrentDictionary<string, byte> _ufoHits = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _eventAttackCooldowns = new();
+    private volatile string _activeMapOperation = "Idle";
+    private long _lastAreaLoadMilliseconds;
+    private long _lastAreaPrefetchMilliseconds;
+    private int _preparedAreaCount;
 
     public RealityWorld(RealityConfiguration configuration, DeterministicWorldGenerator generator, IWeatherProvider weatherProvider, SqliteRealityStore store)
     {
@@ -48,6 +54,13 @@ public sealed partial class RealityWorld
     public int PlayerCount => _players.Count;
     public int BaseEntityCount => _baseEntities.Count + _actors.Count;
     public int RealityEntityCount => _realityEntities.Count;
+    public int LoadedAreaCount => _loadedAreas.Count;
+    public int ActorCount => _actors.Count;
+    public int ElevationSampleCount => _elevationSamples.Count;
+    public int PreparedAreaCount => Volatile.Read(ref _preparedAreaCount);
+    public string ActiveMapOperation => _activeMapOperation;
+    public long LastAreaLoadMilliseconds => Interlocked.Read(ref _lastAreaLoadMilliseconds);
+    public long LastAreaPrefetchMilliseconds => Interlocked.Read(ref _lastAreaPrefetchMilliseconds);
     public string GeographicProvider => _geographic?.Provider ?? "not loaded";
     public WeatherState Weather { get; private set; } = WeatherState.Unavailable;
 
@@ -765,33 +778,126 @@ public sealed partial class RealityWorld
         var key = $"{cellX}:{cellY}";
         if (_loadedAreas.ContainsKey(key)) return false;
         await _areaLoadLock.WaitAsync(cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             if (_loadedAreas.ContainsKey(key)) return false;
-            var centerPosition = new WorldPosition(Configuration.Area.Region, origin.X + cellX * size, origin.Y + cellY * size);
-            var center = new LocalTangentProjection(Configuration.Area.Region).Unproject(centerPosition);
-            if (RegionId.FromGeo(center) != Configuration.Area.Region) throw new InvalidOperationException("This prototype reached a geographic projection boundary. Cross-region Earth streaming is the next world-scale milestone.");
-            var areaConfiguration = Configuration with { Area = new GeographicArea(center, size) };
+            _activeMapOperation = $"Activating map block {key}";
+            var areaConfiguration = AreaConfiguration(cellX, cellY);
             var generated = await _generator.GenerateAsync(areaConfiguration, cancellationToken);
             ApplyGeneratedWorld(generated);
             _loadedAreas[key] = generated.Area.Bounds;
             return true;
         }
-        finally { _areaLoadLock.Release(); }
+        finally
+        {
+            stopwatch.Stop();
+            Interlocked.Exchange(ref _lastAreaLoadMilliseconds, stopwatch.ElapsedMilliseconds);
+            _activeMapOperation = "Idle";
+            _areaLoadLock.Release();
+        }
     }
 
     public Task<bool> LoadAreaAsync(double x,double y,CancellationToken cancellationToken=default)=>EnsureAreaLoadedAsync(x,y,cancellationToken);
+
+    public async Task<AreaPrefetchResult> PrefetchAreasAsync(PrefetchAreaRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!await _areaPrefetchLock.WaitAsync(0, cancellationToken))
+            return new AreaPrefetchResult(0, 0, LastAreaPrefetchMilliseconds, true);
+        var stopwatch = Stopwatch.StartNew();
+        var prepared = 0;
+        var alreadyPrepared = 0;
+        try
+        {
+            var (targetX, targetY) = AreaCellFor(request.X, request.Y);
+            var (originX, originY) = AreaCellFor(request.OriginX, request.OriginY);
+            var stepX = Math.Sign(targetX - originX);
+            var stepY = Math.Sign(targetY - originY);
+            var hasDirection = stepX != 0 || stepY != 0;
+            if (stepX != 0 && stepY != 0)
+            {
+                if (Math.Abs(request.X - request.OriginX) >= Math.Abs(request.Y - request.OriginY)) stepY = 0;
+                else stepX = 0;
+            }
+            (int X, int Y)[] orderedCells;
+            if (!hasDirection)
+            {
+                orderedCells =
+                [
+                    (targetX + 1, targetY), (targetX - 1, targetY),
+                    (targetX, targetY + 1), (targetX, targetY - 1),
+                    (targetX + 1, targetY + 1), (targetX + 1, targetY - 1),
+                    (targetX - 1, targetY + 1), (targetX - 1, targetY - 1)
+                ];
+            }
+            else
+            {
+                var perpendicularX = -stepY;
+                var perpendicularY = stepX;
+                orderedCells =
+                [
+                    (targetX + perpendicularX, targetY + perpendicularY),
+                    (targetX - perpendicularX, targetY - perpendicularY),
+                    (targetX + stepX, targetY + stepY),
+                    (targetX + stepX + perpendicularX, targetY + stepY + perpendicularY),
+                    (targetX + stepX - perpendicularX, targetY + stepY - perpendicularY)
+                ];
+            }
+            var candidates = orderedCells.Distinct().Where(cell => !_loadedAreas.ContainsKey($"{cell.X}:{cell.Y}")).ToArray();
+
+            for (var index = 0; index < candidates.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var cell = candidates[index];
+                var areaConfiguration = AreaConfiguration(cell.X, cell.Y);
+                _activeMapOperation = $"Preparing nearby map {index + 1}/{candidates.Length}";
+                if (_generator.IsGeneratedWorldCached(areaConfiguration)) alreadyPrepared++;
+                else
+                {
+                    await _generator.GenerateAsync(areaConfiguration, cancellationToken);
+                    prepared++;
+                }
+            }
+            Interlocked.Add(ref _preparedAreaCount, prepared);
+            return new AreaPrefetchResult(prepared, alreadyPrepared, stopwatch.ElapsedMilliseconds, false);
+        }
+        finally
+        {
+            stopwatch.Stop();
+            Interlocked.Exchange(ref _lastAreaPrefetchMilliseconds, stopwatch.ElapsedMilliseconds);
+            _activeMapOperation = "Idle";
+            _areaPrefetchLock.Release();
+        }
+    }
+
     public bool IsAreaLoaded(double x, double y) => _loadedAreas.ContainsKey(AreaKeyFor(x, y));
     public bool IsAreaLoadRequiredForPath(string characterId, double x, double y) =>
         _players.TryGetValue(characterId, out var player) && player.LocationId == "outdoor" && !IsAreaLoaded(x, y);
 
     public string AreaKeyFor(double x, double y)
     {
+        var (cellX, cellY) = AreaCellFor(x, y);
+        return $"{cellX}:{cellY}";
+    }
+
+    private (int X, int Y) AreaCellFor(double x, double y)
+    {
         var origin = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
         var size = Configuration.Area.SizeMeters;
-        var cellX = (int)Math.Floor((x - (origin.X - size / 2d)) / size);
-        var cellY = (int)Math.Floor((y - (origin.Y - size / 2d)) / size);
-        return $"{cellX}:{cellY}";
+        return ((int)Math.Floor((x - (origin.X - size / 2d)) / size), (int)Math.Floor((y - (origin.Y - size / 2d)) / size));
+    }
+
+    private RealityConfiguration AreaConfiguration(int cellX, int cellY)
+    {
+        var projection = new LocalTangentProjection(Configuration.Area.Region);
+        var origin = projection.Project(Configuration.Area.Center);
+        var centerPosition = new WorldPosition(Configuration.Area.Region,
+            origin.X + cellX * Configuration.Area.SizeMeters,
+            origin.Y + cellY * Configuration.Area.SizeMeters);
+        var center = projection.Unproject(centerPosition);
+        if (RegionId.FromGeo(center) != Configuration.Area.Region)
+            throw new InvalidOperationException("This prototype reached a geographic projection boundary. Cross-region Earth streaming is the next world-scale milestone.");
+        return Configuration with { Area = new GeographicArea(center, Configuration.Area.SizeMeters) };
     }
 
     private Queue<WorldPosition> CreateActorRoute(ActorState actor)

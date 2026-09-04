@@ -2,6 +2,7 @@ using AlternateEarth.Geo;
 using AlternateEarth.Server;
 using AlternateEarth.Shared;
 using Microsoft.Extensions.FileProviders;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(builder.Configuration["Server:Urls"] ?? "http://0.0.0.0:5080");
@@ -53,7 +54,9 @@ builder.Services.AddSingleton<IGeographicProvider>(services =>
         : new FlatElevationProvider();
     return new OverpassGeographicProvider(factory.CreateClient("overpass"), Path.Combine(dataDirectory, "geo-cache"), elevation);
 });
-builder.Services.AddSingleton<DeterministicWorldGenerator>();
+builder.Services.AddSingleton(services => new DeterministicWorldGenerator(
+    services.GetRequiredService<IGeographicProvider>(),
+    Path.Combine(dataDirectory, "world-cache")));
 builder.Services.AddSingleton<IWeatherProvider>(services =>
     new OpenMeteoWeatherProvider(services.GetRequiredService<IHttpClientFactory>().CreateClient("weather")));
 builder.Services.AddSingleton<RealityWorld>();
@@ -109,8 +112,33 @@ app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
     realityEntities = state.RealityEntityCount,
     geographicProvider = state.GeographicProvider
 }));
+app.MapGet("/api/diagnostics", (RealityWorld state) =>
+{
+    using var process = Process.GetCurrentProcess();
+    return Results.Ok(new
+    {
+        activeOperation = state.ActiveMapOperation,
+        lastAreaLoadMilliseconds = state.LastAreaLoadMilliseconds,
+        lastAreaPrefetchMilliseconds = state.LastAreaPrefetchMilliseconds,
+        loadedAreas = state.LoadedAreaCount,
+        preparedAreas = state.PreparedAreaCount,
+        baseEntities = state.BaseEntityCount,
+        realityEntities = state.RealityEntityCount,
+        actors = state.ActorCount,
+        elevationSamples = state.ElevationSampleCount,
+        workingSetMegabytes = process.WorkingSet64 / 1_048_576d,
+        managedMegabytes = GC.GetTotalMemory(false) / 1_048_576d,
+        uptimeSeconds = (DateTimeOffset.UtcNow - process.StartTime.ToUniversalTime()).TotalSeconds
+    });
+});
 app.MapGet("/api/world", (RealityWorld state) => Results.Ok(state.CreateSnapshot()));
 app.MapGet("/api/weather", (RealityWorld state) => Results.Ok(state.Weather));
+app.MapPost("/api/world/prefetch", async (HttpContext context, AccountService accounts, RealityWorld state, PrefetchAreaRequest request) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    return Results.Ok(await state.PrefetchAreasAsync(request, context.RequestAborted));
+});
 app.MapGet("/api/account/me", async (HttpContext context, AccountService accounts) =>
 {
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);

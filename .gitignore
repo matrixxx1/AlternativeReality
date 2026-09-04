@@ -8,6 +8,7 @@ data/*.db-wal
 data/*.log
 data/geo-cache/area-*.json
 data/geo-cache/overpass-*.json
+data/world-cache/
 TestResults/
 *.user
 *.suo
