@@ -121,6 +121,7 @@ app.MapGet("/api/diagnostics", async (HttpContext context, AccountService accoun
     return Results.Ok(new
     {
         activeOperation = state.ActiveMapOperation,
+        activeOperations = state.ActiveMapOperations,
         lastAreaLoadMilliseconds = state.LastAreaLoadMilliseconds,
         lastAreaPrefetchMilliseconds = state.LastAreaPrefetchMilliseconds,
         loadedAreas = state.LoadedAreaCount,

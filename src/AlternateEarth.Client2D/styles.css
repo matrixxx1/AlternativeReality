@@ -36,6 +36,11 @@ h1 { margin: 3px 0 4px; font-size: 20px; }
 .performance-panel > div { display:flex; justify-content:space-between; gap:10px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.08); }
 .performance-panel span { color:#c8c6a8; }
 .performance-panel strong { max-width:68%; text-align:right; overflow-wrap:anywhere; }
+.performance-panel .performance-tasks-row { align-items:flex-start; }
+.performance-task-list { max-width:68%; margin:0; padding:0; list-style:none; text-align:right; overflow-wrap:anywhere; }
+.performance-task-list li { color:#ffe18a; }
+.performance-task-list li + li { margin-top:4px; padding-top:4px; border-top:1px dotted rgba(255,255,255,.12); }
+.performance-task-list .performance-idle { color:#9de29d; }
 .performance-good { color:#9de29d; }
 .performance-warn { color:#f0d16c; }
 .performance-bad { color:#ff8d7e; }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=44">
+  <link rel="stylesheet" href="styles.css?v=45">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -55,7 +55,7 @@
   </section>
   <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
     <strong>Performance</strong>
-    <div><span>Activity</span><strong id="performanceActivity">Starting…</strong></div>
+    <div class="performance-tasks-row"><span>Active tasks</span><ul id="performanceActivity" class="performance-task-list" aria-live="polite"><li>Starting…</li></ul></div>
     <div><span>Browser</span><strong id="performanceFps">—</strong></div>
     <div><span>Frame work</span><strong id="performanceFrame">—</strong></div>
     <div><span>World objects</span><strong id="performanceEntities">—</strong></div>
@@ -247,6 +247,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=77"></script>
+  <script src="app.js?v=78"></script>
 </body>
 </html>

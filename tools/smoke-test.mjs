@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=77`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=78`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -14,6 +14,8 @@ if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('for(con
   throw new Error('Inventory drop controls are missing.');
 if (!clientHtml.includes('miniMapTooltip') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'") || !clientScript.includes('miniMapMarkerAt') || !clientScript.includes('miniMapMarkers'))
   throw new Error('Personal flag, categorized mini-map markers, or hover labels are missing.');
+if (!clientHtml.includes('Active tasks') || !clientScript.includes('setPerformanceTask') || !clientScript.includes('activeOperations') || !clientScript.includes('area-prefetch:'))
+  throw new Error('Performance active-task lifecycle or map-area task reporting is missing.');
 if (!clientHtml.includes('brontosaurusIntervalConfig') || !clientHtml.includes('stegosaurusIntervalConfig') || !clientHtml.includes('raptorIntervalConfig') || !clientHtml.includes('landOfGiantsIntervalConfig') || !clientScript.includes('drawBrontosaurusActor') || !clientScript.includes('drawStegosaurusActor') || !clientScript.includes('drawRaptorActor') || !clientScript.includes('drawGiantActor'))
   throw new Error('Dinosaur event controls or renderers are missing.');
 if (!clientHtml.includes('activeEventsPanel') || !clientHtml.includes('ufoEventNameConfig') || !clientHtml.includes('landOfGiantsEventNameConfig') || !clientScript.includes('renderActiveEvents'))
@@ -42,7 +44,7 @@ async function connect(label) {
     waiters.push(waiter);
     timer=setTimeout(() => { const index = waiters.indexOf(waiter); if (index >= 0) waiters.splice(index, 1); reject(new Error(`Timed out waiting for ${username}. Received: ${messages.map(message => message.type).join(', ')}`)); }, timeoutMs);
   });
-  return { socket, waitFor, messageCount:()=>messages.length, username, sessionToken: setup.sessionToken };
+  return { socket, waitFor, messageCount:()=>messages.length, username, sessionToken: setup.sessionToken, cookieHeader:cookie.split(';')[0] };
 }
 
 const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]);
@@ -99,6 +101,8 @@ try {
   first.socket.send(JSON.stringify({ type: 'setGodMode', enabled: true }));
   const god = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.godMode);
   if (god.player.walletCents < 50000 || god.player.water < 10 || god.player.stamina < 10) throw new Error('God Mode resources were not enforced.');
+  const diagnosticsResponse=await fetch(`${baseUrl}/api/diagnostics`,{headers:{cookie:first.cookieHeader}}),diagnostics=await diagnosticsResponse.json();
+  if(!diagnosticsResponse.ok||!Array.isArray(diagnostics.activeOperations))throw new Error('Server diagnostics did not expose the active map-task list.');
   let configActionStart=first.messageCount()-1;
   first.socket.send(JSON.stringify({type:'configureInventoryItem',itemType:'food',action:'take'}));
   const configTake=await first.waitFor(message=>message.type==='configuredInventoryAdjusted'&&message.message.includes('Home inventory'),10000,configActionStart);

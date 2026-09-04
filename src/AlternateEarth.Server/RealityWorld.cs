@@ -40,7 +40,7 @@ public sealed partial class RealityWorld
     private long? _lastLandOfGiantsCycle;
     private readonly ConcurrentDictionary<string, byte> _ufoHits = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _eventAttackCooldowns = new();
-    private volatile string _activeMapOperation = "Idle";
+    private readonly ConcurrentDictionary<string, string> _activeMapOperations = new();
     private long _lastAreaLoadMilliseconds;
     private long _lastAreaPrefetchMilliseconds;
     private int _preparedAreaCount;
@@ -63,7 +63,8 @@ public sealed partial class RealityWorld
     public int ActorCount => _actors.Count;
     public int ElevationSampleCount => _elevationSamples.Count;
     public int PreparedAreaCount => Volatile.Read(ref _preparedAreaCount);
-    public string ActiveMapOperation => _activeMapOperation;
+    public IReadOnlyList<string> ActiveMapOperations => _activeMapOperations.OrderBy(item => item.Key).Select(item => item.Value).ToArray();
+    public string ActiveMapOperation => ActiveMapOperations.FirstOrDefault() ?? "Idle";
     public long LastAreaLoadMilliseconds => Interlocked.Read(ref _lastAreaLoadMilliseconds);
     public long LastAreaPrefetchMilliseconds => Interlocked.Read(ref _lastAreaPrefetchMilliseconds);
     public string GeographicProvider => _geographic?.Provider ?? "not loaded";
@@ -924,7 +925,7 @@ public sealed partial class RealityWorld
         try
         {
             if (_loadedAreas.ContainsKey(key)) return false;
-            _activeMapOperation = $"Activating map block {key}";
+            _activeMapOperations["area-load"] = $"Activating map block {key}";
             var areaConfiguration = AreaConfiguration(cellX, cellY);
             var generated = await _generator.GenerateAsync(areaConfiguration, cancellationToken);
             ApplyGeneratedWorld(generated);
@@ -935,7 +936,7 @@ public sealed partial class RealityWorld
         {
             stopwatch.Stop();
             Interlocked.Exchange(ref _lastAreaLoadMilliseconds, stopwatch.ElapsedMilliseconds);
-            _activeMapOperation = "Idle";
+            _activeMapOperations.TryRemove("area-load", out _);
             _areaLoadLock.Release();
         }
     }
@@ -992,7 +993,7 @@ public sealed partial class RealityWorld
                 cancellationToken.ThrowIfCancellationRequested();
                 var cell = candidates[index];
                 var areaConfiguration = AreaConfiguration(cell.X, cell.Y);
-                _activeMapOperation = $"Preparing nearby map {index + 1}/{candidates.Length}";
+                _activeMapOperations["area-prefetch"] = $"Preparing nearby map {index + 1}/{candidates.Length}";
                 if (_generator.IsGeneratedWorldCached(areaConfiguration)) alreadyPrepared++;
                 else
                 {
@@ -1007,7 +1008,7 @@ public sealed partial class RealityWorld
         {
             stopwatch.Stop();
             Interlocked.Exchange(ref _lastAreaPrefetchMilliseconds, stopwatch.ElapsedMilliseconds);
-            _activeMapOperation = "Idle";
+            _activeMapOperations.TryRemove("area-prefetch", out _);
             _areaPrefetchLock.Release();
         }
     }

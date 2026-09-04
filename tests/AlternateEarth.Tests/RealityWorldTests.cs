@@ -367,11 +367,13 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var result = await world.PrefetchAreasAsync(new PrefetchAreaRequest(600, 0, 0, 0));
 
         Assert.False(result.AlreadyRunning);
+        Assert.Empty(world.ActiveMapOperations);
         Assert.Equal(5, result.Prepared);
         Assert.Equal(2, world.LoadedAreaCount);
         Assert.Equal(7, provider.RequestCount);
         Assert.Equal(7, Directory.GetFiles(cacheDirectory, "world-*.json").Length);
         Assert.True(await world.LoadAreaAsync(1_100, 0));
+        Assert.Empty(world.ActiveMapOperations);
         Assert.Equal(7, provider.RequestCount);
         Assert.Equal(3, world.LoadedAreaCount);
     }
