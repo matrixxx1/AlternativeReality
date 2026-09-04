@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=33">
+  <link rel="stylesheet" href="styles.css?v=35">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
   <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
   <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
   <aside id="rightRail" class="right-rail" aria-label="Game panels">
-  <div class="right-rail-heading"><div><strong>AlternativeReality</strong><span>Control rail</span></div><button id="rightRailToggle" type="button" aria-label="Collapse control rail" aria-expanded="true">›</button></div>
+  <div class="right-rail-heading"><div><strong>AlternativeReality</strong><span>Control rail</span></div><button id="openHelpWindowButton" class="rail-help-button" type="button">Help</button><button id="rightRailToggle" type="button" aria-label="Collapse control rail" aria-expanded="true">›</button></div>
   <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link" hidden>
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
     <h1>AlternativeReality</h1>
@@ -51,12 +51,7 @@
       <button type="button" data-mode="raft">Raft</button>
     </div>
   </section>
-  <section id="helpPanel" class="panel help-panel" data-collapsible="Help and reality">
-    <strong>Help &amp; reality</strong>
-    <button id="openHelpWindowButton" type="button">Open window</button>
-  </section>
   <section id="godPanel" class="panel god-panel" data-collapsible="Game controls">
-    <button id="toggleChatButton" type="button">Show chat</button>
     <label><input id="godMode" type="checkbox"> God Mode</label>
     <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
     <div id="worldEventControls" class="world-event-controls" hidden>
@@ -117,14 +112,14 @@
       </div>
     </section>
   </section>
-  <section id="chatHistory" class="panel chat-history" data-collapsible="Recent chat" hidden>
+  <section id="chatPanel" class="panel chat-panel" data-collapsible="Chat">
     <strong>Recent chat</strong>
     <div id="chatMessages" class="chat-messages"><div class="empty-chat">No messages yet.</div></div>
+    <form id="chatForm" class="chat-form">
+      <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
+      <button type="submit">Say</button>
+    </form>
   </section>
-  <form id="chatForm" class="panel chat-form" data-collapsible="Chat">
-    <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
-    <button type="submit">Say</button>
-  </form>
   <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
@@ -196,6 +191,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=62"></script>
+  <script src="app.js?v=64"></script>
 </body>
 </html>
