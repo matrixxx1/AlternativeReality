@@ -112,8 +112,11 @@ app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
     realityEntities = state.RealityEntityCount,
     geographicProvider = state.GeographicProvider
 }));
-app.MapGet("/api/diagnostics", (RealityWorld state) =>
+app.MapGet("/api/diagnostics", async (HttpContext context, AccountService accounts, RealityWorld state) =>
 {
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    if (!state.IsGodModeEnabled(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     using var process = Process.GetCurrentProcess();
     return Results.Ok(new
     {

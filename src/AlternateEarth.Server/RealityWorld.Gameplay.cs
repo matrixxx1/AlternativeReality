@@ -265,6 +265,7 @@ public sealed partial class RealityWorld
     }
 
     private bool playerIsGod(string playerId) => _players.TryGetValue(playerId, out var player) && player.GodMode;
+    public bool IsGodModeEnabled(string playerId) => playerIsGod(playerId);
 
     public async Task<IReadOnlyList<PlayerState>> AdvanceVitalsAsync(TimeSpan elapsed, CancellationToken cancellationToken)
     {

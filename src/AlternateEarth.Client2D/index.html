@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=39">
+  <link rel="stylesheet" href="styles.css?v=40">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -37,8 +37,13 @@
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
     <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
     <button id="centerButton" type="button">Center on player</button>
+    <div class="admin-controls">
+      <label><input id="godMode" type="checkbox"> God Mode</label>
+      <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
+      <button id="serverConfigButton" type="button" hidden>Server config</button>
+    </div>
   </section>
-  <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance">
+  <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
     <strong>Performance</strong>
     <div><span>Activity</span><strong id="performanceActivity">Starting…</strong></div>
     <div><span>Browser</span><strong id="performanceFps">—</strong></div>
@@ -61,18 +66,6 @@
       <button type="button" data-mode="motorcycle">Motorcycle</button>
       <button type="button" data-mode="raft">Raft</button>
     </div>
-  </section>
-  <section id="godPanel" class="panel god-panel" data-collapsible="Game controls">
-    <label><input id="godMode" type="checkbox"> God Mode</label>
-    <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
-    <div id="worldEventControls" class="world-event-controls" hidden>
-      <span>Trigger event</span>
-      <button type="button" data-world-event="ufo">UFO</button>
-      <button type="button" data-world-event="trex">T-Rex</button>
-      <button type="button" data-world-event="bear">Bear</button>
-    </div>
-    <button id="rebuildButton" type="button" disabled>Rebuild Reality</button>
-    <button id="serverConfigButton" type="button" hidden>Server config</button>
   </section>
   <section id="inventoryPanel" class="panel inventory-panel">
     <div class="inventory-header"><strong>Inventory &amp; equipment</strong><button id="toggleInventoryButton" type="button">Hide</button></div>
@@ -193,24 +186,21 @@
     </section>
     <section class="server-config-page" data-server-config-page="events" hidden>
       <p>Schedules are server-authoritative and persist for this reality. Hours use the server location's 24-hour clock.</p>
-      <div class="server-event-grid">
-        <label>Simulated server time<input id="serverTimeConfig" type="datetime-local" step="60"></label>
-        <label>Weather mode<select id="weatherModeConfig"><option value="live">Live local weather</option><option value="clear">Clear</option><option value="rain">Rain</option><option value="snow">Snow</option><option value="fog">Fog</option><option value="storm">Thunderstorm</option></select></label>
-        <label>Temperature override °C<input id="weatherTemperatureConfig" type="number" min="-90" max="60" step="0.1" placeholder="Live/default"></label>
-        <label>Weather refresh (minutes)<input id="weatherRefreshConfig" type="number" min="1" max="1440" step="1"></label>
-        <label>Street lights on (hour)<input id="streetLightsOnConfig" type="number" min="0" max="23" step="1"></label>
-        <label>Street lights off (hour)<input id="streetLightsOffConfig" type="number" min="0" max="23" step="1"></label>
-        <label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label>
-        <label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label>
-        <label>Door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label>
-        <label>UFO interval (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label>
-        <label>UFO duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label>
-        <label>T-Rex interval (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label>
-        <label>T-Rex portal duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label>
-        <label>Bear interval (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label>
-        <label>Bear duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label>
+      <div class="server-event-list">
+        <div class="server-event-row"><label>Simulated server time<input id="serverTimeConfig" type="datetime-local" step="60"></label></div>
+        <div class="server-event-row"><label>Weather mode<select id="weatherModeConfig"><option value="live">Live local weather</option><option value="clear">Clear</option><option value="rain">Rain</option><option value="snow">Snow</option><option value="fog">Fog</option><option value="storm">Thunderstorm</option></select></label></div>
+        <div class="server-event-row"><label>Temperature override °C<input id="weatherTemperatureConfig" type="number" min="-90" max="60" step="0.1" placeholder="Live/default"></label></div>
+        <div class="server-event-row"><label>Weather refresh (minutes)<input id="weatherRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
+        <div class="server-event-row"><label>Street lights on (hour)<input id="streetLightsOnConfig" type="number" min="0" max="23" step="1"></label></div>
+        <div class="server-event-row"><label>Street lights off (hour)<input id="streetLightsOffConfig" type="number" min="0" max="23" step="1"></label></div>
+        <div class="server-event-row"><label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
+        <div class="server-event-row"><label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
+        <div class="server-event-row"><label>Door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
+        <div class="server-event-row world-event-row"><label>UFO event interval (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>T-Rex portal interval (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Great bear interval (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
       </div>
-      <button id="saveServerEventsConfig" type="button">Save server events</button>
+      <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save server events</button><button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button></div>
     </section>
   </section>
   </aside>
@@ -242,6 +232,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=69"></script>
+  <script src="app.js?v=70"></script>
 </body>
 </html>

@@ -32,7 +32,7 @@ Daily UFOs are ordinary logical actors with subtype `ufo`; green-beam strikes us
 | `openChest`, `takeChestItems`, `chestSeen`, `collectLoot` | chest/loot IDs and selected item quantities | validates proximity; chest cash is collected automatically, while item selection remains authoritative and capacity checked |
 | `requestArea` | local-meter viewport location | streams and locally caches another geographic cell before the player enters it |
 
-Authenticated HTTP `POST /api/world/prefetch` accepts a target block and movement origin. It prepares nearby canonical blocks on the server without activating them or adding them to a client snapshot. `GET /api/diagnostics` supplies the in-game Performance panel with current map work, cache/load timings, block/entity counts, elevation samples, and process memory.
+Authenticated HTTP `POST /api/world/prefetch` accepts a target block and movement origin. It prepares nearby canonical blocks on the server without activating them or adding them to a client snapshot. God Mode-authenticated `GET /api/diagnostics` supplies the otherwise-hidden Performance panel with current map work, cache/load timings, block/entity counts, elevation samples, and process memory.
 | `rebuildArea` | legacy `godMode` acknowledgement | checks only the connected character's authoritative God Mode state; resets all loaded regions and transient world state, regenerates, and returns players to their bases |
 | `teleport` | destination `x`, `y`; legacy `godMode` acknowledgement | checks only authoritative God Mode, generates an unloaded destination first, then resolves it to a safe canonical point |
 | `say` | `message` text | derives username/player ID and UTC time on the server; rejects blank, rapid, or over-180-character messages |
