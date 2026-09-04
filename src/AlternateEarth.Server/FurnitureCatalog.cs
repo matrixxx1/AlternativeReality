@@ -36,6 +36,7 @@ internal static class FurnitureCatalog
         new("barstool", "Barstool", .5, .5, 7_500, 50_000, "barstool", ["oak", "walnut", "white", "black", "red"], ["solid", "woven", "leather"]),
         new("bench", "Bench", 1.4, .55, 12_000, 90_000, "bench", ["oak", "walnut", "white", "black", "green"], ["solid", "woodgrain", "woven"]),
         new("cabinet", "Cabinet", 1.1, .5, 20_000, 180_000, "cabinet", ["oak", "walnut", "white", "black", "sage"], ["solid", "woodgrain", "paneled"]),
+        new("storageChest", "Storage chest", 1.25, .65, 25_000, 150_000, "storageChest", ["oak", "walnut", "black"], ["solid", "woodgrain", "ironbound"]),
         new("vanity", "Vanity", 1.2, .55, 20_000, 175_000, "vanity", ["oak", "walnut", "white", "black", "rose"], ["solid", "woodgrain"]),
         new("floorLamp", "Floor lamp", .5, .5, 6_000, 50_000, "lamp", ["brass", "black", "white", "silver"], ["solid"]),
         new("tableLamp", "Table lamp", .35, .35, 3_000, 30_000, "lamp", ["brass", "black", "white", "blue", "rose"], ["solid", "striped", "floral"]),

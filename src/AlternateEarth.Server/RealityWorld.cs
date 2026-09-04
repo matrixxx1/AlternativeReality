@@ -19,6 +19,7 @@ public sealed partial class RealityWorld
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly SemaphoreSlim _areaLoadLock = new(1, 1);
     private readonly SemaphoreSlim _basePurchaseLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _playerSaveLocks = new();
     private readonly Random _actorRandom;
     private GeographicDataset? _geographic;
     private readonly ConcurrentDictionary<string, CanonicalEntity> _baseEntities = new();
@@ -52,7 +53,10 @@ public sealed partial class RealityWorld
                 _itemConfigurations[item.ItemType] = item with
                 {
                     SpeedModifierMph = item.SpeedModifierMph ?? defaults.SpeedModifierMph,
-                    VisibilityModifierMeters = item.VisibilityModifierMeters ?? defaults.VisibilityModifierMeters
+                    VisibilityModifierMeters = item.VisibilityModifierMeters ?? defaults.VisibilityModifierMeters,
+                    WeightPounds = defaults.WeightPounds,
+                    Category = defaults.Category,
+                    CarriedInBackpack = defaults.CarriedInBackpack
                 };
         _movementConfiguration = await _store.LoadMovementConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultMovementConfiguration;
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
@@ -95,20 +99,31 @@ public sealed partial class RealityWorld
         var home = string.IsNullOrWhiteSpace(accountId) ? null : await EnsureHomeAsync(characterId, accountId, cancellationToken);
         var center = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
         var newAccountSpawn = existing is null && !string.IsNullOrWhiteSpace(accountId) && await _store.IsFirstAccountCharacterAsync(accountId, characterId, cancellationToken);
-        var startsAtHome = home is not null && !newAccountSpawn;
-        var location = startsAtHome ? home!.Id : "outdoor";
-        var position = startsAtHome ? home!.Exit : newAccountSpawn ? RandomOutdoorSpawn(characterId) : Navigation.FindNearestWalkable(center);
-        position = startsAtHome ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
+        var resumesOutdoors = existing is not null && existing.LocationId == "outdoor" && existing.Position.Region == Configuration.Area.Region;
+        var resumesInterior = existing is not null && existing.LocationId != "outdoor" && _dungeons.ContainsKey(existing.LocationId);
+        if (resumesOutdoors && !_loadedAreas.Values.Any(area => area.Contains(existing!.Position.X, existing.Position.Y)))
+            await EnsureAreaLoadedAsync(existing!.Position.X, existing.Position.Y, cancellationToken);
+        var location = resumesInterior ? existing!.LocationId : home is not null && !newAccountSpawn && !resumesOutdoors ? home.Id : "outdoor";
+        var inside = location != "outdoor";
+        var position = resumesInterior
+            ? InteriorPositionIsSafe(existing!.Position, _dungeons[existing.LocationId]) ? existing.Position : _dungeons[existing.LocationId].Exit
+            : location == home?.Id ? home.Exit : newAccountSpawn ? RandomOutdoorSpawn(characterId) : resumesOutdoors ? existing!.Position : Navigation.FindNearestWalkable(center);
+        position = inside ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
-            startsAtHome ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, startsAtHome ? TravelMode.Walk : existing?.TravelMode ?? TravelMode.Walk,
+            inside ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, inside ? TravelMode.Walk : existing?.TravelMode ?? TravelMode.Walk,
             Math.Clamp(existing?.Stamina ?? 10, 0, 10), 10,
             Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
             existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
             existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false,
             existing?.MagicHikingShoesOn ?? false, existing?.MagicRunningShoesOn ?? false, existing?.HatOn ?? false,
-            existing?.DirtBikeGasGallons ?? 0, existing?.MotorcycleGasGallons ?? 0, existing?.EquippedWeapon ?? "fist");
+            existing?.DirtBikeGasGallons ?? 0, existing?.MotorcycleGasGallons ?? 0, existing?.EquippedWeapon ?? "fist",
+            Math.Clamp(existing?.BodyHeat ?? 50, 0, 100), 100,
+            existing is { EquippedHat: not "none" } ? existing.EquippedHat : existing?.HatOn == true ? "hat" : "none",
+            existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none");
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
+        var offhand = ActiveOffhand(player);
+        player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser" };
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
@@ -132,9 +147,13 @@ public sealed partial class RealityWorld
             if (assignment?.Position is { } assignedPosition && assignedPosition.Region == Configuration.Area.Region && !_baseEntities.ContainsKey(assignment.BuildingId))
                 await EnsureAreaLoadedAsync(assignedPosition.X, assignedPosition.Y, cancellationToken);
             var baseBuilding = assignment?.BuildingId;
+            if (baseBuilding is not null && _baseEntities.TryGetValue(baseBuilding, out var assignedBuilding) && StoreProfileForBuilding(assignedBuilding) is not null)
+                baseBuilding = null;
             if (baseBuilding is null || !_baseEntities.ContainsKey(baseBuilding))
             {
-                var buildings = _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building).OrderBy(entity => entity.Id).ToArray();
+                var buildings = _baseEntities.Values
+                    .Where(entity => entity.Kind == EntityKind.Building && StoreProfileForBuilding(entity) is null)
+                    .OrderBy(entity => entity.Id).ToArray();
                 if (buildings.Length == 0) return null;
                 var assigned = await _store.LoadAssignedBaseBuildingsAsync(Configuration.Id, cancellationToken);
                 var start = (StableInt(accountId) & int.MaxValue) % buildings.Length;
@@ -145,6 +164,7 @@ public sealed partial class RealityWorld
             _baseBuildings[accountId] = baseBuilding;
             var baseEntity = _baseEntities[baseBuilding];
             await EnsureHomeFurnitureAsync(accountId, baseEntity, cancellationToken);
+            await EnsureHomeItemStorageAsync(accountId, cancellationToken);
             var homeId = $"home:{accountId}:{baseBuilding}";
             var home = _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, baseEntity));
             SetBaseReturnPosition(playerId, baseBuilding);
@@ -387,6 +407,36 @@ public sealed partial class RealityWorld
                 _actors[actor.Id] = updated;
                 changed.Add(updated);
             }
+            foreach (var dungeonPair in _dungeons.ToArray())
+            {
+                var dungeon = dungeonPair.Value;
+                if (!dungeon.IsStore) continue;
+                foreach (var original in dungeon.Actors.Where(actor => actor.Subtype == "storeEmployee").ToArray())
+                {
+                    var actor = original;
+                    if (!_actorRoutes.TryGetValue(actor.Id, out var route) || route.Count == 0)
+                    {
+                        route = CreateInteriorActorRoute(actor, dungeon);
+                        _actorRoutes[actor.Id] = route;
+                    }
+                    if (route.Count == 0)
+                    {
+                        if (actor.IsMoving) SetActor(dungeonPair.Key, actor with { IsMoving = false, Version = actor.Version + 1 });
+                        continue;
+                    }
+                    var waypoint = route.Peek();
+                    var dx = waypoint.X - actor.Position.X; var dy = waypoint.Y - actor.Position.Y;
+                    var distance = Math.Sqrt(dx * dx + dy * dy);
+                    if (distance < .35) { route.Dequeue(); continue; }
+                    var step = Math.Min(distance, ActorSpeed(actor.Subtype) * elapsed.TotalSeconds);
+                    var position = actor.Position with { X = actor.Position.X + dx / distance * step, Y = actor.Position.Y + dy / distance * step };
+                    if (dungeon.Walls.Any(wall => CrossesDungeonWall(actor.Position, position, wall))) { route.Clear(); continue; }
+                    var facing = Math.Abs(dx) > Math.Abs(dy) ? (dx > 0 ? "east" : "west") : (dy > 0 ? "north" : "south");
+                    var updated = actor with { Position = position, Facing = facing, IsMoving = true, Version = actor.Version + 1 };
+                    SetActor(dungeonPair.Key, updated);
+                    changed.Add(updated);
+                }
+            }
         }
         return changed;
     }
@@ -462,10 +512,15 @@ public sealed partial class RealityWorld
         return entity;
     }
 
-    public WorldSnapshot CreateSnapshot() => new(Configuration, _loadedBounds ?? Configuration.Area.Bounds,
-        _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
-        _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
-        Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray());
+    public WorldSnapshot CreateSnapshot()
+    {
+        var lockSchedule = GetDoorLockSchedule();
+        return new(Configuration, _loadedBounds ?? Configuration.Area.Bounds,
+            _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), _realityEntities.Values.OrderBy(entity => entity.Id).ToArray(),
+            _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
+            Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray(),
+            lockSchedule.Doors, lockSchedule.EndsAtUtc);
+    }
 
     private void ApplyGeneratedWorld(GeographicDataset generated)
     {
@@ -497,7 +552,8 @@ public sealed partial class RealityWorld
             var travel = entity.Kind == EntityKind.Npc ? (TravelMode)(identity % 10 == 0 ? 3 : identity % 8 == 0 ? 2 : 0) : TravelMode.Walk;
             _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, entity.Properties.GetValueOrDefault("subtype") ?? "unknown",
                 entity.Properties.GetValueOrDefault("name") ?? "Wanderer", safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
-                IsMerchant: merchant, TravelMode: travel, MerchantCategory: merchantCategory);
+                IsMerchant: merchant, TravelMode: travel, MerchantCategory: merchantCategory,
+                EquippedWeapon: merchant ? "pistol" : "none");
         }
     }
 
@@ -549,10 +605,23 @@ public sealed partial class RealityWorld
         return new Queue<WorldPosition>();
     }
 
+    private Queue<WorldPosition> CreateInteriorActorRoute(ActorState actor, DungeonState dungeon)
+    {
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            var point = new GeometryPoint(.6 + _actorRandom.NextDouble() * Math.Max(.1, dungeon.Width - 1.2), .6 + _actorRandom.NextDouble() * Math.Max(.1, dungeon.Height - 1.2));
+            if (!PointInsideFootprint(point, dungeon.Footprint) || dungeon.Footprint is { Count: >= 3 } footprint && DistanceToFootprint(point, footprint) < .5) continue;
+            var target = new WorldPosition(actor.Position.Region, point.X, point.Y);
+            if (dungeon.Walls.Any(wall => CrossesDungeonWall(actor.Position, target, wall))) continue;
+            return new Queue<WorldPosition>(new[] { target });
+        }
+        return new Queue<WorldPosition>();
+    }
+
     private static double ActorSpeed(string subtype) => subtype switch
     {
         "rabbit" => 2.2, "dog" => 1.8, "cat" => 1.4, "bird" => 2.6,
-        "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, _ => 1.25
+        "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, "storeEmployee" => 1.1, _ => 1.25
     };
 
     private string ActorSpeech(ActorState actor)
@@ -592,9 +661,7 @@ public sealed partial class RealityWorld
         };
     }
 
-    private static string ActorDisplayName(ActorState actor) => actor.Kind == EntityKind.Npc
-        ? actor.Name
-        : char.ToUpperInvariant(actor.Subtype[0]) + actor.Subtype[1..];
+    private static string ActorDisplayName(ActorState actor) => actor.Name;
 
     private const double MetersPerMile = 1609.344;
     private const double DirtBikeMilesPerGallon = 50;
@@ -611,19 +678,30 @@ public sealed partial class RealityWorld
         {
             SetBaseReturnPosition(player.Id, home.BuildingId);
             return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
-                HealthHearts = 10, Stamina = 10, Water = 10, TravelMode = TravelMode.Walk, LocationId = home.Id,
+                HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = home.Id,
                 FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, Version = player.Version + 1 };
         }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
-            HealthHearts = 10, Stamina = 10, Water = 10, TravelMode = TravelMode.Walk, LocationId = "outdoor",
+            HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = "outdoor",
             FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, Version = player.Version + 1 };
     }
 
-    private async Task SavePlayerAsync(PlayerState player, CancellationToken cancellationToken)
+    private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken)
     {
-        _players[player.Id] = player;
-        await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
+        var saveLock = _playerSaveLocks.GetOrAdd(player.Id, _ => new SemaphoreSlim(1, 1));
+        await saveLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Periodic simulation work may have captured this player before a
+            // doorway transition completed. Never let that older snapshot
+            // overwrite a newer authoritative location or its persisted state.
+            if (_players.TryGetValue(player.Id, out var current) && current.Version >= player.Version) return false;
+            _players[player.Id] = player;
+            await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
+            return true;
+        }
+        finally { saveLock.Release(); }
     }
 
     private WorldNavigation Navigation => _navigation ?? throw new InvalidOperationException("World navigation is not initialized.");

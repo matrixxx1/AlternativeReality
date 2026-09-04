@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 16;
+    public const int Version = 20;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -18,6 +18,7 @@ public sealed record SayRequest(string Message);
 public sealed record SetGodModeRequest(bool Enabled);
 public sealed record EnterDungeonRequest(string DoorId);
 public sealed record ExitDungeonRequest();
+public sealed record ChangeDungeonLevelRequest(int Direction);
 public sealed record CombatRequest(string TargetId, string Weapon);
 public sealed record RequestTradeRequest(string MerchantId);
 public sealed record ConfirmTradeRequest(string MerchantId, IReadOnlyList<PurchaseLine> Purchases);
@@ -29,12 +30,15 @@ public sealed record MoveFurnitureRequest(string FurnitureId, double X, double Y
 public sealed record RotateFurnitureRequest(string FurnitureId);
 public sealed record StoreFurnitureRequest(string FurnitureId);
 public sealed record PlaceFurnitureRequest(string FurnitureId, double X, double Y, double RotationDegrees = 0);
+public sealed record OpenHomeStorageRequest(string ChestId);
+public sealed record TransferHomeStorageRequest(string ChestId, string ItemType, int Quantity, bool ToStorage);
 public sealed record PurchaseBaseRequest(string DoorId);
 public sealed record SetLightsRequest(bool FlashlightOn, bool LanternOn, bool LaserOn);
 public sealed record SetMagicHikingShoesRequest(bool Enabled);
 public sealed record SetMagicRunningShoesRequest(bool Enabled);
 public sealed record SetEquipmentRequest(string Slot, string? ItemType);
 public sealed record UpdateItemConfigurationRequest(string ItemType, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, double SpeedModifierMph = 0, double VisibilityModifierMeters = 0);
+public sealed record ConfigureInventoryItemRequest(string ItemType, string Action);
 public sealed record UpdateMovementConfigurationRequest(double BaseSpeedMph, double BaseVisibilityMeters, IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph, IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record RemoveObjectRequest(string EntityId);

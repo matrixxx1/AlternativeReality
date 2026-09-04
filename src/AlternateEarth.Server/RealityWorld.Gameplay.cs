@@ -8,22 +8,53 @@ namespace AlternateEarth.Server;
 public sealed partial class RealityWorld
 {
     public const long BasePurchasePriceCents = 35_000_000;
-    public const long GodModeBasePurchasePriceCents = 1;
+    public const double MaximumBackpackWeightPounds = 50;
+    public const int MaximumWeaponSlots = 3;
+    public const int MaximumQuestSlots = 3;
+    public const int MaximumOtherSlots = 6;
+    private static readonly string[] FriendlyHumanNames =
+    [
+        "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
+        "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis"
+    ];
     private static readonly ItemConfiguration[] DefaultItemConfigurations =
     {
-        new("fist","Fist","Permanent melee weapon; consumes no ammunition",.25,1.6,0,0,false,true),
-        new("rock","Rock","Thrown weapon and ammunition",1,25,1,100,true,false,"rock"), new("ballBearing","Ball bearing","Slingshot ammunition",0,0,5,200),
-        new("knife","Knife","Short melee weapon",2,1.6,2_000,4_000,true,true), new("sword","Sword","Extended melee weapon",5,2.3,30_000,50_000,true,true),
-        new("slingshot","Slingshot","Ranged weapon; consumes ball bearings",2,60,5_000,15_000,true,true,"ballBearing"),
-        new("crossbow","Crossbow","Ranged weapon; consumes arrows",3,100,30_000,50_000,true,true,"arrow"), new("arrow","Arrow","Crossbow ammunition",0,0,5,500),
-        new("pistol","Pistol","Ranged weapon; consumes bullets",5,50,100_000,300_000,true,true,"bullet"), new("rifle","Rifle","Long-range weapon; consumes bullets",7,200,300_000,600_000,true,true,"bullet"), new("bullet","Bullet","Pistol and rifle ammunition",0,0,25,500),
-        new("skateboard","Skateboard","Fast paved-surface travel",0,0,20_000,30_000,true,true,null,10.5), new("bike","Bike","Faster travel with mild off-road penalty",0,0,40_000,50_000,true,true,null,10.5),
-        new("dirtBike","Dirt bike","Motorized travel up to 40 mph",0,0,300_000,500_000,true,true,null,36.5), new("motorcycle","Motorcycle","Motorized travel up to 90 mph",0,0,500_000,1_000_000,true,true,null,86.5),
-        new("gallonOfGas","Gallon of gas","Refuels the selected motor vehicle",0,0,500,1_000), new("inflatableRaft","Inflatable raft","Safe travel through deep water",0,0,45_000,65_000,true,true,null,2.75),
-        new("flashlight","Flashlight","Directional light",0,0,1_000,5_000,true,true,null,0,50), new("lantern","Lantern","Circular area light",0,0,5_000,10_000,true,true,null,0,30), new("laser","Laser","Straight light beam until collision",0,0,20_000,40_000,true,true,null,0,150),
-        new("magicHikingShoes","Magic hiking shoes","Additive movement and stamina bonus",0,0,10_000,40_000,true,true,null,3.5), new("magicRunningShoes","Magic running shoes","Larger additive movement and conditional stamina bonus",0,0,10_000,40_000,true,true,null,7),
-        new("hat","Hat","Halves water drain while worn",0,0,3_000,7_500,true,true), new("water","Water","Restores water and 2 hearts; pauses drain for 5 minutes",0,0,50,200), new("food","Food","Restores stamina and 2 hearts; pauses drain for 5 minutes",0,0,200,500),
-        new("areaMap","Map of this block","Permanently reveals the current geographic block",0,0,100,100_000,true,true)
+        new("fist","Fist","Permanent melee weapon; consumes no ammunition",.25,1.6,0,0,false,true,WeightPounds:0,Category:InventoryCategory.Weapon),
+        new("rock","Rock","Thrown weapon and ammunition",1,25,1,100,true,false,"rock",WeightPounds:.5,Category:InventoryCategory.Weapon),
+        new("ballBearing","Ball bearing","Slingshot ammunition",0,0,5,200,WeightPounds:.02),
+        new("knife","Knife","Short melee weapon",2,1.6,2_000,4_000,true,true,WeightPounds:.6,Category:InventoryCategory.Weapon),
+        new("sword","Sword","Extended melee weapon",5,2.3,30_000,50_000,true,true,WeightPounds:3,Category:InventoryCategory.Weapon),
+        new("slingshot","Slingshot","Ranged weapon; consumes ball bearings",2,60,5_000,15_000,true,true,"ballBearing",WeightPounds:.4,Category:InventoryCategory.Weapon),
+        new("crossbow","Crossbow","Ranged weapon; consumes arrows",3,100,30_000,50_000,true,true,"arrow",WeightPounds:6.5,Category:InventoryCategory.Weapon),
+        new("arrow","Arrow","Crossbow ammunition",0,0,5,500,WeightPounds:.08),
+        new("pistol","Pistol","Ranged weapon; consumes bullets",5,50,100_000,300_000,true,true,"bullet",WeightPounds:2,Category:InventoryCategory.Weapon),
+        new("rifle","Rifle","Long-range weapon; consumes bullets",7,200,300_000,600_000,true,true,"bullet",WeightPounds:7.5,Category:InventoryCategory.Weapon),
+        new("bullet","Bullet","Pistol and rifle ammunition",0,0,25,500,WeightPounds:.04),
+        new("skateboard","Skateboard","Fast paved-surface travel",0,0,20_000,30_000,true,true,null,10.5,WeightPounds:5),
+        new("bike","Bike","Faster travel with mild off-road penalty",0,0,40_000,50_000,true,true,null,10.5,WeightPounds:26),
+        new("dirtBike","Dirt bike","Parked motorized travel up to 40 mph",0,0,300_000,500_000,true,true,null,36.5,WeightPounds:250,CarriedInBackpack:false),
+        new("motorcycle","Motorcycle","Parked motorized travel up to 90 mph",0,0,500_000,1_000_000,true,true,null,86.5,WeightPounds:450,CarriedInBackpack:false),
+        new("gallonOfGas","Gallon of gas","Refuels the selected motor vehicle",0,0,500,1_000,WeightPounds:6.3),
+        new("inflatableRaft","Inflatable raft","Safe travel through deep water",0,0,45_000,65_000,true,true,null,2.75,WeightPounds:10),
+        new("flashlight","Flashlight","Directional light",0,0,1_000,5_000,true,true,null,0,50,WeightPounds:.5),
+        new("lantern","Lantern","Circular area light",0,0,5_000,10_000,true,true,null,0,30,WeightPounds:1.5),
+        new("laser","Laser","Straight light beam until collision",0,0,20_000,40_000,true,true,null,0,150,WeightPounds:.25),
+        new("magicHikingShoes","Magic hiking shoes","Additive movement and stamina bonus",0,0,10_000,40_000,true,true,null,3.5,WeightPounds:2),
+        new("magicRunningShoes","Magic running shoes","Larger additive movement and conditional stamina bonus",0,0,10_000,40_000,true,true,null,7,WeightPounds:1.5),
+        new("hat","Sun hat","Halves water drain and slightly reduces heat gain",0,0,3_000,7_500,true,true,WeightPounds:.25),
+        new("coolingHat","Cooling hat","Reduces heat gain and helps body heat fall in hot weather",0,0,2_500,7_000,true,true,WeightPounds:.3),
+        new("warmHat","Warm knit hat","Reduces warmth loss in cold weather",0,0,2_000,6_500,true,true,WeightPounds:.35),
+        new("tShirt","T-shirt","Light shirt that sheds heat easily",0,0,1_500,4_500,true,true,WeightPounds:.4),
+        new("coolingShirt","Cooling shirt","Reduces heat generated while moving and speeds cooling",0,0,3_000,9_000,true,true,WeightPounds:.45),
+        new("longSleeveShirt","Long-sleeve shirt","Light insulation for cool weather",0,0,2_500,7_500,true,true,WeightPounds:.65),
+        new("sweater","Sweater","Moderate insulation and movement warmth",0,0,3_500,11_000,true,true,WeightPounds:1.2),
+        new("lightJacket","Light jacket","Strong cool-weather insulation without winter-jacket weight",0,0,6_000,18_000,true,true,WeightPounds:2),
+        new("winterJacket","Winter jacket","Heavy insulation and warmth retention in cold weather",0,0,8_000,30_000,true,true,WeightPounds:3.5),
+        new("coolingShorts","Cooling shorts","Greatly reduce movement heat and shed heat quickly",0,0,2_500,7_500,true,true,WeightPounds:.5),
+        new("warmingPants","Warming pants","Retain warmth and generate extra warmth while moving",0,0,4_500,12_000,true,true,WeightPounds:1.5),
+        new("water","Water","One half-liter bottle; restores water and 2 hearts",0,0,50,200,WeightPounds:1.1),
+        new("food","Food","Packed meal; restores stamina and 2 hearts",0,0,200,500,WeightPounds:.75),
+        new("areaMap","Map of this block","Permanently reveals the current geographic block",0,0,100,100_000,true,true,WeightPounds:.05)
     };
     private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     private static readonly MovementConfiguration DefaultMovementConfiguration = new(
@@ -42,6 +73,10 @@ public sealed partial class RealityWorld
         });
     private MovementConfiguration _movementConfiguration = DefaultMovementConfiguration;
     private static readonly string[] WeaponPowerOrder = ["rifle", "sword", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
+    private static readonly HashSet<string> HatItems = new(["hat", "coolingHat", "warmHat"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> ShirtItems = new(["tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> PantsItems = new(["coolingShorts", "warmingPants"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> OffhandItems = new(["flashlight", "lantern", "laser"], StringComparer.OrdinalIgnoreCase);
     private const double DirtBikeTankGallons = 2;
     private const double MotorcycleTankGallons = 4;
     private readonly ConcurrentDictionary<string, Dictionary<string, int>> _inventories = new();
@@ -49,7 +84,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, DungeonState> _dungeons = new();
     private readonly ConcurrentDictionary<string, WorldPosition> _returnPositions = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastIdleHeal = new();
-    private readonly ConcurrentDictionary<(string Player, string Merchant), TradeQuote> _tradeQuotes = new();
+    private readonly ConcurrentDictionary<(string Player, string Merchant, long Rotation), TradeQuote> _tradeQuotes = new();
     private readonly ConcurrentDictionary<string, LootDropState> _loot = new();
     private readonly ConcurrentDictionary<string, TreasureChestState> _outdoorChests = new();
     private readonly ConcurrentDictionary<(string Actor, string Player), DateTimeOffset> _lastActorAttack = new();
@@ -57,11 +92,13 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, string> _baseBuildings = new();
     private readonly ConcurrentDictionary<(string Player, string Area), byte> _revealedWorldAreas = new();
     private readonly ConcurrentDictionary<string, List<CanonicalEntity>> _homeFurniture = new();
+    private readonly ConcurrentDictionary<string, Dictionary<string, int>> _homeItemStorage = new();
     private readonly SemaphoreSlim _homeFurnitureLock = new(1, 1);
+    private readonly SemaphoreSlim _homeItemStorageLock = new(1, 1);
 
     public PlayerPrivateState GetPrivateState(string playerId)
     {
-        var inventory = new InventoryState(playerId, GetInventoryItems(playerId));
+        var inventory = GetInventoryState(playerId);
         _players.TryGetValue(playerId, out var player);
         var dungeon = player is not null && player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var found) ? WithDiscovery(playerId, found) : null;
         var relationships = _relationships.Where(pair => pair.Key.Player == playerId)
@@ -82,9 +119,13 @@ public sealed partial class RealityWorld
         var serverConfiguration = new ServerConfigurationState(_itemConfigurations.Values.OrderBy(item => item.DisplayName).ToArray(), _movementConfiguration);
         var revealedAreas = _revealedWorldAreas.Keys.Where(key => key.Player == playerId).Select(key => key.Area).OrderBy(key => key).ToArray();
         IReadOnlyList<CanonicalEntity>? homeStorage = null;
+        InventoryState? homeItemStorage = null;
         if (dungeon?.IsHome == true && _playerAccounts.TryGetValue(playerId, out var homeAccount) && _homeFurniture.TryGetValue(homeAccount, out var furniture))
+        {
             homeStorage = furniture.Where(IsStoredFurniture).ToArray();
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage);
+            homeItemStorage = GetHomeItemStorage(homeAccount);
+        }
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage);
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
@@ -93,6 +134,8 @@ public sealed partial class RealityWorld
         var hikingShoesOn = enabled ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(playerId, "magicHikingShoes") > 0;
         var runningShoesOn = enabled ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(playerId, "magicRunningShoes") > 0;
         if (hikingShoesOn && runningShoesOn) runningShoesOn = false;
+        var offhand = ActiveOffhand(player);
+        if (!enabled && offhand != "none" && InventoryQuantity(playerId, offhand) <= 0) offhand = "none";
         var updated = player with
         {
             GodMode = enabled,
@@ -101,13 +144,17 @@ public sealed partial class RealityWorld
             WalletCents = enabled ? Math.Max(50_000, player.WalletCents) : player.WalletCents,
             HealthHearts = enabled ? Math.Max(1, player.HealthHearts) : player.HealthHearts,
             TravelMode = !enabled && TravelModeUnavailable(playerId, player) ? TravelMode.Walk : player.TravelMode,
-            FlashlightOn = enabled ? player.FlashlightOn : player.FlashlightOn && InventoryQuantity(playerId,"flashlight")>0,
-            LanternOn = enabled ? player.LanternOn : player.LanternOn && InventoryQuantity(playerId,"lantern")>0,
-            LaserOn = enabled ? player.LaserOn : player.LaserOn && InventoryQuantity(playerId,"laser")>0,
+            FlashlightOn = offhand == "flashlight",
+            LanternOn = offhand == "lantern",
+            LaserOn = offhand == "laser",
             MagicHikingShoesOn = hikingShoesOn,
             MagicRunningShoesOn = runningShoesOn,
-            HatOn = enabled ? player.HatOn : player.HatOn && InventoryQuantity(playerId, "hat") > 0,
+            EquippedHat = RetainedEquipment(playerId, player.EquippedHat, HatItems, enabled),
+            EquippedShirt = RetainedEquipment(playerId, player.EquippedShirt, ShirtItems, enabled),
+            EquippedPants = RetainedEquipment(playerId, player.EquippedPants, PantsItems, enabled),
+            HatOn = (enabled ? player.EquippedHat : RetainedEquipment(playerId, player.EquippedHat, HatItems, false)).Equals("hat", StringComparison.OrdinalIgnoreCase),
             EquippedWeapon = enabled ? player.EquippedWeapon : BestUsableWeapon(playerId, player.EquippedWeapon, false),
+            BodyHeat = enabled ? 50 : player.BodyHeat,
             Version = player.Version + 1
         };
         await SavePlayerAsync(updated, cancellationToken); return updated;
@@ -123,8 +170,8 @@ public sealed partial class RealityWorld
         _ => false
     };
 
-    public async Task<PlayerState> SetLightsAsync(string playerId,bool flashlight,bool lantern,bool laser,CancellationToken cancellationToken=default)
-    { if(!_players.TryGetValue(playerId,out var player))throw new InvalidOperationException("Unknown player.");if(!player.GodMode&&flashlight&&InventoryQuantity(playerId,"flashlight")<=0)throw new InvalidOperationException("You need a flashlight in your inventory.");if(!player.GodMode&&lantern&&InventoryQuantity(playerId,"lantern")<=0)throw new InvalidOperationException("You need a lantern in your inventory.");if(!player.GodMode&&laser&&InventoryQuantity(playerId,"laser")<=0)throw new InvalidOperationException("You need a laser in your inventory.");var updated=player with{FlashlightOn=flashlight,LanternOn=lantern,LaserOn=laser,Version=player.Version+1};await SavePlayerAsync(updated,cancellationToken);return updated; }
+    public Task<PlayerState> SetLightsAsync(string playerId, bool flashlight, bool lantern, bool laser, CancellationToken cancellationToken = default) =>
+        SetEquipmentAsync(playerId, "offhand", laser ? "laser" : lantern ? "lantern" : flashlight ? "flashlight" : null, cancellationToken);
 
     public Task<PlayerState> SetMagicHikingShoesAsync(string playerId, bool enabled, CancellationToken cancellationToken = default) =>
         SetEquipmentAsync(playerId, "shoes", enabled ? "magicHikingShoes" : null, cancellationToken);
@@ -146,9 +193,34 @@ public sealed partial class RealityWorld
         }
         else if (slot == "hat")
         {
-            if (itemType is not null && itemType != "hat") throw new InvalidOperationException("That item cannot be worn as a hat.");
-            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, "hat") <= 0) throw new InvalidOperationException("You need a hat in your inventory.");
-            updated = player with { HatOn = itemType == "hat", Version = player.Version + 1 };
+            if (itemType is not null && !HatItems.Contains(itemType)) throw new InvalidOperationException("That item cannot be worn as a hat.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
+            var equipped = itemType ?? "none";
+            updated = player with { EquippedHat = equipped, HatOn = equipped.Equals("hat", StringComparison.OrdinalIgnoreCase), Version = player.Version + 1 };
+        }
+        else if (slot == "shirt")
+        {
+            if (itemType is not null && !ShirtItems.Contains(itemType)) throw new InvalidOperationException("That item cannot be worn as a shirt or jacket.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
+            updated = player with { EquippedShirt = itemType ?? "none", Version = player.Version + 1 };
+        }
+        else if (slot == "pants")
+        {
+            if (itemType is not null && !PantsItems.Contains(itemType)) throw new InvalidOperationException("That item cannot be worn as pants or shorts.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
+            updated = player with { EquippedPants = itemType ?? "none", Version = player.Version + 1 };
+        }
+        else if (slot == "offhand")
+        {
+            if (itemType is not null && !OffhandItems.Contains(itemType)) throw new InvalidOperationException("That item cannot be equipped in your offhand.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
+            updated = player with
+            {
+                FlashlightOn = itemType?.Equals("flashlight", StringComparison.OrdinalIgnoreCase) == true,
+                LanternOn = itemType?.Equals("lantern", StringComparison.OrdinalIgnoreCase) == true,
+                LaserOn = itemType?.Equals("laser", StringComparison.OrdinalIgnoreCase) == true,
+                Version = player.Version + 1
+            };
         }
         else if (slot == "weapon")
         {
@@ -178,7 +250,8 @@ public sealed partial class RealityWorld
                 {
                     Stamina = player.MaximumStamina, Water = player.MaximumWater,
                     WalletCents = Math.Max(50_000, player.WalletCents),
-                    HealthHearts = Math.Min(player.MaximumHealthHearts, Math.Max(1, player.HealthHearts) + (elapsed.TotalSeconds / 5))
+                    HealthHearts = Math.Min(player.MaximumHealthHearts, Math.Max(1, player.HealthHearts) + (elapsed.TotalSeconds / 5)),
+                    BodyHeat = 50
                 };
             }
             else
@@ -187,21 +260,84 @@ public sealed partial class RealityWorld
                     updated = updated with { Stamina = Math.Min(player.MaximumStamina, player.Stamina + (.25 * elapsed.TotalSeconds)) };
                 var wearingHat = player.HatOn && InventoryQuantity(pair.Key, "hat") > 0;
                 if (!(player.WaterProtectedUntilUtc > now)) updated = updated with { Water = Math.Max(0, updated.Water - WorldNavigation.WaterDrain(elapsed.TotalSeconds, wearingHat)) };
-                if (idle >= TimeSpan.FromSeconds(30) && player.HealthHearts < player.MaximumHealthHearts &&
+                updated = ApplyBodyTemperature(updated, idle, elapsed);
+                if (updated.BodyHeat >= 85)
+                    updated = updated with { Stamina = Math.Max(0, updated.Stamina - (.05 + (updated.BodyHeat - 85) / 100) * elapsed.TotalSeconds) };
+                if (updated.BodyHeat <= .001)
+                    updated = updated with { HealthHearts = Math.Max(0, updated.HealthHearts - elapsed.TotalSeconds / 120) };
+                if (updated.HealthHearts <= 0) updated = ResetPlayer(updated);
+                else if (idle >= TimeSpan.FromSeconds(30) && updated.BodyHeat > 0 && player.HealthHearts < player.MaximumHealthHearts &&
                     (!_lastIdleHeal.TryGetValue(pair.Key, out var lastHeal) || now - lastHeal >= TimeSpan.FromSeconds(30)))
                 {
                     updated = updated with { HealthHearts = Math.Min(player.MaximumHealthHearts, updated.HealthHearts + .5) };
                     _lastIdleHeal[pair.Key] = now;
                 }
             }
-            if (updated.Stamina == player.Stamina && updated.Water == player.Water && updated.WalletCents == player.WalletCents && updated.HealthHearts == player.HealthHearts) continue;
+            if (updated.Stamina == player.Stamina && updated.Water == player.Water && updated.WalletCents == player.WalletCents && updated.HealthHearts == player.HealthHearts && updated.BodyHeat == player.BodyHeat) continue;
             updated = updated with { SpeedMetersPerSecond = idle > TimeSpan.FromSeconds(.5) ? 0 : updated.SpeedMetersPerSecond, Version = player.Version + 1 };
-            await SavePlayerAsync(updated, cancellationToken); changed.Add(updated);
+            if (await SavePlayerAsync(updated, cancellationToken)) changed.Add(updated);
         }
         foreach (var expired in _loot.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) _loot.TryRemove(expired, out _);
         foreach (var expired in _outdoorChests.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) _outdoorChests.TryRemove(expired, out _);
         return changed;
     }
+
+    private PlayerState ApplyBodyTemperature(PlayerState player, TimeSpan idle, TimeSpan elapsed)
+    {
+        var seconds = elapsed.TotalSeconds;
+        if (player.LocationId != "outdoor" || !Weather.IsAvailable)
+            return player with { BodyHeat = MoveToward(player.BodyHeat, 50, .08 * seconds) };
+        var temperatureF = Weather.TemperatureCelsius * 9 / 5 + 32;
+        var moving = idle < TimeSpan.FromSeconds(1) && player.SpeedMetersPerSecond > .05;
+        var motion = moving ? Math.Clamp(player.SpeedMetersPerSecond / WorldNavigation.MilesPerHour(3.5), .25, 3) : 0;
+        var clothing = ThermalProtection(player);
+        var heat = player.BodyHeat;
+        if (temperatureF < 50)
+        {
+            var coldLoss = (50 - temperatureF) / 30 * .035 * (1 - clothing.ColdProtection) * seconds;
+            var movementWarmth = moving ? (.012 + .016 * clothing.MovementWarmth) * motion * seconds : 0;
+            heat += movementWarmth - coldLoss;
+        }
+        else if (temperatureF > 80 && moving)
+        {
+            var heatGain = (temperatureF - 80) / 20 * .045 * motion * (1 - clothing.HeatProtection) * seconds;
+            heat += heatGain;
+        }
+        else
+        {
+            heat = MoveToward(heat, 50, (.025 + .04 * clothing.CoolingBonus) * seconds);
+        }
+        if (!moving && heat > 50) heat = MoveToward(heat, 50, (.025 + .05 * clothing.CoolingBonus) * seconds);
+        return player with { BodyHeat = Math.Clamp(heat, 0, player.MaximumBodyHeat) };
+    }
+
+    private static double MoveToward(double value, double target, double amount) => value < target ? Math.Min(target, value + amount) : Math.Max(target, value - amount);
+
+    private static (double ColdProtection, double MovementWarmth, double HeatProtection, double CoolingBonus) ThermalProtection(PlayerState player)
+    {
+        var cold = 0d; var warmth = 0d; var heat = 0d; var cooling = 0d;
+        foreach (var item in new[] { player.EquippedHat, player.EquippedShirt, player.EquippedPants })
+        {
+            var effect = item switch
+            {
+                "warmHat" => (.18, .08, 0d, 0d), "hat" => (0d, 0d, .10, .08), "coolingHat" => (0d, 0d, .20, .18),
+                "tShirt" => (0d, 0d, .08, .10), "coolingShirt" => (0d, 0d, .38, .38), "longSleeveShirt" => (.12, .08, 0d, 0d),
+                "sweater" => (.35, .20, 0d, 0d), "lightJacket" => (.48, .24, 0d, 0d), "winterJacket" => (.65, .35, 0d, 0d),
+                "coolingShorts" => (0d, 0d, .48, .55), "warmingPants" => (.32, .42, 0d, 0d),
+                _ => (0d, 0d, 0d, 0d)
+            };
+            cold += effect.Item1; warmth += effect.Item2; heat += effect.Item3; cooling += effect.Item4;
+        }
+        return (Math.Clamp(cold, 0, .85), Math.Clamp(warmth, 0, 1), Math.Clamp(heat, 0, .85), Math.Clamp(cooling, 0, 1));
+    }
+
+    private string RetainedEquipment(string playerId, string itemType, IReadOnlySet<string> allowed, bool godMode)
+    {
+        if (string.IsNullOrWhiteSpace(itemType) || itemType == "none" || !allowed.Contains(itemType)) return "none";
+        return godMode || InventoryQuantity(playerId, itemType) > 0 ? itemType : "none";
+    }
+
+    private static string ActiveOffhand(PlayerState player) => player.LaserOn ? "laser" : player.LanternOn ? "lantern" : player.FlashlightOn ? "flashlight" : "none";
 
     public async Task<PlayerState> ConsumeItemAsync(string playerId, string itemType, CancellationToken cancellationToken = default)
     {
@@ -234,17 +370,50 @@ public sealed partial class RealityWorld
         var buildingId = door.Properties.GetValueOrDefault("buildingId") ?? throw new InvalidOperationException("The door has no building.");
         var building = _baseEntities.Values.First(entity => entity.Id == buildingId);
         var ownsBase = _playerAccounts.TryGetValue(playerId, out var accountId) && _baseBuildings.GetValueOrDefault(accountId) == buildingId;
-        var dungeonId = ownsBase ? $"home:{accountId}:{buildingId}" : $"dungeon:{buildingId}:{playerId}";
-        await ResetDungeonSessionAsync(playerId, dungeonId, cancellationToken);
-        var dungeon = ownsBase ? GenerateHome(dungeonId, building) : GenerateDungeon(dungeonId, building);
+        if (!ownsBase && IsBuildingLocked(building)) throw new InvalidOperationException("This building is locked. Door locks change every four hours.");
+        var dungeonId = ownsBase ? $"home:{accountId}:{buildingId}" : $"dungeon:{buildingId}:{playerId}:{Guid.NewGuid():N}";
+        if (ownsBase) await ResetDungeonSessionAsync(playerId, dungeonId, cancellationToken);
+        var dungeon = ownsBase ? GenerateHome(dungeonId, building) : CreateDungeonSession(dungeonId, building);
         _dungeons[dungeonId] = dungeon;
         foreach (var actor in dungeon.Actors)
             _relationships[(playerId, actor.Id)] = actor.FriendRating;
         _returnPositions[playerId] = player.Position;
         var discovery = new HashSet<string>();
-        if (!dungeon.IsHome) { RevealDungeonCells(discovery, dungeon.Exit.X, dungeon.Exit.Y); foreach (var cell in discovery) await _store.SaveDiscoveryAsync(Configuration.Id, playerId, dungeonId, cell, cancellationToken); }
-        var updated = player with { LocationId = dungeonId, Position = dungeon.Exit, Terrain = TerrainType.Pavement, TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        if (!dungeon.IsHome)
+        {
+            if (dungeon.IsStore)
+            {
+                for (var x = 0; x <= dungeon.Width; x += 3)
+                for (var y = 0; y <= dungeon.Height; y += 3)
+                    RevealDungeonCells(discovery, x, y);
+            }
+            else RevealDungeonCells(discovery, dungeon.Exit.X, dungeon.Exit.Y);
+            foreach (var cell in discovery) await _store.SaveDiscoveryAsync(Configuration.Id, playerId, dungeonId, cell, cancellationToken);
+        }
+        var updated = player with { LocationId = dungeonId, Position = dungeon.Exit, Terrain = TerrainType.Pavement, TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 2 };
         await SavePlayerAsync(updated, cancellationToken); return (updated, dungeon with { RevealedCells = discovery.ToArray() });
+    }
+
+    public async Task<(PlayerState Player, DungeonState Dungeon)> ChangeDungeonLevelAsync(string playerId, int direction, CancellationToken cancellationToken = default)
+    {
+        if (direction is not (-1 or 1)) throw new InvalidOperationException("Choose stairs up or down.");
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId == "outdoor" || !_dungeons.TryGetValue(player.LocationId, out var current) || current.IsHome)
+            throw new InvalidOperationException("You are not inside a multi-level dungeon.");
+        var stairs = current.Stairs ?? throw new InvalidOperationException("This dungeon has no stairs.");
+        if (current.LevelCount <= 1) throw new InvalidOperationException("This dungeon has no stairs.");
+        if (!player.GodMode && player.Position.Distance2D(stairs) > 3) throw new InvalidOperationException("Move closer to the stairs first.");
+        var targetLevel = current.Level + direction;
+        if (targetLevel < 1) throw new InvalidOperationException("You are already on the first level.");
+        if (targetLevel > current.LevelCount) throw new InvalidOperationException("You are already on the last level.");
+        if (!_baseEntities.TryGetValue(current.BuildingId, out var building)) throw new InvalidOperationException("That building is unavailable.");
+        var sessionId = current.SessionId ?? current.Id;
+        var targetId = targetLevel == 1 ? sessionId : $"{sessionId}:level:{targetLevel}";
+        var target = _dungeons.GetOrAdd(targetId, _ => GenerateDungeonFloor(sessionId, building, targetLevel, current.LevelCount, current.Stairs));
+        foreach (var actor in target.Actors) _relationships.TryAdd((playerId, actor.Id), actor.FriendRating);
+        var updated = player with { LocationId = target.Id, Position = target.Stairs ?? target.Exit, SpeedMetersPerSecond = 0, Version = player.Version + 2 };
+        await SavePlayerAsync(updated, cancellationToken);
+        await RevealAsync(updated, target, cancellationToken);
+        return (updated, WithDiscovery(playerId, target));
     }
 
     public async Task<PlayerState> ExitDungeonAsync(string playerId, CancellationToken cancellationToken = default)
@@ -252,7 +421,7 @@ public sealed partial class RealityWorld
         if (!_players.TryGetValue(playerId, out var player) || player.LocationId == "outdoor") throw new InvalidOperationException("You are not inside a dungeon or Home.");
         var dungeonId = player.LocationId;
         var destination = _returnPositions.TryRemove(playerId, out var saved) ? saved : Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
-        var updated = player with { LocationId = "outdoor", Position = destination, Terrain = Navigation.TerrainAt(destination.X, destination.Y), SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        var updated = player with { LocationId = "outdoor", Position = destination, Terrain = Navigation.TerrainAt(destination.X, destination.Y), SpeedMetersPerSecond = 0, Version = player.Version + 2 };
         await SavePlayerAsync(updated, cancellationToken);
         await ResetDungeonSessionAsync(playerId, dungeonId, cancellationToken);
         return updated;
@@ -260,11 +429,17 @@ public sealed partial class RealityWorld
 
     private async Task ResetDungeonSessionAsync(string playerId, string dungeonId, CancellationToken cancellationToken)
     {
-        _dungeons.TryRemove(dungeonId, out _);
-        foreach (var relationship in _relationships.Keys.Where(key => key.Player == playerId && key.Actor.StartsWith(dungeonId + ":", StringComparison.Ordinal)).ToArray()) _relationships.TryRemove(relationship, out _);
-        foreach (var drop in _loot.Where(pair => pair.Value.LocationId == dungeonId).Select(pair => pair.Key).ToArray()) _loot.TryRemove(drop, out _);
-        foreach (var quote in _tradeQuotes.Keys.Where(key => key.Player == playerId && key.Merchant.StartsWith(dungeonId + ":", StringComparison.Ordinal)).ToArray()) _tradeQuotes.TryRemove(quote, out _);
-        await _store.ResetDungeonStateAsync(Configuration.Id, playerId, dungeonId, cancellationToken);
+        var sessionId = _dungeons.TryGetValue(dungeonId, out var current) ? current.SessionId ?? dungeonId : dungeonId;
+        var floorIds = _dungeons.Keys.Where(id => id == sessionId || id.StartsWith(sessionId + ":level:", StringComparison.Ordinal)).ToArray();
+        if (floorIds.Length == 0) floorIds = [dungeonId];
+        foreach (var floorId in floorIds)
+        {
+            _dungeons.TryRemove(floorId, out _);
+            await _store.ResetDungeonStateAsync(Configuration.Id, playerId, floorId, cancellationToken);
+        }
+        foreach (var relationship in _relationships.Keys.Where(key => key.Player == playerId && key.Actor.StartsWith(sessionId + ":", StringComparison.Ordinal)).ToArray()) _relationships.TryRemove(relationship, out _);
+        foreach (var drop in _loot.Where(pair => pair.Value.LocationId == sessionId || pair.Value.LocationId.StartsWith(sessionId + ":level:", StringComparison.Ordinal)).Select(pair => pair.Key).ToArray()) _loot.TryRemove(drop, out _);
+        foreach (var quote in _tradeQuotes.Keys.Where(key => key.Player == playerId && key.Merchant.StartsWith(sessionId + ":", StringComparison.Ordinal)).ToArray()) _tradeQuotes.TryRemove(quote, out _);
     }
 
     public async Task<(PlayerState Player, long PriceCents)> PurchaseBaseAsync(string playerId, PurchaseBaseRequest request, CancellationToken cancellationToken = default)
@@ -275,9 +450,10 @@ public sealed partial class RealityWorld
         if (player.Position.Distance2D(door.Position) > 6) throw new InvalidOperationException("Move within 6 meters of the door before purchasing this base.");
         var buildingId = door.Properties.GetValueOrDefault("buildingId") ?? throw new InvalidOperationException("The door has no building.");
         var building = _baseEntities.GetValueOrDefault(buildingId) ?? throw new InvalidOperationException("That building is unavailable.");
+        if (StoreProfileForBuilding(building) is not null) throw new InvalidOperationException("Stores are commercial properties and cannot be purchased as a Home.");
         if (_baseBuildings.GetValueOrDefault(accountId) == buildingId) throw new InvalidOperationException("This building is already your base.");
-        var price = player.GodMode ? GodModeBasePurchasePriceCents : CalculateBuildingPriceCents(building);
-        if (player.WalletCents < price) throw new InvalidOperationException($"This base costs ${price / 100m:N2}; you do not have enough money.");
+        var price = CalculateBuildingPriceCents(building);
+        if (!player.GodMode && player.WalletCents < price) throw new InvalidOperationException($"This base costs ${price / 100m:N2}; you do not have enough money.");
 
         await _basePurchaseLock.WaitAsync(cancellationToken);
         try
@@ -290,7 +466,7 @@ public sealed partial class RealityWorld
             var homeId = $"home:{accountId}:{buildingId}";
             _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
             foreach (var linkedPlayer in _playerAccounts.Where(pair => pair.Value == accountId).Select(pair => pair.Key)) SetBaseReturnPosition(linkedPlayer, buildingId);
-            var updated = player with { WalletCents = player.WalletCents - price, Version = player.Version + 1 };
+            var updated = player with { WalletCents = player.GodMode ? player.WalletCents : player.WalletCents - price, Version = player.Version + 1 };
             await SavePlayerAsync(updated, cancellationToken);
             return (updated, price);
         }
@@ -353,31 +529,121 @@ public sealed partial class RealityWorld
         var cells = _store.LoadDiscoveryAsync(Configuration.Id, playerId, dungeon.Id).GetAwaiter().GetResult(); return dungeon with { RevealedCells = cells.ToArray() };
     }
 
-    private DungeonState GenerateDungeon(string id, CanonicalEntity building)
+    private DungeonState CreateDungeonSession(string sessionId, CanonicalEntity building)
     {
-        var minX = building.Geometry.Min(p => p.X); var maxX = building.Geometry.Max(p => p.X); var minY = building.Geometry.Min(p => p.Y); var maxY = building.Geometry.Max(p => p.Y);
-        var width = Math.Clamp(maxX - minX, 12, 60); var height = Math.Clamp(maxY - minY, 12, 60); var seed = StableInt(id); var random = new Random(seed);
-        var splitX = width * (.4 + random.NextDouble() * .2); var splitY = height * (.4 + random.NextDouble() * .2); const double door = 2.2;
-        var walls = new[]
+        var store = StoreProfileForBuilding(building);
+        if (store is not null) return GenerateStoreInterior(sessionId, building, store);
+        var levelCount = RandomDungeonLevelCount(building);
+        var layout = CreateInteriorLayout(building);
+        var stairRandom = new Random(StableInt($"{sessionId}:stairs"));
+        WorldPosition? stairs = levelCount > 1 ? RandomInteriorPosition(stairRandom, layout, building.Position.Region, layout.Exit) : null;
+        return GenerateDungeonFloor(sessionId, building, 1, levelCount, stairs);
+    }
+
+    private static int RandomDungeonLevelCount(CanonicalEntity building)
+    {
+        if (int.TryParse(building.Properties.GetValueOrDefault("dungeon:levels"), out var specified)) return Math.Clamp(specified, 1, 10);
+        // Seventy percent are single-level; the rest are uniformly distributed
+        // from two through ten levels for an occasional genuinely deep dungeon.
+        return RandomNumberGenerator.GetInt32(100) < 70 ? 1 : RandomNumberGenerator.GetInt32(2, 11);
+    }
+
+    private DungeonState GenerateDungeonFloor(string sessionId, CanonicalEntity building, int level, int levelCount, WorldPosition? stairs)
+    {
+        var id = level == 1 ? sessionId : $"{sessionId}:level:{level}";
+        var layout = CreateInteriorLayout(building);
+        var width = layout.Width; var height = layout.Height; var seed = StableInt(id); var random = new Random(seed);
+        var walls = layout.ExteriorWalls.ToList(); var exteriorWallCount = walls.Count;
+        var rooms = new List<DungeonRoom>();
+        if (IsAxisAlignedRectangle(layout.Footprint))
         {
-            new DungeonWall(0,0,width,0), new DungeonWall(width,0,width,height), new DungeonWall(width,height,0,height), new DungeonWall(0,height,0,0),
-            new DungeonWall(splitX,0,splitX,height,splitY-door/2,splitY+door/2), new DungeonWall(0,splitY,width,splitY,splitX-door/2,splitX+door/2)
-        };
-        var rooms = new[] { new DungeonRoom(0,0,splitX,splitY), new DungeonRoom(splitX,0,width-splitX,splitY), new DungeonRoom(0,splitY,splitX,height-splitY), new DungeonRoom(splitX,splitY,width-splitX,height-splitY) };
+            var splitX = width * (.4 + random.NextDouble() * .2); var splitY = height * (.4 + random.NextDouble() * .2); const double door = 2.2;
+            walls.Add(new DungeonWall(splitX, 0, splitX, height, splitY - door / 2, splitY + door / 2));
+            walls.Add(new DungeonWall(0, splitY, width, splitY, splitX - door / 2, splitX + door / 2));
+            rooms.AddRange([new(0, 0, splitX, splitY), new(splitX, 0, width - splitX, splitY), new(0, splitY, splitX, height - splitY), new(splitX, splitY, width - splitX, height - splitY)]);
+        }
+        else rooms.Add(new DungeonRoom(0, 0, width, height));
         var region = building.Position.Region; var actors = new List<ActorState>();
         for (var i = 0; i < random.Next(3, 7); i++)
         {
             var merchant = i == 0 && random.NextDouble() < .55; var foe = merchant ? random.NextDouble() * 2 : -2 + random.NextDouble() * 4;
-            actors.Add(new ActorState($"{id}:npc:{i}", EntityKind.Npc, merchant ? "merchant" : "resident", merchant ? $"Merchant {i + 1}" : $"Dungeon Dweller {i + 1}",
-                new WorldPosition(region, 3 + random.NextDouble() * (width - 6), 3 + random.NextDouble() * (height - 6)), HealthHearts: 4 + random.Next(5), MaximumHealthHearts: 8,
-                FriendRating: foe, IsMerchant: merchant, TravelMode: (TravelMode)random.Next(0, 4), LocationId: id));
+            var position = RandomInteriorPosition(random, layout, region, stairs);
+            var actorName = merchant || foe >= 0 ? FriendlyHumanName(id, i) : $"Dungeon Dweller {i + 1}";
+            actors.Add(new ActorState($"{id}:npc:{i}", EntityKind.Npc, merchant ? "merchant" : "resident", actorName,
+                position, HealthHearts: 4 + random.Next(5), MaximumHealthHearts: 8,
+                FriendRating: foe, IsMerchant: merchant, TravelMode: (TravelMode)random.Next(0, 4), LocationId: id,
+                EquippedWeapon: merchant ? "pistol" : "none"));
         }
-        var chests = Enumerable.Range(0, random.Next(1, 4)).Select(i => new TreasureChestState($"{id}:chest:{i}", new WorldPosition(region, 2 + random.NextDouble() * (width - 4), 2 + random.NextDouble() * (height - 4)), id)).ToArray();
-        return new DungeonState(id, building.Id, width, height, rooms, walls, new WorldPosition(region, 2, 2), actors, chests, Array.Empty<string>());
+        var chests = Enumerable.Range(0, random.Next(1, 4)).Select(i => new TreasureChestState($"{id}:chest:{i}", RandomInteriorPosition(random, layout, region, stairs), id)).ToArray();
+        return new DungeonState(id, building.Id, width, height, rooms, walls, layout.Exit, actors, chests, Array.Empty<string>(),
+            Footprint: layout.Footprint, ExteriorWallCount: exteriorWallCount, Level: level, LevelCount: levelCount,
+            Stairs: stairs, Doorway: layout.Doorway, SessionId: sessionId);
+    }
+
+    private sealed record StoreProfile(string Name, string Category);
+
+    private StoreProfile? StoreProfileForBuilding(CanonicalEntity building)
+    {
+        CanonicalEntity? source = building.Properties.ContainsKey("merchantCategory") ? building : null;
+        source ??= _baseEntities.Values
+            .Where(entity => entity.Kind == EntityKind.PointOfInterest && entity.Properties.ContainsKey("merchantCategory"))
+            .Where(entity => PointInsideWorldFootprint(entity.Position, building.Geometry))
+            .OrderBy(entity => entity.Position.Distance2D(building.Position))
+            .FirstOrDefault();
+        if (source is null) return null;
+        var category = source.Properties.GetValueOrDefault("merchantCategory") ?? "general";
+        var name = source.Properties.GetValueOrDefault("name") ?? source.Properties.GetValueOrDefault("brand") ?? $"{char.ToUpperInvariant(category[0])}{category[1..]} store";
+        return new StoreProfile(name, category);
+    }
+
+    private static bool PointInsideWorldFootprint(WorldPosition point, IReadOnlyList<GeometryPoint> footprint)
+    {
+        if (footprint.Count < 3) return false;
+        var inside = false;
+        for (var index = 0; index < footprint.Count; index++)
+        {
+            var previous = index == 0 ? footprint.Count - 1 : index - 1;
+            var a = footprint[index]; var b = footprint[previous];
+            if ((a.Y > point.Y) != (b.Y > point.Y) &&
+                point.X < (b.X - a.X) * (point.Y - a.Y) / (Math.Abs(b.Y - a.Y) < .000001 ? double.Epsilon : b.Y - a.Y) + a.X)
+                inside = !inside;
+        }
+        return inside;
+    }
+
+    private DungeonState GenerateStoreInterior(string sessionId, CanonicalEntity building, StoreProfile store)
+    {
+        var layout = CreateInteriorLayout(building);
+        var random = new Random(StableInt($"{sessionId}:store"));
+        var factionId = $"{sessionId}:staff";
+        var actors = new List<ActorState>();
+        var merchantPosition = RandomInteriorPosition(random, layout, building.Position.Region, layout.Exit);
+        actors.Add(new ActorState($"{sessionId}:merchant", EntityKind.Npc, "storeMerchant", FriendlyHumanName(sessionId, 0), merchantPosition,
+            HealthHearts: 8, MaximumHealthHearts: 8, FriendRating: 1, IsMerchant: true, LocationId: sessionId,
+            MerchantCategory: store.Category, EquippedWeapon: "pistol", FactionId: factionId));
+        var employeeCount = random.Next(2, 7);
+        for (var index = 0; index < employeeCount; index++)
+        {
+            var position = RandomInteriorPosition(random, layout, building.Position.Region, layout.Exit);
+            actors.Add(new ActorState($"{sessionId}:employee:{index}", EntityKind.Npc, "storeEmployee", FriendlyHumanName(sessionId, index + 1), position,
+                HealthHearts: 6, MaximumHealthHearts: 6, FriendRating: 1, LocationId: sessionId,
+                EquippedWeapon: "fist", FactionId: factionId));
+        }
+        return new DungeonState(sessionId, building.Id, layout.Width, layout.Height,
+            new[] { new DungeonRoom(0, 0, layout.Width, layout.Height) }, layout.ExteriorWalls, layout.Exit,
+            actors, Array.Empty<TreasureChestState>(), Array.Empty<string>(), Footprint: layout.Footprint,
+            ExteriorWallCount: layout.ExteriorWalls.Count, Doorway: layout.Doorway, SessionId: sessionId,
+            IsStore: true, StoreCategory: store.Category);
     }
 
     private DungeonState GenerateHome(string id, CanonicalEntity building)
         => BuildHome(id, building);
+
+    private static string FriendlyHumanName(string scope, int ordinal)
+    {
+        var start = (StableInt($"friendly-name:{scope}") & int.MaxValue) % FriendlyHumanNames.Length;
+        return FriendlyHumanNames[(start + ordinal) % FriendlyHumanNames.Length];
+    }
 
     public async Task<PlayerState> RestAtBedAsync(string playerId,string bedId,CancellationToken cancellationToken=default)
     {
@@ -391,7 +657,9 @@ public sealed partial class RealityWorld
     {
         var merchant = FindActor(playerId, merchantId); if (merchant is null || !merchant.IsMerchant) throw new InvalidOperationException("That character is not a merchant.");
         var player = _players[playerId]; if (player.LocationId != merchant.LocationId || player.Position.Distance2D(merchant.Position) > 5) throw new InvalidOperationException("Move closer to trade.");
-        return _tradeQuotes.GetOrAdd((playerId, merchantId), _ => GenerateTradeQuote(playerId, merchant));
+        var rotation = MerchantInventoryRotation(DateTimeOffset.UtcNow);
+        foreach (var expired in _tradeQuotes.Keys.Where(key => key.Player == playerId && key.Merchant == merchantId && key.Rotation != rotation).ToArray()) _tradeQuotes.TryRemove(expired, out _);
+        return _tradeQuotes.GetOrAdd((playerId, merchantId, rotation), _ => GenerateTradeQuote(playerId, merchant));
     }
 
     public async Task<(PlayerState Player, InventoryState Inventory, RelationshipState Relationship)> ConfirmTradeAsync(string playerId, ConfirmTradeRequest request, CancellationToken cancellationToken = default)
@@ -399,7 +667,10 @@ public sealed partial class RealityWorld
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player."); var quote = RequestTrade(playerId, request.MerchantId);
         var requested = request.Purchases.Where(line => line.Quantity > 0).ToArray(); if (requested.Length == 0) throw new InvalidOperationException("Select at least one item.");
         long total = 0; foreach (var line in requested) { var offer = quote.Offers.FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("Item not offered."); if (line.Quantity > offer.Quantity) throw new InvalidOperationException("Not enough stock."); checked { total += offer.UnitPriceCents * line.Quantity; } }
-        if (total > player.WalletCents) throw new InvalidOperationException("You cannot spend more than you have.");
+        if (!player.GodMode && total > player.WalletCents) throw new InvalidOperationException("You cannot spend more than you have.");
+        var backpackPurchases = requested.Where(line => !line.ItemType.Equals("areaMap", StringComparison.OrdinalIgnoreCase) && !FurnitureCatalog.TryParse(line.ItemType, out _, out _, out _))
+            .Select(line => InventoryStack(line.ItemType, line.Quantity)).ToArray();
+        if (!CanAddToBackpack(playerId, backpackPurchases, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
         foreach (var line in requested)
         {
             if (line.ItemType.Equals("areaMap", StringComparison.OrdinalIgnoreCase))
@@ -415,11 +686,11 @@ public sealed partial class RealityWorld
             }
             else AddInventory(playerId, line.ItemType, line.Quantity);
         }
-        var updated = player with { WalletCents = player.WalletCents - total, Version = player.Version + 1 };
+        var updated = player with { WalletCents = player.GodMode ? player.WalletCents : player.WalletCents - total, Version = player.Version + 1 };
         var friend = Relationship(playerId, request.MerchantId) + .5; _relationships[(playerId, request.MerchantId)] = friend; await _store.SaveRelationshipAsync(Configuration.Id, new(playerId, request.MerchantId, friend), cancellationToken);
         foreach (var key in _tradeQuotes.Keys.Where(key => key.Player == playerId).ToArray()) _tradeQuotes.TryRemove(key, out _);
         await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
-        return (updated, new InventoryState(playerId, GetInventoryItems(playerId)), new RelationshipState(playerId, request.MerchantId, friend));
+        return (updated, GetInventoryState(playerId), new RelationshipState(playerId, request.MerchantId, friend));
     }
 
     private TradeQuote GenerateTradeQuote(string playerId, ActorState merchant)
@@ -437,7 +708,7 @@ public sealed partial class RealityWorld
 
     private MerchantOffer[] BaseMerchantOffers(ActorState merchant, string? playerId = null)
     {
-        var random = new Random(StableInt($"{merchant.Id}:{DateTimeOffset.UtcNow:yyyyMMdd}"));
+        var random = new Random(StableInt($"{merchant.Id}:{MerchantInventoryRotation(DateTimeOffset.UtcNow)}"));
         if (merchant.MerchantCategory == "furniture")
         {
             var furnitureOffers = FurnitureCatalog.All.OrderBy(_ => random.Next()).Take(random.Next(10, 19)).Select(item => FurnitureCatalog.CreateOffer(item, random)).ToList();
@@ -450,22 +721,46 @@ public sealed partial class RealityWorld
         }
         var allowed = merchant.MerchantCategory switch
         {
-            "gas" => new HashSet<string>(["gallonOfGas"], StringComparer.OrdinalIgnoreCase),
-            "clothing" => new HashSet<string>(["hat", "magicHikingShoes", "magicRunningShoes"], StringComparer.OrdinalIgnoreCase),
+            "gas" => new HashSet<string>(["gallonOfGas", "food", "water"], StringComparer.OrdinalIgnoreCase),
+            "clothing" => new HashSet<string>(["hat", "coolingHat", "warmHat", "tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket", "coolingShorts", "warmingPants", "magicHikingShoes", "magicRunningShoes"], StringComparer.OrdinalIgnoreCase),
             "food" => new HashSet<string>(["food", "water"], StringComparer.OrdinalIgnoreCase),
             "convenience" => new HashSet<string>(["food", "water"], StringComparer.OrdinalIgnoreCase),
+            "weapons" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet"], StringComparer.OrdinalIgnoreCase),
+            "hardware" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "bike", "flashlight", "lantern", "laser"], StringComparer.OrdinalIgnoreCase),
+            "sportingGoods" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "skateboard", "bike", "magicHikingShoes", "magicRunningShoes", "inflatableRaft"], StringComparer.OrdinalIgnoreCase),
+            "vehicles" => new HashSet<string>(["dirtBike", "motorcycle", "gallonOfGas"], StringComparer.OrdinalIgnoreCase),
             _ => null
         };
         var pool = _itemConfigurations.Values.Where(item => item.ForSale && item.ItemType != "areaMap" && (allowed is null || allowed.Contains(item.ItemType))).ToArray();
-        var selected = pool.OrderBy(_ => random.Next()).Take(Math.Min(pool.Length, allowed is null ? random.Next(3, 7) : Math.Max(1, pool.Length))).ToList();
+        var selectedCount = allowed is null ? random.Next(3, 7) : random.Next(Math.Min(2, pool.Length), Math.Min(pool.Length, Math.Max(3, (int)Math.Ceiling(pool.Length * .7))) + 1);
+        var selected = pool.OrderBy(_ => random.Next()).Take(selectedCount).ToList();
+        void EnsureSelected(string itemType) { if (!selected.Any(item => item.ItemType.Equals(itemType, StringComparison.OrdinalIgnoreCase))) selected.Add(_itemConfigurations[itemType]); }
+        if (merchant.MerchantCategory == "gas") EnsureSelected("gallonOfGas");
+        if (merchant.MerchantCategory is "hardware" or "sportingGoods")
+        {
+            EnsureSelected("bike");
+            var weapon = pool.Where(item => item.Category == InventoryCategory.Weapon).OrderBy(_ => random.Next()).FirstOrDefault();
+            if (weapon is not null) EnsureSelected(weapon.ItemType);
+        }
+        if (merchant.MerchantCategory == "vehicles") { EnsureSelected("dirtBike"); EnsureSelected("motorcycle"); }
         if (playerId is not null && merchant.LocationId == "outdoor" && !_revealedWorldAreas.ContainsKey((playerId, AreaKeyFor(merchant.Position.X, merchant.Position.Y)))) selected.Add(_itemConfigurations["areaMap"]);
         return selected.Select(item => new MerchantOffer(item.ItemType, item.Single ? 1 : random.Next(3, 31), random.NextInt64(item.MinimumPriceCents, item.MaximumPriceCents + 1), item.DisplayName, item.ItemType, new Dictionary<string, string> { ["description"] = item.Effect })).ToArray();
     }
+
+    private static long MerchantInventoryRotation(DateTimeOffset value) => value.ToUnixTimeSeconds() / (4 * 60 * 60);
 
     private static string DisplayItem(string itemType) => itemType switch
     {
         "magicHikingShoes" => "magic hiking shoes",
         "magicRunningShoes" => "magic running shoes",
+        "coolingShorts" => "cooling shorts",
+        "warmingPants" => "warming pants",
+        "coolingShirt" => "a cooling shirt",
+        "longSleeveShirt" => "a long-sleeve shirt",
+        "lightJacket" => "a light jacket",
+        "winterJacket" => "a winter jacket",
+        "coolingHat" => "a cooling hat",
+        "warmHat" => "a warm knit hat",
         "dirtBike" => "a dirt bike",
         "gallonOfGas" => "a gallon of gas",
         "ballBearing" => "a ball bearing",
@@ -505,9 +800,23 @@ public sealed partial class RealityWorld
         RelationshipState? relationship = null;
         if (actorTarget is not null)
         {
-            var relation = Relationship(playerId, actorTarget.Id) - 1; _relationships[(playerId, actorTarget.Id)] = relation;
-            relationship = new(playerId, actorTarget.Id, relation);
-            await _store.SaveRelationshipAsync(Configuration.Id, relationship, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(actorTarget.FactionId))
+            {
+                var allies = ActorsAtLocation(player.LocationId).Where(actor => actor.FactionId == actorTarget.FactionId).ToArray();
+                foreach (var ally in allies)
+                {
+                    var relation = Math.Min(-3, Relationship(playerId, ally.Id) - 1);
+                    _relationships[(playerId, ally.Id)] = relation;
+                    await _store.SaveRelationshipAsync(Configuration.Id, new RelationshipState(playerId, ally.Id, relation), cancellationToken);
+                }
+                relationship = new(playerId, actorTarget.Id, Relationship(playerId, actorTarget.Id));
+            }
+            else
+            {
+                var relation = Relationship(playerId, actorTarget.Id) - 1; _relationships[(playerId, actorTarget.Id)] = relation;
+                relationship = new(playerId, actorTarget.Id, relation);
+                await _store.SaveRelationshipAsync(Configuration.Id, relationship, cancellationToken);
+            }
             if (hit) UpdateActorHealth(player, actorTarget, Math.Max(0, targetHealth - damage), died);
         }
         PlayerState? updatedTarget = null;
@@ -521,12 +830,16 @@ public sealed partial class RealityWorld
         var nextWeapon = player.GodMode ? weapon : BestUsableWeapon(playerId, weapon, false);
         var updatedAttacker = player.EquippedWeapon == nextWeapon ? player : player with { EquippedWeapon = nextWeapon, Version = player.Version + 1 };
         if (!ReferenceEquals(updatedAttacker, player)) await SavePlayerAsync(updatedAttacker, cancellationToken);
-        var message = hit ? (died ? $"{targetName} was defeated." : $"Hit {targetName} for {damage:0.##} heart{(damage == 1 ? "" : "s")}.") : $"Missed {targetName}.";
+        var message = hit
+            ? died
+                ? $"{player.Name} defeated {targetName}."
+                : $"{player.Name} hit {targetName} for {damage:0.##} heart{(damage == 1 ? "" : "s")} damage."
+            : $"{player.Name} missed {targetName}.";
         if (nextWeapon != weapon) message += $" Switched to {DisplayItem(nextWeapon)}.";
         var eventHealth = updatedTarget?.HealthHearts ?? (hit ? Math.Max(0, targetHealth - damage) : targetHealth);
         var combat = new CombatEvent(playerId, request.TargetId, weapon, player.Position, targetPosition, hit, damage, died, message, eventHealth);
         var dungeon = player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var d) ? WithDiscovery(playerId, d) : null;
-        return new(combat, updatedAttacker, updatedTarget, new InventoryState(playerId, GetInventoryItems(playerId)), relationship, dungeon);
+        return new(combat, updatedAttacker, updatedTarget, GetInventoryState(playerId), relationship, dungeon);
     }
 
     private bool OwnsWeapon(string playerId, string weapon) => weapon == "fist" || InventoryQuantity(playerId, weapon) > 0;
@@ -568,7 +881,8 @@ public sealed partial class RealityWorld
         foreach (var itemType in ActiveMovementItems(player, magicHikingShoes, magicRunningShoes))
             if (_itemConfigurations.TryGetValue(itemType, out var item)) mph += item.SpeedModifierMph ?? 0;
         mph = Math.Max(.1, mph);
-        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1);
+        var loadMultiplier = player.GodMode ? 1 : Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / 100d, .5, 1);
+        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * loadMultiplier;
     }
 
     private static IEnumerable<string> ActiveMovementItems(PlayerState player, bool? magicHikingShoes = null, bool? magicRunningShoes = null)
@@ -640,9 +954,12 @@ public sealed partial class RealityWorld
         if (player.LocationId == "outdoor") chest = _outdoorChests.GetValueOrDefault(chestId);
         else { _dungeons.TryGetValue(player.LocationId, out dungeon); chest = dungeon?.Chests.FirstOrDefault(c => c.Id == chestId); }
         if (chest is null) throw new InvalidOperationException("Chest not found."); if (player.Position.Distance2D(chest.Position) > 4) throw new InvalidOperationException("Move closer to the chest.");
-        var random = new Random(StableInt($"{chestId}:{playerId}")); var money = random.Next(25, 5001); var rocks = random.Next(1, 8); var bearings = random.Next(0, 12); AddInventory(playerId, "rock", rocks); if (bearings > 0) AddInventory(playerId, "ballBearing", bearings);
+        var random = new Random(StableInt($"{chestId}:{playerId}")); var money = random.Next(25, 5001); var rocks = random.Next(1, 8); var bearings = random.Next(0, 12);
+        var rewards = new[] { InventoryStack("rock", rocks), InventoryStack("ballBearing", bearings) };
+        if (!CanAddToBackpack(playerId, rewards, out var capacityMessage)) throw new InvalidOperationException(capacityMessage + " Store something at Home before opening this chest.");
+        AddInventory(playerId, "rock", rocks); if (bearings > 0) AddInventory(playerId, "ballBearing", bearings);
         if (player.LocationId == "outdoor") _outdoorChests.TryRemove(chestId, out _); else _dungeons[player.LocationId] = dungeon! with { Chests = dungeon!.Chests.Where(c => c.Id != chestId).ToArray() }; var updated = player with { WalletCents = player.WalletCents + money, Version = player.Version + 1 };
-        await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken); return (updated, new(playerId, GetInventoryItems(playerId)), $"Found {money / 100.0:C}, {rocks} rocks, and {bearings} ball bearings.");
+        await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken); return (updated, GetInventoryState(playerId), $"Found {money / 100.0:C}, {rocks} rocks, and {bearings} ball bearings.");
     }
 
     public TreasureChestState MarkChestSeen(string playerId, string chestId)
@@ -689,8 +1006,10 @@ public sealed partial class RealityWorld
             _lastActorAttack[(actor.Id, player.Id)] = now;
             var damage = Math.Min(3, .5 + hostility * .25); var health = player.GodMode ? Math.Max(1, player.HealthHearts - damage) : Math.Max(0, player.HealthHearts - damage);
             var died = health <= 0; var updated = died ? ResetPlayer(player with { HealthHearts = 0 }) : player with { HealthHearts = health, Version = player.Version + 1 };
-            await SavePlayerAsync(updated, cancellationToken); changedPlayers.Add(updated);
-            combat.Add(new CombatEvent(actor.Id, player.Id, "attack", actor.Position, player.Position, true, damage, died, died ? $"{actor.Name} defeated you." : $"{actor.Name} attacked for {damage:0.##} hearts.", updated.HealthHearts));
+            if (!await SavePlayerAsync(updated, cancellationToken)) continue;
+            changedPlayers.Add(updated);
+            combat.Add(new CombatEvent(actor.Id, player.Id, "attack", actor.Position, player.Position, true, damage, died,
+                died ? $"{actor.Name} defeated {player.Name}." : $"{actor.Name} hit {player.Name} for {damage:0.##} heart{(damage == 1 ? "" : "s")} damage.", updated.HealthHearts));
         }
         return new HostileTick(changedActors.Values.ToArray(), changedPlayers, combat);
     }
@@ -714,10 +1033,11 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var player) || !_loot.TryGetValue(lootId, out var loot) || loot.LocationId != player.LocationId) throw new InvalidOperationException("Treasure is not available.");
         if (player.Position.Distance2D(loot.Position) > 4) throw new InvalidOperationException("Move closer to the treasure.");
+        if (!CanAddToBackpack(playerId, loot.Items.Select(item => InventoryStack(item.ItemType, item.Quantity)), out var capacityMessage)) throw new InvalidOperationException(capacityMessage + " Store something at Home before collecting this treasure.");
         _loot.TryRemove(lootId, out _); foreach (var item in loot.Items) AddInventory(playerId, item.ItemType, item.Quantity);
         var updated = player with { WalletCents = player.WalletCents + loot.MoneyCents, Version = player.Version + 1 };
         await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
-        return (updated, new(playerId, GetInventoryItems(playerId)), $"Collected {loot.MoneyCents / 100.0:C} and dropped supplies.");
+        return (updated, GetInventoryState(playerId), $"Collected {loot.MoneyCents / 100.0:C} and dropped supplies.");
     }
 
     private ActorState? FindActor(string playerId, string actorId)
@@ -726,12 +1046,60 @@ public sealed partial class RealityWorld
         return _dungeons.TryGetValue(player.LocationId, out var dungeon) ? dungeon.Actors.FirstOrDefault(actor => actor.Id == actorId) : null;
     }
 
+    private IReadOnlyList<ActorState> ActorsAtLocation(string locationId) =>
+        locationId == "outdoor" ? _actors.Values.ToArray() : _dungeons.TryGetValue(locationId, out var dungeon) ? dungeon.Actors : Array.Empty<ActorState>();
+
     private double Relationship(string playerId, string actorId) => _relationships.GetValueOrDefault((playerId, actorId));
     private int InventoryQuantity(string playerId, string item) => _inventories.TryGetValue(playerId, out var inventory) && inventory.TryGetValue(item, out var quantity) ? quantity : 0;
     private void AddInventory(string playerId, string item, int quantity) { var inventory = _inventories.GetOrAdd(playerId, _ => new(StringComparer.OrdinalIgnoreCase)); lock (inventory) inventory[item] = inventory.GetValueOrDefault(item) + quantity; }
-    private bool RemoveInventory(string playerId, string item, int quantity) { var inventory = _inventories.GetOrAdd(playerId, _ => new(StringComparer.OrdinalIgnoreCase)); lock (inventory) { var current = inventory.GetValueOrDefault(item); if (current < quantity) return false; inventory[item] = current - quantity; return true; } }
-    private IReadOnlyList<ItemStack> GetInventoryItems(string playerId) { if (!_inventories.TryGetValue(playerId, out var inventory)) return Array.Empty<ItemStack>(); lock (inventory) return inventory.Where(p => p.Value > 0).OrderBy(p => p.Key).Select(p => new ItemStack(p.Key, p.Value)).ToArray(); }
-    private Task SaveInventoryAsync(string playerId, CancellationToken cancellationToken) => _store.SaveInventoryAsync(new(playerId, GetInventoryItems(playerId)), cancellationToken);
+    private bool RemoveInventory(string playerId, string item, int quantity) { var inventory = _inventories.GetOrAdd(playerId, _ => new(StringComparer.OrdinalIgnoreCase)); lock (inventory) { var current = inventory.GetValueOrDefault(item); if (current < quantity) return false; inventory[item] = current - quantity; if (inventory[item] <= 0) inventory.Remove(item); return true; } }
+
+    private ItemConfiguration InventoryDefinition(string itemType) => _itemConfigurations.TryGetValue(itemType, out var definition)
+        ? definition
+        : new ItemConfiguration(itemType, DisplayItem(itemType), "Uncatalogued item", 0, 0, 0, 0, false, WeightPounds: 1,
+            Category: itemType.StartsWith("quest:", StringComparison.OrdinalIgnoreCase) ? InventoryCategory.Quest : InventoryCategory.Other);
+
+    private ItemStack InventoryStack(string itemType, int quantity)
+    {
+        var definition = InventoryDefinition(itemType);
+        return new ItemStack(itemType, quantity, definition.Category, definition.WeightPounds, definition.CarriedInBackpack);
+    }
+
+    private IReadOnlyList<ItemStack> GetInventoryItems(string playerId)
+    {
+        if (!_inventories.TryGetValue(playerId, out var inventory)) return Array.Empty<ItemStack>();
+        lock (inventory) return inventory.Where(pair => pair.Value > 0).OrderBy(pair => pair.Key).Select(pair => InventoryStack(pair.Key, pair.Value)).ToArray();
+    }
+
+    private InventoryState GetInventoryState(string playerId)
+    {
+        var items = GetInventoryItems(playerId);
+        var carried = items.Where(item => item.CarriedInBackpack).ToArray();
+        return new InventoryState(playerId, items,
+            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), MaximumBackpackWeightPounds,
+            carried.Count(item => item.Category == InventoryCategory.Weapon), MaximumWeaponSlots,
+            carried.Count(item => item.Category == InventoryCategory.Quest), MaximumQuestSlots,
+            carried.Count(item => item.Category == InventoryCategory.Other), MaximumOtherSlots);
+    }
+
+    private bool CanAddToBackpack(string playerId, IEnumerable<ItemStack> additions, out string message)
+    {
+        var combined = GetInventoryItems(playerId).ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+        foreach (var addition in additions.Where(item => item.Quantity > 0)) combined[addition.ItemType] = combined.GetValueOrDefault(addition.ItemType) + addition.Quantity;
+        var items = combined.Select(pair => InventoryStack(pair.Key, pair.Value)).Where(item => item.CarriedInBackpack).ToArray();
+        var weaponSlots = items.Count(item => item.Category == InventoryCategory.Weapon);
+        var questSlots = items.Count(item => item.Category == InventoryCategory.Quest);
+        var otherSlots = items.Count(item => item.Category == InventoryCategory.Other);
+        var weight = items.Sum(item => item.UnitWeightPounds * item.Quantity);
+        if (weaponSlots > MaximumWeaponSlots) message = $"Your backpack only has {MaximumWeaponSlots} weapon slots (your fist is always free).";
+        else if (questSlots > MaximumQuestSlots) message = $"Your backpack only has {MaximumQuestSlots} quest-item slots.";
+        else if (otherSlots > MaximumOtherSlots) message = $"Your backpack only has {MaximumOtherSlots} other-item slots.";
+        else if (weight > MaximumBackpackWeightPounds + .0001) message = $"That would make your backpack weigh {weight:0.##} lb; the absolute maximum is {MaximumBackpackWeightPounds:0} lb.";
+        else { message = string.Empty; return true; }
+        return false;
+    }
+
+    private Task SaveInventoryAsync(string playerId, CancellationToken cancellationToken) => _store.SaveInventoryAsync(GetInventoryState(playerId), cancellationToken);
 
     private static bool CrossesDungeonWall(WorldPosition start, WorldPosition end, DungeonWall wall)
     {

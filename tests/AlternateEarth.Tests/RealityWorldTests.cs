@@ -21,7 +21,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task NewAccountStartsOutdoorsThenReconnectsInsidePersistentBase()
+    public async Task NewAccountStartsOutdoorsAndReconnectsAtPersistedOutdoorPosition()
     {
         var configuration = new RealityConfiguration("home-test", "Home Test", 17, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var region = configuration.Area.Region;
@@ -44,8 +44,39 @@ public sealed class RealityWorldTests : IAsyncLifetime
 
         world.Leave(first.Id);
         var reconnected = await world.JoinAsync("character-1", "Player", "account-1");
-        Assert.StartsWith("home:account-1:", reconnected.LocationId);
-        Assert.Equal(world.GetPrivateState(reconnected.Id).Dungeon!.Exit, reconnected.Position);
+        Assert.Equal("outdoor", reconnected.LocationId);
+        Assert.Equal(first.Position, reconnected.Position);
+        Assert.Null(world.GetPrivateState(reconnected.Id).Dungeon);
+        Assert.NotNull(world.GetPrivateState(reconnected.Id).Base);
+    }
+
+    [Fact]
+    public async Task LeavingHomeRemainsOutdoorsAfterReconnect()
+    {
+        var configuration = new RealityConfiguration("home-exit-test", "Home Exit Test", 117, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var building = Building("exit-home", region, 20, 20);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "home-exit.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("exit-account", "ExitPlayer", "hash", "salt", "token", "exit-character"), "ExitPlayer");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("exit-character", "ExitPlayer", "exit-account");
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.SetGodModeAsync(player.Id, true);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+        Assert.True(entered.Dungeon.IsHome);
+
+        var exited = await world.ExitDungeonAsync(player.Id);
+        Assert.Equal("outdoor", exited.LocationId);
+        Assert.Null(world.GetPrivateState(player.Id).Dungeon);
+        world.Leave(player.Id);
+
+        var reconnected = await world.JoinAsync(player.Id, "ExitPlayer", "exit-account");
+        Assert.Equal("outdoor", reconnected.LocationId);
+        Assert.Equal(exited.Position, reconnected.Position);
+        Assert.Null(world.GetPrivateState(player.Id).Dungeon);
     }
 
     [Fact]
@@ -132,7 +163,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GodModePurchasesNewAccountBaseForOneCentAndPersistsIt()
+    public async Task GodModePurchasesBaseAtDisplayedPriceWithoutSpendingWalletFunds()
     {
         var configuration = new RealityConfiguration("base-purchase", "Base Purchase", 20, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var region = configuration.Area.Region;
@@ -157,12 +188,13 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var before = await world.SetGodModeAsync(player.Id, true);
         var purchased = await world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(targetDoor.Id));
 
-        Assert.Equal(1, purchased.PriceCents);
-        Assert.Equal(before.WalletCents - 1, purchased.Player.WalletCents);
+        Assert.Equal(expectedPrice, purchased.PriceCents);
+        Assert.Equal(before.WalletCents, purchased.Player.WalletCents);
         Assert.Equal(targetBuilding.Id, world.GetPrivateState(player.Id).Base!.BuildingId);
         world.Leave(player.Id);
         var reconnected = await world.JoinAsync("buyer", "Buyer", "buyer-account");
-        Assert.Contains(targetBuilding.Id, reconnected.LocationId);
+        Assert.Equal("outdoor", reconnected.LocationId);
+        Assert.Equal(targetBuilding.Id, world.GetPrivateState(reconnected.Id).Base!.BuildingId);
     }
 
     [Fact]
@@ -170,8 +202,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
     {
         var configuration = new RealityConfiguration("dungeon-reset", "Dungeon Reset", 21, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var region = configuration.Area.Region;
-        var firstBuilding = Building("dungeon-a", region, 20, 20);
-        var secondBuilding = Building("dungeon-b", region, 60, 20);
+        var firstBuilding = Building("dungeon-a", region, 20, 20) with { Properties = new Dictionary<string, string> { ["building"] = "yes", ["questItem"] = "true" } };
+        var secondBuilding = Building("dungeon-b", region, 60, 20) with { Properties = new Dictionary<string, string> { ["building"] = "yes", ["questItem"] = "true" } };
         var store = new SqliteRealityStore(Path.Combine(_directory, "dungeon-reset.db"));
         await store.InitializeAsync(configuration);
         await store.CreateAccountAsync(new AccountRecord("dungeon-account", "Dungeon", "hash", "salt", "token", "dungeon-player"), "Dungeon");
@@ -187,8 +219,129 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var second = await world.EnterDungeonAsync(player.Id, door.Id);
 
         Assert.NotSame(first.Dungeon, second.Dungeon);
-        Assert.Equal(first.Dungeon.Actors.Count, second.Dungeon.Actors.Count);
-        Assert.Equal(first.Dungeon.Chests.Count, second.Dungeon.Chests.Count);
+        Assert.NotEqual(first.Dungeon.SessionId, second.Dungeon.SessionId);
+        Assert.InRange(first.Dungeon.LevelCount, 1, 10);
+        Assert.InRange(second.Dungeon.LevelCount, 1, 10);
+        Assert.InRange(first.Dungeon.Actors.Count, 3, 6);
+        Assert.InRange(second.Dungeon.Actors.Count, 3, 6);
+    }
+
+    [Fact]
+    public async Task StoreBuildingsAreSafeCommercialInteriorsAndCannotBecomeHomes()
+    {
+        var configuration = new RealityConfiguration("store-building", "Store Building", 71, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var storeBuilding = Building("a-store", region, 20, 20) with
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["building"] = "retail", ["merchantCategory"] = "clothing", ["name"] = "Foot Mart", ["questItem"] = "true"
+            }
+        };
+        var residentialBuilding = Building("z-home", region, 60, 20);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "store-building.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("shopper-account", "Shopper", "hash", "salt", "token", "shopper-player"), "Shopper");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(storeBuilding, residentialBuilding)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("shopper-player", "Shopper", "shopper-account");
+
+        Assert.Equal(residentialBuilding.Id, world.GetPrivateState(player.Id).Base!.BuildingId);
+        player = await world.SetGodModeAsync(player.Id, true);
+        var storeDoor = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door && entity.Properties["buildingId"] == storeBuilding.Id);
+        await world.TeleportAsync(player.Id, new TeleportRequest(storeDoor.Position.X, storeDoor.Position.Y, true));
+        var purchaseError = await Assert.ThrowsAsync<InvalidOperationException>(() => world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(storeDoor.Id)));
+        Assert.Contains("cannot be purchased", purchaseError.Message, StringComparison.OrdinalIgnoreCase);
+
+        var entered = await world.EnterDungeonAsync(player.Id, storeDoor.Id);
+        Assert.True(entered.Dungeon.IsStore);
+        Assert.Single(entered.Dungeon.Actors, actor => actor.IsMerchant);
+        Assert.DoesNotContain(entered.Dungeon.Actors, actor => actor.Name.Contains("Dungeon Dweller", StringComparison.OrdinalIgnoreCase));
+        Assert.All(entered.Dungeon.Actors, actor => Assert.True(actor.IsMerchant || actor.Subtype == "storeEmployee"));
+        Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.Name, new[] { "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo", "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis" }));
+        Assert.Equal("outdoor", (await world.ExitDungeonAsync(player.Id)).LocationId);
+    }
+
+    [Fact]
+    public async Task DungeonMatchesBuildingFootprintAndTraversesSharedStairs()
+    {
+        var configuration = new RealityConfiguration("shaped-levels", "Shaped Levels", 23, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        CanonicalEntity ShapedBuilding(string id, double x) => new(id, EntityKind.Building, new WorldPosition(region, x, 20),
+            new GeometryPoint[] { new(x - 9, 13), new(x + 9, 13), new(x + 9, 20), new(x + 2, 20), new(x + 2, 27), new(x - 9, 27), new(x - 9, 13) },
+            new Dictionary<string, string> { ["building"] = "yes", ["dungeon:levels"] = "3", ["questItem"] = "true" });
+        var firstBuilding = ShapedBuilding("shaped-a", 20);
+        var secondBuilding = ShapedBuilding("shaped-b", 60);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "shaped-levels.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("shaped-account", "Explorer", "hash", "salt", "token", "shaped-player"), "Explorer");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(firstBuilding, secondBuilding)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("shaped-player", "Explorer", "shaped-account");
+        var ownBase = world.GetPrivateState(player.Id).Base!.BuildingId;
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door && entity.Properties["buildingId"] != ownBase);
+        await world.SetGodModeAsync(player.Id, true);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+
+        var first = await world.EnterDungeonAsync(player.Id, door.Id);
+        Assert.Equal(18, first.Dungeon.Width, 3);
+        Assert.Equal(14, first.Dungeon.Height, 3);
+        Assert.Equal(6, first.Dungeon.Footprint!.Count);
+        Assert.Equal(6, first.Dungeon.ExteriorWallCount);
+        Assert.Equal(1, first.Dungeon.Level);
+        Assert.Equal(3, first.Dungeon.LevelCount);
+        Assert.NotNull(first.Dungeon.Stairs);
+
+        var second = await world.ChangeDungeonLevelAsync(player.Id, 1);
+        Assert.Equal(2, second.Dungeon.Level);
+        Assert.Equal(first.Dungeon.Stairs, second.Dungeon.Stairs);
+        var last = await world.ChangeDungeonLevelAsync(player.Id, 1);
+        Assert.Equal(3, last.Dungeon.Level);
+        Assert.Equal(first.Dungeon.Stairs, last.Dungeon.Stairs);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.ChangeDungeonLevelAsync(player.Id, 1));
+        var returned = await world.ChangeDungeonLevelAsync(player.Id, -1);
+        Assert.Equal(2, returned.Dungeon.Level);
+    }
+
+    [Fact]
+    public async Task DoorLocksBlockOrdinaryBuildingsButNotBaseOrQuestBuildings()
+    {
+        var configuration = new RealityConfiguration("door-locks", "Door Locks", 124, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var buildings = Enumerable.Range(0, 24)
+            .Select(index => Building($"lock-building-{index}", region, 20 + index % 6 * 28, 20 + index / 6 * 28))
+            .ToList();
+        for (var index = 0; index < 2; index++)
+        {
+            var quest = Building($"quest-building-{index}", region, 20 + index * 28, 160);
+            buildings.Add(quest with { Properties = new Dictionary<string, string>(quest.Properties) { ["questItem"] = "true" } });
+        }
+        var store = new SqliteRealityStore(Path.Combine(_directory, "door-locks.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("lock-account", "LockTester", "hash", "salt", "token", "lock-player"), "LockTester");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(buildings.ToArray())), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("lock-player", "LockTester", "lock-account");
+        player = await world.SetGodModeAsync(player.Id, true);
+        var snapshot = world.CreateSnapshot();
+        var baseId = world.GetPrivateState(player.Id).Base!.BuildingId;
+        var doors = snapshot.BaseEntities.Where(entity => entity.Kind == EntityKind.Door).ToDictionary(entity => entity.Id);
+        var baseDoor = doors.Values.Single(door => door.Properties["buildingId"] == baseId);
+
+        await world.TeleportAsync(player.Id, new TeleportRequest(baseDoor.Position.X, baseDoor.Position.Y, true));
+        Assert.True((await world.EnterDungeonAsync(player.Id, baseDoor.Id)).Dungeon.IsHome);
+        await world.ExitDungeonAsync(player.Id);
+
+        var locked = snapshot.DoorLocks!.First(state => state.Locked && state.BuildingId != baseId);
+        var lockedDoor = doors[locked.DoorId];
+        await world.TeleportAsync(player.Id, new TeleportRequest(lockedDoor.Position.X, lockedDoor.Position.Y, true));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.EnterDungeonAsync(player.Id, lockedDoor.Id));
+        Assert.Contains("locked", error.Message, StringComparison.OrdinalIgnoreCase);
+
+        var questDoor = doors.Values.First(door => door.Properties["buildingId"].StartsWith("quest-building-", StringComparison.Ordinal) && door.Properties["buildingId"] != baseId);
+        Assert.False(snapshot.DoorLocks!.Single(state => state.DoorId == questDoor.Id).Locked);
+        await world.TeleportAsync(player.Id, new TeleportRequest(questDoor.Position.X, questDoor.Position.Y, true));
+        Assert.False((await world.EnterDungeonAsync(player.Id, questDoor.Id)).Dungeon.IsHome);
     }
 
     [Fact]
@@ -217,6 +370,88 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StackedItemsUseOneSlotPerTypeButAllUnitsContributeWeightAndSlowMovement()
+    {
+        var configuration = new RealityConfiguration("stacked-inventory", "Stacked Inventory", 221, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "stacked-inventory.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("stacker", new[] { new ItemStack("rock", 50), new ItemStack("slingshot", 3) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var loaded = await world.JoinAsync("stacker", "Stacker");
+        var empty = await world.JoinAsync("empty-stacker", "Empty");
+
+        var inventory = world.GetPrivateState(loaded.Id).Inventory;
+        Assert.Equal(2, inventory.WeaponSlotsUsed);
+        Assert.Equal(26.2, inventory.WeightPounds, 3);
+        var loadedSpeed = world.ConfiguredSpeedMetersPerSecond(loaded, TerrainType.Pavement);
+        var emptySpeed = world.ConfiguredSpeedMetersPerSecond(empty, TerrainType.Pavement);
+        Assert.Equal(.738, loadedSpeed / emptySpeed, 3);
+
+        var god = await world.SetGodModeAsync(loaded.Id, true);
+        Assert.Equal(5, world.ConfiguredSpeedMetersPerSecond(god, TerrainType.Pavement) / emptySpeed, 3);
+    }
+
+    [Fact]
+    public async Task HomeStorageChestTransfersStacksWithoutCapacityLimit()
+    {
+        var configuration = new RealityConfiguration("home-item-storage", "Home Item Storage", 222, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "home-item-storage.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("storage-account", "Storage", "hash", "salt", "token", "storage-player"), "Storage");
+        await store.SaveInventoryAsync(new InventoryState("storage-player", new[] { new ItemStack("rock", 50), new ItemStack("ballBearing", 25) }));
+        await store.SaveInventoryAsync(new InventoryState("home-items:home-item-storage:storage-account", new[] { new ItemStack("quest:first", 1), new ItemStack("quest:second", 1), new ItemStack("quest:third", 1), new ItemStack("quest:fourth", 1) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("storage-home", region, 20, 20))), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("storage-player", "Storage", "storage-account");
+        player = await world.SetGodModeAsync(player.Id, true);
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+        var chest = entered.Dungeon.Furnishings!.Single(item => item.Properties.GetValueOrDefault("objectType") == "storageChest");
+
+        var opened = world.OpenHomeItemStorage(player.Id, chest.Id);
+        Assert.True(opened.Unlimited);
+        var deposited = await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "rock", 40, true));
+        Assert.Equal(10, deposited.PrivateState.Inventory.Items.Single(item => item.ItemType == "rock").Quantity);
+        Assert.Equal(40, deposited.PrivateState.HomeItemStorage!.Items.Single(item => item.ItemType == "rock").Quantity);
+        var withdrawn = await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "rock", 5, false));
+        Assert.Equal(15, withdrawn.PrivateState.Inventory.Items.Single(item => item.ItemType == "rock").Quantity);
+        Assert.Equal(35, withdrawn.PrivateState.HomeItemStorage!.Items.Single(item => item.ItemType == "rock").Quantity);
+        var persisted = await store.LoadInventoryAsync("home-items:home-item-storage:storage-account");
+        Assert.Equal(35, persisted.Items.Single(item => item.ItemType == "rock").Quantity);
+        await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:first", 1, false));
+        await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:second", 1, false));
+        await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:third", 1, false));
+        var questLimit = await Assert.ThrowsAsync<InvalidOperationException>(() => world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:fourth", 1, false)));
+        Assert.Contains("quest-item slots", questLimit.Message);
+    }
+
+    [Fact]
+    public async Task BackpackRejectsRewardsAboveAbsoluteWeightOrWeaponSlotLimit()
+    {
+        var configuration = new RealityConfiguration("inventory-limits", "Inventory Limits", 223, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "inventory-limits.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("heavy", new[] { new ItemStack("rock", 100) }));
+        await store.SaveInventoryAsync(new InventoryState("armed", new[] { new ItemStack("knife", 1), new ItemStack("sword", 1), new ItemStack("slingshot", 1) }));
+        await store.SaveInventoryAsync(new InventoryState("packed", new[] { new ItemStack("water", 1), new ItemStack("food", 1), new ItemStack("flashlight", 1), new ItemStack("hat", 1), new ItemStack("laser", 1), new ItemStack("arrow", 1) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+
+        foreach (var (characterId, expectedMessage) in new[] { ("heavy", "maximum"), ("armed", "weapon slots"), ("packed", "other-item slots") })
+        {
+            var player = await world.JoinAsync(characterId, characterId);
+            player = await world.SetGodModeAsync(player.Id, true);
+            var chest = world.GetPrivateState(player.Id).Chests!.First();
+            await world.TeleportAsync(player.Id, new TeleportRequest(chest.Position.X, chest.Position.Y, true));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.OpenChestAsync(player.Id, chest.Id));
+            Assert.Contains(expectedMessage, error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public async Task RifleDoesSevenHeartsDamageAndGodModeDoesNotConsumeBullets()
     {
         var configuration = new RealityConfiguration("rifle-damage", "Rifle Damage", 23, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500), PvpEnabled: true);
@@ -235,6 +470,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.NotNull(combat);
         Assert.True(combat.Event.Hit);
         Assert.Equal(7, combat.Event.Damage);
+        Assert.Contains("Rifleman", combat.Event.Message);
+        Assert.Contains("7 hearts damage", combat.Event.Message);
         Assert.Equal(1, combat.Inventory.Items.Single(item => item.ItemType == "bullet").Quantity);
 
         await world.SetEquipmentAsync(attacker.Id, "weapon", "sword");
@@ -299,14 +536,19 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(merchantPoi)), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
         var player = await world.JoinAsync("map-buyer", "MapBuyer");
-        await world.SetGodModeAsync(player.Id, true);
-        await world.UpdateItemConfigurationAsync(player.Id, new UpdateItemConfigurationRequest("areaMap", 0, 0, 1, 1));
+        player = await world.SetGodModeAsync(player.Id, true);
+        const long displayedPrice = 100_000_000;
+        await world.UpdateItemConfigurationAsync(player.Id, new UpdateItemConfigurationRequest("areaMap", 0, 0, displayedPrice, displayedPrice));
         var merchant = world.CreateSnapshot().Actors!.First(actor => actor.IsMerchant);
         await world.TeleportAsync(player.Id, new TeleportRequest(merchant.Position.X, merchant.Position.Y, true));
         var quote = world.RequestTrade(player.Id, merchant.Id);
-        Assert.Contains(quote.Offers, offer => offer.ItemType == "areaMap" && offer.UnitPriceCents == 1);
+        Assert.Contains(quote.Offers, offer => offer.ItemType == "areaMap" && offer.UnitPriceCents == displayedPrice);
 
-        await world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine("areaMap", 1) }));
+        player = await world.SetGodModeAsync(player.Id, false);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine("areaMap", 1) })));
+        player = await world.SetGodModeAsync(player.Id, true);
+        var purchase = await world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine("areaMap", 1) }));
+        Assert.Equal(player.WalletCents, purchase.Player.WalletCents);
         var expectedArea = world.AreaKeyFor(merchant.Position.X, merchant.Position.Y);
         Assert.Contains(expectedArea, world.GetPrivateState(player.Id).RevealedWorldAreas!);
         Assert.DoesNotContain(world.RequestTrade(player.Id, merchant.Id).Offers, offer => offer.ItemType == "areaMap");
@@ -391,9 +633,12 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.True(entered.Dungeon.IsHome);
         Assert.Equal(30, entered.Dungeon.Width, 3);
         Assert.Equal(20, entered.Dungeon.Height, 3);
-        Assert.True(entered.Dungeon.Walls[0].DoorEnd - entered.Dungeon.Walls[0].DoorStart >= 3.5);
-        Assert.Equal(0.65, entered.Dungeon.Exit.Y, 3);
-        Assert.All(entered.Dungeon.Walls.Skip(4), wall => Assert.True(wall.DoorStart >= 0 && wall.DoorEnd > wall.DoorStart));
+        Assert.Equal(4, entered.Dungeon.Footprint!.Count);
+        Assert.Equal(4, entered.Dungeon.ExteriorWallCount);
+        Assert.NotNull(entered.Dungeon.Doorway);
+        Assert.True(IsInside(entered.Dungeon.Exit, entered.Dungeon.Footprint));
+        Assert.All(entered.Dungeon.Furnishings!, item => Assert.True(IsInside(item.Position, entered.Dungeon.Footprint)));
+        Assert.All(entered.Dungeon.Walls.Skip(entered.Dungeon.ExteriorWallCount), wall => Assert.True(wall.DoorStart >= 0 && wall.DoorEnd > wall.DoorStart));
         Assert.Contains(entered.Dungeon.Furnishings!, item => item.Properties["objectType"] == "wardrobe");
         var chair = entered.Dungeon.Furnishings!.First(item => item.Properties["objectType"] == "diningChair");
         var originalPosition = chair.Position;
@@ -410,10 +655,21 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await world.EnterDungeonAsync(player.Id, door.Id);
         Assert.Contains(world.GetPrivateState(player.Id).HomeStorage!, item => item.Id == chair.Id);
         world.Leave(player.Id);
+        var savedFurniture = (await store.LoadHomeFurnitureAsync("home-account", configuration.Id)).ToList();
+        var wardrobeIndex = savedFurniture.FindIndex(item => item.Properties["objectType"] == "wardrobe");
+        savedFurniture[wardrobeIndex] = savedFurniture[wardrobeIndex] with
+        {
+            Position = new WorldPosition(region, entered.Dungeon.Width + 50, entered.Dungeon.Height + 50),
+            Properties = new Dictionary<string, string>(savedFurniture[wardrobeIndex].Properties, StringComparer.OrdinalIgnoreCase) { ["stored"] = "false" }
+        };
+        await store.SaveHomeFurnitureAsync("home-account", configuration.Id, savedFurniture);
         var reloadedWorld = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
         await reloadedWorld.InitializeAsync();
         await reloadedWorld.JoinAsync("home-player", "HomeUser", "home-account");
         Assert.Contains(reloadedWorld.GetPrivateState("home-player").HomeStorage!, item => item.Id == chair.Id);
+        var repairedHome = reloadedWorld.GetPrivateState("home-player").Dungeon!;
+        var repairedWardrobe = repairedHome.Furnishings!.Single(item => item.Properties["objectType"] == "wardrobe");
+        Assert.True(IsInside(repairedWardrobe.Position, repairedHome.Footprint));
     }
 
     [Fact]
@@ -455,6 +711,77 @@ public sealed class RealityWorldTests : IAsyncLifetime
             new GeometryPoint[] { new(x - 5, y - 5), new(x + 5, y - 5), new(x + 5, y + 5), new(x - 5, y + 5), new(x - 5, y - 5) },
             new Dictionary<string, string> { ["building"] = "yes" });
 
+    [Fact]
+    public async Task ClothingAndOffhandEquipmentDriveTemperatureAndLighting()
+    {
+        var configuration = new RealityConfiguration("climate-test", "Climate Test", 901, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "climate.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("climber", new[]
+        {
+            new ItemStack("warmHat", 1), new ItemStack("winterJacket", 1), new ItemStack("warmingPants", 1),
+            new ItemStack("flashlight", 1), new ItemStack("lantern", 1), new ItemStack("laser", 1)
+        }));
+        var cold = new WeatherState("Clear", 0, -10, 0, 0, true, DateTimeOffset.UtcNow, "test");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(cold), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("climber", "Climber");
+
+        player = await world.SetEquipmentAsync(player.Id, "hat", "warmHat");
+        player = await world.SetEquipmentAsync(player.Id, "shirt", "winterJacket");
+        player = await world.SetEquipmentAsync(player.Id, "pants", "warmingPants");
+        player = await world.SetEquipmentAsync(player.Id, "offhand", "lantern");
+        Assert.Equal("warmHat", player.EquippedHat);Assert.Equal("winterJacket", player.EquippedShirt);Assert.Equal("warmingPants", player.EquippedPants);
+        Assert.True(player.LanternOn);Assert.False(player.FlashlightOn);Assert.False(player.LaserOn);
+
+        player = await world.SetEquipmentAsync(player.Id, "offhand", "laser");
+        Assert.True(player.LaserOn);Assert.False(player.LanternOn);Assert.False(player.FlashlightOn);
+        var changed = await world.AdvanceVitalsAsync(TimeSpan.FromMinutes(1), CancellationToken.None);
+        player = Assert.Single(changed, item => item.Id == player.Id);
+        Assert.InRange(player.BodyHeat, 49, 50);
+        player = await world.SetGodModeAsync(player.Id, true);
+        Assert.Equal(50, player.BodyHeat);
+    }
+
+    [Fact]
+    public async Task GodModeConfigInventoryUsesHomeBeforeBackpack()
+    {
+        var configuration = new RealityConfiguration("config-inventory", "Config Inventory", 902, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "config-inventory.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("config-account", "ConfigUser", "hash", "salt", "token", "config-player"), "ConfigUser");
+        await store.SaveInventoryAsync(new InventoryState("config-player", new[] { new ItemStack("rock", 1) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("config-home", region, 20, 20))), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("config-player", "ConfigUser", "config-account");
+        await world.SetGodModeAsync(player.Id, true);
+
+        var taken = await world.ConfigureInventoryItemAsync(player.Id, new ConfigureInventoryItemRequest("rock", "take"));
+        Assert.Contains("Home inventory", taken.Message);
+        var removedHome = await world.ConfigureInventoryItemAsync(player.Id, new ConfigureInventoryItemRequest("rock", "give"));
+        Assert.Contains("Home inventory", removedHome.Message);
+        Assert.Equal(1, removedHome.PrivateState.Inventory.Items.Single(item => item.ItemType == "rock").Quantity);
+
+        var removedBackpack = await world.ConfigureInventoryItemAsync(player.Id, new ConfigureInventoryItemRequest("rock", "give"));
+        Assert.Contains("backpack", removedBackpack.Message);
+        Assert.DoesNotContain(removedBackpack.PrivateState.Inventory.Items, item => item.ItemType == "rock");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.ConfigureInventoryItemAsync(player.Id, new ConfigureInventoryItemRequest("rock", "give")));
+    }
+
+    private static bool IsInside(WorldPosition position, IReadOnlyList<GeometryPoint>? polygon)
+    {
+        if (polygon is null || polygon.Count < 3) return false;
+        var inside = false;
+        for (var index = 0; index < polygon.Count; index++)
+        {
+            var previous = index == 0 ? polygon.Count - 1 : index - 1;
+            var a = polygon[index]; var b = polygon[previous];
+            if ((a.Y > position.Y) != (b.Y > position.Y) && position.X < (b.X - a.X) * (position.Y - a.Y) / ((b.Y - a.Y) + double.Epsilon) + a.X) inside = !inside;
+        }
+        return inside;
+    }
+
     private sealed class FixedGeographicProvider(params CanonicalEntity[] buildings) : IGeographicProvider
     {
         public string Name => "test";
@@ -462,9 +789,9 @@ public sealed class RealityWorldTests : IAsyncLifetime
             Task.FromResult(new GeographicDataset(Name, area, buildings, new[] { new ElevationSample(0, 0, 0) }, DateTimeOffset.UtcNow));
     }
 
-    private sealed class FixedWeatherProvider : IWeatherProvider
+    private sealed class FixedWeatherProvider(WeatherState? weather = null) : IWeatherProvider
     {
         public Task<WeatherState> GetCurrentAsync(GeoCoordinate coordinate, CancellationToken cancellationToken = default) =>
-            Task.FromResult(WeatherState.Unavailable);
+            Task.FromResult(weather ?? WeatherState.Unavailable);
     }
 }

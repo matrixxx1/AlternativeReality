@@ -40,6 +40,21 @@ public sealed partial class RealityWorld
                 loaded = CreateStarterFurniture(accountId, building);
                 await _store.SaveHomeFurnitureAsync(accountId, Configuration.Id, loaded, cancellationToken);
             }
+            else if (!loaded.Any(item => item.Properties.GetValueOrDefault("objectType") == "storageChest"))
+            {
+                var definition = FurnitureCatalog.All.First(item => item.Type == "storageChest");
+                var chest = CreateFurnitureEntity(accountId, definition, "oak", "ironbound", true, loaded.Count, building.Position.Region);
+                var home = EmptyHome($"home:{accountId}:{building.Id}", building, loaded.Where(item => !IsStoredFurniture(item)).ToArray());
+                if (TryFindOpenFurniturePosition(home, chest, loaded, out var position)) chest = SetFurniturePlacement(chest, position.X, position.Y, 0, false);
+                loaded.Add(chest);
+                await _store.SaveHomeFurnitureAsync(accountId, Configuration.Id, loaded, cancellationToken);
+            }
+            // Older layouts used rectangular bounds and may have persisted an
+            // item beyond an irregular building footprint or over the entry.
+            // Preserve every valid player placement and relocate only items
+            // that are no longer safe in the canonical Home layout.
+            if (RepairFurniturePlacements(accountId, building, loaded))
+                await _store.SaveHomeFurnitureAsync(accountId, Configuration.Id, loaded, cancellationToken);
             _homeFurniture[accountId] = loaded;
         }
         finally { _homeFurnitureLock.Release(); }
@@ -50,7 +65,7 @@ public sealed partial class RealityWorld
         var home = EmptyHome($"home:{accountId}:{building.Id}", building, Array.Empty<CanonicalEntity>());
         var starters = new[]
         {
-            ("fireplace", "brick", "masonry"), ("bed", "walnut", "striped"), ("wardrobe", "oak", "woodgrain"),
+            ("storageChest", "oak", "ironbound"), ("fireplace", "brick", "masonry"), ("bed", "walnut", "striped"), ("wardrobe", "oak", "woodgrain"),
             ("diningTable", "oak", "woodgrain"), ("diningChair", "oak", "solid"), ("diningChair", "oak", "solid")
         };
         var result = new List<CanonicalEntity>();
@@ -104,34 +119,39 @@ public sealed partial class RealityWorld
         return EmptyHome(id, building, furnishings);
     }
 
-    private static DungeonState EmptyHome(string id, CanonicalEntity building, IReadOnlyList<CanonicalEntity> furnishings)
+    private DungeonState EmptyHome(string id, CanonicalEntity building, IReadOnlyList<CanonicalEntity> furnishings)
     {
-        var width = Math.Clamp(building.Geometry.Max(point => point.X) - building.Geometry.Min(point => point.X), 6, 100);
-        var height = Math.Clamp(building.Geometry.Max(point => point.Y) - building.Geometry.Min(point => point.Y), 6, 100);
+        var layout = CreateInteriorLayout(building);
+        var width = layout.Width; var height = layout.Height;
         const double doorway = 2.2;
-        const double exteriorDoorway = 3.6;
-        var exitX = width / 2d;
-        var walls = new List<DungeonWall>
-        {
-            new(0, 0, width, 0, exitX - exteriorDoorway / 2d, exitX + exteriorDoorway / 2d),
-            new(width, 0, width, height), new(width, height, 0, height), new(0, height, 0, 0)
-        };
+        var walls = layout.ExteriorWalls.ToList();
+        var exteriorWallCount = walls.Count;
         var rooms = new List<DungeonRoom>();
         // The account/building-specific seed makes each acquired Home layout different,
         // while keeping the same layout after reconnects and server restarts.
         var layoutRandom = new Random(StableInt($"home-layout:{id}"));
         var splitX = width * (.38 + layoutRandom.NextDouble() * .24);
         var splitY = height * (.38 + layoutRandom.NextDouble() * .24);
-        if (width >= 12) walls.Add(new DungeonWall(splitX, 0, splitX, height, splitY - doorway / 2, splitY + doorway / 2));
-        if (height >= 12) walls.Add(new DungeonWall(0, splitY, width, splitY, splitX - doorway / 2, splitX + doorway / 2));
-        if (width >= 12 && height >= 12)
+        var rectangular = IsAxisAlignedRectangle(layout.Footprint);
+        if (rectangular && width >= 12) walls.Add(new DungeonWall(splitX, 0, splitX, height, splitY - doorway / 2, splitY + doorway / 2));
+        if (rectangular && height >= 12) walls.Add(new DungeonWall(0, splitY, width, splitY, splitX - doorway / 2, splitX + doorway / 2));
+        if (rectangular && width >= 12 && height >= 12)
         {
             rooms.AddRange([new(0, 0, splitX, splitY), new(splitX, 0, width - splitX, splitY), new(0, splitY, splitX, height - splitY), new(splitX, splitY, width - splitX, height - splitY)]);
         }
-        else if (width >= 12) rooms.AddRange([new(0, 0, splitX, height), new(splitX, 0, width - splitX, height)]);
-        else if (height >= 12) rooms.AddRange([new(0, 0, width, splitY), new(0, splitY, width, height - splitY)]);
+        else if (rectangular && width >= 12) rooms.AddRange([new(0, 0, splitX, height), new(splitX, 0, width - splitX, height)]);
+        else if (rectangular && height >= 12) rooms.AddRange([new(0, 0, width, splitY), new(0, splitY, width, height - splitY)]);
         else rooms.Add(new DungeonRoom(0, 0, width, height));
-        return new DungeonState(id, building.Id, width, height, rooms, walls, new WorldPosition(building.Position.Region, exitX, .65), Array.Empty<ActorState>(), Array.Empty<TreasureChestState>(), Array.Empty<string>(), true, furnishings);
+        var home = new DungeonState(id, building.Id, width, height, rooms, walls, layout.Exit, Array.Empty<ActorState>(), Array.Empty<TreasureChestState>(), Array.Empty<string>(), true, furnishings,
+            layout.Footprint, exteriorWallCount, Doorway: layout.Doorway, SessionId: id);
+        if (InteriorPositionIsSafe(home.Exit, home)) return home;
+        WorldPosition? safeEntry = Enumerable.Range(1, Math.Max(1, (int)Math.Floor(height * 2) - 1))
+            .SelectMany(y => Enumerable.Range(1, Math.Max(1, (int)Math.Floor(width * 2) - 1)).Select(x => new WorldPosition(building.Position.Region, x / 2d, y / 2d)))
+            .Where(candidate => InteriorPositionIsSafe(candidate, home))
+            .OrderBy(candidate => candidate.Distance2D(layout.Exit))
+            .Select(candidate => (WorldPosition?)candidate)
+            .FirstOrDefault();
+        return safeEntry is null ? home : home with { Exit = safeEntry.Value };
     }
 
     private static (double Width, double Depth) FurnitureSize(CanonicalEntity furniture, double? rotationOverride = null)
@@ -152,6 +172,12 @@ public sealed partial class RealityWorld
     {
         var size = FurnitureSize(furniture, rotation); const double clearance = .18;
         if (x - size.Width / 2 < .35 || y - size.Depth / 2 < .35 || x + size.Width / 2 > home.Width - .35 || y + size.Depth / 2 > home.Height - .35) return false;
+        if (home.Footprint is { Count: >= 3 } footprint)
+        {
+            var halfWidth = size.Width / 2 + .35; var halfDepth = size.Depth / 2 + .35;
+            if (!new[] { new GeometryPoint(x - halfWidth, y - halfDepth), new GeometryPoint(x + halfWidth, y - halfDepth), new GeometryPoint(x + halfWidth, y + halfDepth), new GeometryPoint(x - halfWidth, y + halfDepth) }
+                .All(point => PointInsideFootprint(point, footprint))) return false;
+        }
         var exitDx = x - home.Exit.X; var exitDy = y - home.Exit.Y;
         if (Math.Sqrt(exitDx * exitDx + exitDy * exitDy) < Math.Max(2.2, Math.Max(size.Width, size.Depth))) return false;
         foreach (var other in existing.Where(item => item.Id != furniture.Id && !IsStoredFurniture(item)))
@@ -159,7 +185,7 @@ public sealed partial class RealityWorld
             var otherSize = FurnitureSize(other);
             if (Math.Abs(x - other.Position.X) < (size.Width + otherSize.Width) / 2 + clearance && Math.Abs(y - other.Position.Y) < (size.Depth + otherSize.Depth) / 2 + clearance) return false;
         }
-        foreach (var wall in home.Walls.Skip(4))
+        foreach (var wall in home.Walls.Skip(home.ExteriorWallCount))
         {
             var vertical = Math.Abs(wall.X1 - wall.X2) < .01;
             if (vertical && Math.Abs(x - wall.X1) < size.Width / 2 + clearance && y + size.Depth / 2 > Math.Min(wall.Y1, wall.Y2) && y - size.Depth / 2 < Math.Max(wall.Y1, wall.Y2))
@@ -189,6 +215,39 @@ public sealed partial class RealityWorld
             position = new WorldPosition(home.Exit.Region, x, y); return true;
         }
         position = new WorldPosition(home.Exit.Region, 0, 0); return false;
+    }
+
+    private bool RepairFurniturePlacements(string accountId, CanonicalEntity building, List<CanonicalEntity> furniture)
+    {
+        var home = EmptyHome($"home:{accountId}:{building.Id}", building, Array.Empty<CanonicalEntity>());
+        var accepted = new List<CanonicalEntity>(furniture.Count);
+        var changed = false;
+        foreach (var item in furniture)
+        {
+            if (IsStoredFurniture(item))
+            {
+                accepted.Add(item);
+                continue;
+            }
+
+            var rotation = double.TryParse(item.Properties.GetValueOrDefault("rotationDegrees"), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedRotation) ? parsedRotation : 0;
+            if (FurniturePlacementValid(home, item, item.Position.X, item.Position.Y, rotation, accepted))
+            {
+                accepted.Add(item);
+                continue;
+            }
+
+            var repaired = TryFindOpenFurniturePosition(home, item, accepted, out var position)
+                ? SetFurniturePlacement(item, position.X, position.Y, rotation, false)
+                : SetFurniturePlacement(item, 0, 0, rotation, true);
+            accepted.Add(repaired);
+            changed = true;
+        }
+
+        if (!changed) return false;
+        furniture.Clear();
+        furniture.AddRange(accepted);
+        return true;
     }
 
     private async Task AddPurchasedFurnitureAsync(string playerId, string offeredItemType, CancellationToken cancellationToken)
@@ -264,7 +323,7 @@ public sealed partial class RealityWorld
         }, cancellationToken);
 
     public Task<DungeonState> StoreFurnitureAsync(string playerId, StoreFurnitureRequest request, CancellationToken cancellationToken = default) =>
-        UpdateFurnitureAsync(playerId, request.FurnitureId, (_, item, _) => item.Properties.GetValueOrDefault("builtIn") == "true" && item.Properties.GetValueOrDefault("objectType") == "fireplace"
-            ? throw new InvalidOperationException("The built-in fireplace cannot be placed in storage.")
+        UpdateFurnitureAsync(playerId, request.FurnitureId, (_, item, _) => item.Properties.GetValueOrDefault("builtIn") == "true" && item.Properties.GetValueOrDefault("objectType") is "fireplace" or "storageChest"
+            ? throw new InvalidOperationException("That built-in fixture cannot be placed in storage.")
             : SetFurniturePlacement(item, 0, 0, 0, true), cancellationToken);
 }

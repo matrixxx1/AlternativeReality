@@ -68,6 +68,10 @@ public sealed class GenerationTests
         Assert.Equal(1, first.Count(actor => actor.Properties["subtype"] == "bear"));
         Assert.Equal(8, first.Count(actor => actor.Kind == EntityKind.Npc));
         Assert.Equal(first.Select(actor => actor.Position), second.Select(actor => actor.Position));
+        Assert.Contains(first, actor => actor.Kind == EntityKind.Npc && actor.Properties["name"] == "Joe");
+        Assert.All(first.Where(actor => actor.Properties["subtype"] == "dog"), actor => Assert.NotEqual("dog", actor.Properties["name"]));
+        Assert.All(first.Where(actor => actor.Properties["subtype"] == "cat"), actor => Assert.NotEqual("cat", actor.Properties["name"]));
+        Assert.Equal(first.Select(actor => actor.Properties["name"]), second.Select(actor => actor.Properties["name"]));
     }
 
     [Fact]
@@ -96,6 +100,7 @@ public sealed class GenerationTests
         Assert.Equal(EntityKind.Npc, merchant.Kind);
         Assert.Equal("gas", merchant.Properties["merchantCategory"]);
         Assert.Contains("Test Fuel", merchant.Properties["name"]);
+        Assert.StartsWith("Joe at ", merchant.Properties["name"]);
     }
 
     [Fact]
@@ -120,6 +125,30 @@ public sealed class GenerationTests
             var road = Assert.Single(dataset.Features);
             Assert.Equal(EntityKind.Road, road.Kind);
             Assert.Equal(2, road.Geometry.Count);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task OverpassImporterClassifiesSpecialtyRetailers()
+    {
+        const string response = """
+            {"elements":[
+              {"type":"node","id":1,"lat":45.5000,"lon":-122.5000,"tags":{"shop":"hardware","name":"Handy Hardware"}},
+              {"type":"node","id":2,"lat":45.5001,"lon":-122.5001,"tags":{"shop":"sports","name":"Field Sports"}},
+              {"type":"node","id":3,"lat":45.5002,"lon":-122.5002,"tags":{"shop":"car","name":"Motor Center"}}
+            ]}
+            """;
+        var directory = Path.Combine(Path.GetTempPath(), $"alternative-reality-retail-{Guid.NewGuid():N}");
+        try
+        {
+            using var client = new HttpClient(new StaticJsonHandler(response)) { BaseAddress = new Uri("https://example.test/") };
+            var provider = new OverpassGeographicProvider(client, directory, new FlatElevationProvider());
+            var dataset = await provider.GetAreaAsync(new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+
+            Assert.Contains(dataset.Features, feature => feature.Properties.GetValueOrDefault("merchantCategory") == "hardware");
+            Assert.Contains(dataset.Features, feature => feature.Properties.GetValueOrDefault("merchantCategory") == "sportingGoods");
+            Assert.Contains(dataset.Features, feature => feature.Properties.GetValueOrDefault("merchantCategory") == "vehicles");
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

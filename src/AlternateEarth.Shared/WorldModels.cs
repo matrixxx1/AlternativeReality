@@ -92,7 +92,12 @@ public sealed record PlayerState(
     bool HatOn = false,
     double DirtBikeGasGallons = 0,
     double MotorcycleGasGallons = 0,
-    string EquippedWeapon = "fist");
+    string EquippedWeapon = "fist",
+    double BodyHeat = 50,
+    double MaximumBodyHeat = 100,
+    string EquippedHat = "none",
+    string EquippedShirt = "none",
+    string EquippedPants = "none");
 
 public sealed record ActorState(
     string Id,
@@ -109,11 +114,30 @@ public sealed record ActorState(
     bool IsMerchant = false,
     TravelMode TravelMode = TravelMode.Walk,
     string LocationId = "outdoor",
-    string? MerchantCategory = null);
+    string? MerchantCategory = null,
+    string EquippedWeapon = "none",
+    string? FactionId = null);
 
-public sealed record ItemStack(string ItemType, int Quantity);
-public sealed record InventoryState(string PlayerId, IReadOnlyList<ItemStack> Items);
-public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null);
+public enum InventoryCategory { Weapon, Quest, Other }
+public sealed record ItemStack(
+    string ItemType,
+    int Quantity,
+    InventoryCategory Category = InventoryCategory.Other,
+    double UnitWeightPounds = 1,
+    bool CarriedInBackpack = true);
+public sealed record InventoryState(
+    string PlayerId,
+    IReadOnlyList<ItemStack> Items,
+    double WeightPounds = 0,
+    double MaximumWeightPounds = 50,
+    int WeaponSlotsUsed = 0,
+    int MaximumWeaponSlots = 3,
+    int QuestSlotsUsed = 0,
+    int MaximumQuestSlots = 3,
+    int OtherSlotsUsed = 0,
+    int MaximumOtherSlots = 6,
+    bool Unlimited = false);
+public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true);
 public sealed record MovementConfiguration(
     double BaseSpeedMph,
     double BaseVisibilityMeters,
@@ -139,7 +163,11 @@ public sealed record DungeonState(
     IReadOnlyList<DungeonRoom> Rooms, IReadOnlyList<DungeonWall> Walls,
     WorldPosition Exit, IReadOnlyList<ActorState> Actors,
     IReadOnlyList<TreasureChestState> Chests, IReadOnlyList<string> RevealedCells,
-    bool IsHome = false, IReadOnlyList<CanonicalEntity>? Furnishings = null);
+    bool IsHome = false, IReadOnlyList<CanonicalEntity>? Furnishings = null,
+    IReadOnlyList<GeometryPoint>? Footprint = null, int ExteriorWallCount = 4,
+    int Level = 1, int LevelCount = 1, WorldPosition? Stairs = null,
+    WorldPosition? Doorway = null, string? SessionId = null,
+    bool IsStore = false, string? StoreCategory = null);
 public sealed record BaseState(
     string BuildingId,
     string DoorId,
@@ -155,10 +183,10 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<LootDropState>? Loot = null,
     BaseState? Base = null,
     long BasePurchasePriceCents = 35_000_000,
-    long GodModeBasePurchasePriceCents = 1,
     ServerConfigurationState? ServerConfiguration = null,
     IReadOnlyList<string>? RevealedWorldAreas = null,
-    IReadOnlyList<CanonicalEntity>? HomeStorage = null);
+    IReadOnlyList<CanonicalEntity>? HomeStorage = null,
+    InventoryState? HomeItemStorage = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(
@@ -235,6 +263,8 @@ public sealed record GeographicDataset(
     IReadOnlyList<ElevationSample> Elevation,
     DateTimeOffset CachedAtUtc);
 
+public sealed record DoorLockState(string DoorId, string BuildingId, bool Locked);
+
 public sealed record WorldSnapshot(
     RealityConfiguration Reality,
     WorldBounds Bounds,
@@ -244,4 +274,6 @@ public sealed record WorldSnapshot(
     IReadOnlyList<ElevationSample> Elevation,
     WeatherState? Weather = null,
     IReadOnlyList<ActorState>? Actors = null,
-    IReadOnlyList<WorldBounds>? LoadedAreas = null);
+    IReadOnlyList<WorldBounds>? LoadedAreas = null,
+    IReadOnlyList<DoorLockState>? DoorLocks = null,
+    DateTimeOffset? DoorLockCycleEndsAtUtc = null);

@@ -4,18 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=22">
+  <link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
   <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
-  <header class="panel title-panel">
+  <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
+  <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link">
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
     <h1>AlternativeReality</h1>
     <div id="realityName" class="reality-name">Connecting reality…</div>
     <div class="status-row"><span id="connectionDot" class="dot"></span><span id="status">Opening reality link</span></div>
   </header>
-  <section class="panel telemetry-panel">
+  <section id="telemetryPanel" class="panel telemetry-panel" data-collapsible="Player status">
     <div class="gps-row"><span>Your GPS</span><strong id="playerGpsValue">—</strong></div>
     <div class="gps-row"><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
     <div><span>Terrain</span><strong id="terrainValue">—</strong></div>
@@ -30,13 +31,14 @@
     <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
     <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
     <div class="water"><span>Water</span><strong id="waterValue">●●●●●●●●●●</strong></div>
+    <div class="body-heat"><span>Body heat</span><strong id="bodyHeatValue">Comfortable · 50%</strong></div>
     <div><span>Gas</span><strong id="gasValue">—</strong></div>
     <div><span>Wallet</span><strong id="walletValue">$0.00</strong></div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
     <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
     <button id="centerButton" type="button">Center on player</button>
   </section>
-  <section class="panel travel-panel" aria-label="Travel mode">
+  <section id="travelPanel" class="panel travel-panel" aria-label="Travel mode" data-collapsible="Travel">
     <strong>Travel mode</strong>
     <div class="mode-buttons">
       <button type="button" data-mode="walk">Walk</button>
@@ -47,21 +49,15 @@
       <button type="button" data-mode="motorcycle">Motorcycle</button>
       <button type="button" data-mode="raft">Raft</button>
     </div>
-    <div class="light-switches" role="group" aria-label="Lighting options">
-      <strong>Lighting</strong>
-      <label><input id="flashlightToggle" type="checkbox"> Flashlight</label>
-      <label><input id="lanternToggle" type="checkbox"> Lantern</label>
-      <label><input id="laserToggle" type="checkbox"> Laser</label>
-    </div>
   </section>
-  <section class="panel help-panel">
+  <section id="helpPanel" class="panel help-panel" data-collapsible="Controls">
     <div><kbd>WASD</kbd> / <kbd>Arrows</kbd> move</div>
     <div><kbd>Left click</kbd> travel / use weapon</div>
     <div><kbd>Left / right drag</kbd> pan</div>
     <div><kbd>Right click</kbd> / <kbd>double-click</kbd> actions</div>
     <div><kbd>Wheel</kbd> zoom</div>
   </section>
-  <section class="panel god-panel">
+  <section id="godPanel" class="panel god-panel" data-collapsible="Game controls">
     <button id="toggleChatButton" type="button">Show chat</button>
     <label><input id="godMode" type="checkbox"> God Mode</label>
     <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
@@ -81,64 +77,81 @@
           <path d="M35 48 L65 48 L75 105 L62 105 L68 165 M38 105 L32 165 M36 58 L14 108 M64 58 L86 108"></path>
         </svg>
         <button id="equipmentHat" class="equipment-slot slot-hat" type="button"><span>Hat</span><em>Empty</em></button>
-        <button id="equipmentShirt" class="equipment-slot slot-shirt" type="button" disabled><span>Shirt</span><em>Empty</em></button>
-        <button id="equipmentGloves" class="equipment-slot slot-gloves" type="button" disabled><span>Gloves</span><em>Empty</em></button>
-        <button id="equipmentPants" class="equipment-slot slot-pants" type="button" disabled><span>Pants</span><em>Empty</em></button>
+        <button id="equipmentShirt" class="equipment-slot slot-shirt" type="button"><span>Shirt</span><em>Empty</em></button>
+        <button id="equipmentOffhand" class="equipment-slot slot-gloves" type="button"><span>Offhand</span><em>Empty</em></button>
+        <button id="equipmentPants" class="equipment-slot slot-pants" type="button"><span>Pants</span><em>Empty</em></button>
         <button id="equipmentShoes" class="equipment-slot slot-shoes" type="button"><span>Shoes</span><em>Empty</em></button>
         <button id="equipmentWeapon" class="equipment-slot slot-weapon" type="button"><span>Weapon</span><em>Fist</em></button>
       </div>
       <div class="backpack" aria-label="Backpack">
         <div class="backpack-handle" aria-hidden="true"></div>
         <strong class="carried-title">Backpack</strong>
-        <small>Drag a weapon to the figure’s weapon slot.</small>
+        <small id="backpackSummary">0.0 / 50 lb</small>
+        <nav class="backpack-tabs" aria-label="Backpack categories">
+          <button type="button" data-inventory-tab="weapon">Weapons <span id="weaponSlotCount">0/3</span></button>
+          <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount">0/3</span></button>
+          <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount">0/6</span></button>
+        </nav>
         <div id="inventoryItems" class="inventory-items">Empty</div>
       </div>
     </div>
   </section>
-  <section id="characterPanel" class="panel character-panel" hidden>
+  <section id="characterPanel" class="panel character-panel" data-collapsible="Character manager" hidden>
     <div class="window-header"><strong>Wardrobe · Characters</strong><button id="closeCharactersButton" type="button">Close</button></div>
     <div id="characterList"></div>
     <form id="characterForm"><input id="characterName" minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" placeholder="New character" required><button type="submit">Add</button></form>
   </section>
-  <section id="homeStoragePanel" class="panel home-storage" hidden>
+  <section id="homeStoragePanel" class="panel home-storage" data-collapsible="Home storage" hidden>
     <div class="window-header"><strong>Home storage</strong><span id="homeStorageCount">0 items</span></div>
     <small>Stored furniture is available only inside your Home. Choose an item, then drag it onto an open floor position.</small>
     <div id="homeStorageItems" class="home-storage-items"></div>
+    <section id="homeItemStorageSection" class="home-item-storage" hidden>
+      <div class="home-item-storage-header"><strong>Storage chest</strong><span>Unlimited capacity</span></div>
+      <div class="home-item-storage-columns">
+        <div><strong>Backpack</strong><div id="backpackStorageItems" class="storage-transfer-items"></div></div>
+        <div><strong>Chest</strong><div id="chestStorageItems" class="storage-transfer-items"></div></div>
+      </div>
+    </section>
   </section>
-  <section id="chatHistory" class="panel chat-history" hidden>
+  <section id="chatHistory" class="panel chat-history" data-collapsible="Recent chat" hidden>
     <strong>Recent chat</strong>
     <div id="chatMessages" class="chat-messages"><div class="empty-chat">No messages yet.</div></div>
   </section>
-  <form id="chatForm" class="panel chat-form">
+  <form id="chatForm" class="panel chat-form" data-collapsible="Chat">
     <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
     <button type="submit">Say</button>
   </form>
   <section id="actionMenu" class="panel action-menu" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
-    <button id="moveToButton" type="button" hidden>Move here</button>
+    <button id="enterBuildingButton" type="button" hidden>Enter building</button>
+    <button id="goUpstairsButton" type="button" hidden>Go upstairs</button>
+    <button id="goDownstairsButton" type="button" hidden>Go downstairs</button>
+    <button id="leaveDungeonButton" type="button" hidden>Leave dungeon</button>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
+    <button id="stalkButton" type="button" hidden>Stalk</button>
+    <button id="continuousAttackButton" type="button" hidden>Attack</button>
     <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
     <button id="useFurnitureButton" type="button" hidden>Use item</button>
     <button id="moveFurnitureButton" type="button" hidden>Move item</button>
     <button id="rotateFurnitureButton" type="button" hidden>Rotate 90°</button>
     <button id="storeFurnitureButton" type="button" hidden>Place in Home storage</button>
   </section>
-  <section id="tradeWindow" class="panel trade-window" hidden>
+  <section id="tradeWindow" class="panel trade-window" data-collapsible="Merchant inventory" hidden>
     <h2 id="tradeTitle">Merchant</h2>
     <div id="tradeFriend"></div>
     <div id="tradeOffers"></div>
     <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm purchase</button></div>
   </section>
-  <section id="serverConfigWindow" class="panel server-config-window" hidden>
+  <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
     <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
     <p>Movement is additive: base speed + terrain + travel mode + every active item modifier. Dynamic characters and treasure are hidden beyond visible range; geographic scenery remains visible.</p>
     <section class="movement-config">
       <div class="movement-base"><label>Player base speed (mph)<input id="baseSpeedConfig" type="number" min="0.1" max="200" step="0.1"></label><label>Base visible range (m)<input id="baseVisibilityConfig" type="number" min="1" max="5000" step="1"></label><button id="saveMovementConfig" type="button">Save movement &amp; visibility</button></div>
       <div class="modifier-groups"><div><strong>Terrain speed +/- mph</strong><div id="terrainSpeedConfig" class="modifier-grid"></div></div><div><strong>Travel mode speed +/- mph</strong><div id="travelSpeedConfig" class="modifier-grid"></div></div></div>
     </section>
-    <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span></div><div id="serverConfigItems"></div></div>
+    <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
   </section>
   <div id="actorTooltip" class="actor-tooltip" hidden></div>
   <section id="accountSetup" class="account-setup">
@@ -168,6 +181,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=40"></script>
+  <script src="app.js?v=46"></script>
 </body>
 </html>

@@ -6,6 +6,19 @@ namespace AlternateEarth.Geo;
 
 public sealed class DeterministicWorldGenerator
 {
+    private static readonly string[] HumanNames =
+    [
+        "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
+        "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis"
+    ];
+    private static readonly string[] DogNames =
+    [
+        "Bark Twain", "Indiana Bones", "Chewbarka", "Woofgang", "Captain Sniff", "Sir Barksalot", "Droolius Caesar", "Biscuit"
+    ];
+    private static readonly string[] CatNames =
+    [
+        "Chairman Meow", "Purrlock Holmes", "Catrick Swayze", "Kitty Smalls", "Fuzz Aldrin", "Tuna Turner", "Cat Benatar", "Meowly Cyrus"
+    ];
     private readonly IGeographicProvider _geographicProvider;
 
     public DeterministicWorldGenerator(IGeographicProvider geographicProvider) => _geographicProvider = geographicProvider;
@@ -74,7 +87,7 @@ public sealed class DeterministicWorldGenerator
             entity.Position, Array.Empty<GeometryPoint>(), new Dictionary<string, string>
             {
                 ["subtype"] = "merchant",
-                ["name"] = entity.Properties.GetValueOrDefault("name") is { Length: > 0 } name ? $"{name} clerk" : $"{entity.Properties.GetValueOrDefault("merchantCategory")} merchant",
+                ["name"] = $"{HumanNames[index % HumanNames.Length]} at {entity.Properties.GetValueOrDefault("name") ?? entity.Properties.GetValueOrDefault("brand") ?? "the shop"}",
                 ["merchantCategory"] = entity.Properties.GetValueOrDefault("merchantCategory") ?? "general",
                 ["sourceFeatureId"] = entity.Id
             })).ToArray();
@@ -255,7 +268,6 @@ public sealed class DeterministicWorldGenerator
             (EntityKind.Animal, "bird", 10), (EntityKind.Animal, "deer", 5), (EntityKind.Animal, "cougar", 1),
             (EntityKind.Animal, "bear", 1), (EntityKind.Npc, "resident", 8)
         };
-        var names = new[] { "Alex", "Bailey", "Casey", "Drew", "Emery", "Finley", "Gray", "Harper" };
         var bounds = reality.Area.Bounds;
         var random = new Random(StableSeed(reality.Seed + 104729, reality));
         var result = new List<CanonicalEntity>();
@@ -273,7 +285,10 @@ public sealed class DeterministicWorldGenerator
                     y = bounds.MinimumY + (random.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
                     attempts++;
                 } while (attempts < 80 && obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, .5)));
-                var name = definition.Kind == EntityKind.Npc ? names[index % names.Length] : definition.Subtype;
+                var name = definition.Kind == EntityKind.Npc ? HumanNames[index % HumanNames.Length]
+                    : definition.Subtype == "dog" ? DogNames[index % DogNames.Length]
+                    : definition.Subtype == "cat" ? CatNames[index % CatNames.Length]
+                    : definition.Subtype;
                 result.Add(new CanonicalEntity(
                     $"generated:{reality.Id}:{AreaKey(reality)}:actor:{actorIndex++}",
                     definition.Kind,

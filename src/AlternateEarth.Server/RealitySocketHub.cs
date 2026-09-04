@@ -42,9 +42,11 @@ public sealed class RealitySocketHub
         catch (WebSocketException) { }
         finally
         {
-            _clients.TryRemove(characterId, out _);
-            _world.Leave(characterId);
-            await BroadcastAsync(new { type = "playerLeft", playerId = characterId }, characterId, CancellationToken.None);
+            if (_clients.TryGetValue(characterId, out var active) && ReferenceEquals(active, connection) && _clients.TryRemove(characterId, out _))
+            {
+                _world.Leave(characterId);
+                await BroadcastAsync(new { type = "playerLeft", playerId = characterId }, characterId, CancellationToken.None);
+            }
         }
     }
 
@@ -114,6 +116,11 @@ public sealed class RealitySocketHub
                         var itemConfiguration = await _world.UpdateItemConfigurationAsync(characterId, root.Deserialize<UpdateItemConfigurationRequest>(SharedJson.Options)!, cancellationToken);
                         await connection.SendAsync(new { type = "itemConfigurationUpdated", item = itemConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "configureInventoryItem":
+                        var inventoryAdjustment = await _world.ConfigureInventoryItemAsync(characterId, root.Deserialize<ConfigureInventoryItemRequest>(SharedJson.Options)!, cancellationToken);
+                        if (inventoryAdjustment.Player is not null) await BroadcastAsync(new { type = "playerUpdated", player = inventoryAdjustment.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "configuredInventoryAdjusted", privateState = inventoryAdjustment.PrivateState, message = inventoryAdjustment.Message }, cancellationToken);
+                        break;
                     case "updateMovementConfiguration":
                         var movementConfiguration = await _world.UpdateMovementConfigurationAsync(characterId, root.Deserialize<UpdateMovementConfigurationRequest>(SharedJson.Options)!, cancellationToken);
                         await connection.SendAsync(new { type = "movementConfigurationUpdated", movement = movementConfiguration, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
@@ -123,6 +130,12 @@ public sealed class RealitySocketHub
                         var entered = await _world.EnterDungeonAsync(characterId, enter.DoorId, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = entered.Player }, null, cancellationToken);
                         await connection.SendAsync(new { type = "dungeonEntered", player = entered.Player, dungeon = entered.Dungeon, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "changeDungeonLevel":
+                        var levelRequest = root.Deserialize<ChangeDungeonLevelRequest>(SharedJson.Options)!;
+                        var changedLevel = await _world.ChangeDungeonLevelAsync(characterId, levelRequest.Direction, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = changedLevel.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "dungeonLevelChanged", player = changedLevel.Player, dungeon = changedLevel.Dungeon, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "exitDungeon":
                         var exited = await _world.ExitDungeonAsync(characterId, cancellationToken);
@@ -156,6 +169,15 @@ public sealed class RealitySocketHub
                     case "storeFurniture":
                         var storedFurniture = await _world.StoreFurnitureAsync(characterId, root.Deserialize<StoreFurnitureRequest>(SharedJson.Options)!, cancellationToken);
                         await connection.SendAsync(new { type = "homeUpdated", dungeon = storedFurniture, privateState = _world.GetPrivateState(characterId), message = "Furniture moved to Home storage." }, cancellationToken);
+                        break;
+                    case "openHomeStorage":
+                        var openedStorage = _world.OpenHomeItemStorage(characterId, root.Deserialize<OpenHomeStorageRequest>(SharedJson.Options)!.ChestId);
+                        await connection.SendAsync(new { type = "homeStorageOpened", storage = openedStorage, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "transferHomeStorage":
+                        var storageState = await _world.TransferHomeItemAsync(characterId, root.Deserialize<TransferHomeStorageRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = storageState.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "homeStorageUpdated", privateState = storageState.PrivateState, message = "Storage chest updated." }, cancellationToken);
                         break;
                     case "purchaseBase":
                         var basePurchase = await _world.PurchaseBaseAsync(characterId, root.Deserialize<PurchaseBaseRequest>(SharedJson.Options)!, cancellationToken);
@@ -290,6 +312,9 @@ public sealed class RealitySocketHub
 
     public Task BroadcastPlayersAsync(IReadOnlyList<PlayerState> players, CancellationToken cancellationToken = default) =>
         players.Count == 0 ? Task.CompletedTask : BroadcastAsync(new { type = "playersUpdated", players }, null, cancellationToken);
+
+    public Task BroadcastDoorLocksAsync(DoorLockSchedule schedule, CancellationToken cancellationToken = default) =>
+        BroadcastAsync(new { type = "doorLocksChanged", doorLocks = schedule.Doors, doorLockCycleEndsAtUtc = schedule.EndsAtUtc }, null, cancellationToken);
 
     public async Task BroadcastCombatAsync(IReadOnlyList<CombatEvent> combat, CancellationToken cancellationToken = default)
     {

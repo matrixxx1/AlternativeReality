@@ -33,7 +33,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             var cached = JsonSerializer.Deserialize<GeographicDataset>(cachedJson, SharedJson.Options);
             if (cached is not null)
             {
-                return cached;
+                return cached with { Features = NormalizeMerchantCategories(cached.Features) };
             }
         }
 
@@ -250,14 +250,26 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         if (category is not null) properties["merchantCategory"] = category;
     }
 
+    private static IReadOnlyList<CanonicalEntity> NormalizeMerchantCategories(IReadOnlyList<CanonicalEntity> features) => features.Select(entity =>
+    {
+        var category = MerchantCategory(entity.Properties);
+        if (category is null || entity.Properties.GetValueOrDefault("merchantCategory") == category) return entity;
+        var properties = new Dictionary<string, string>(entity.Properties, StringComparer.OrdinalIgnoreCase) { ["merchantCategory"] = category };
+        return entity with { Properties = properties };
+    }).ToArray();
+
     private static string? MerchantCategory(IReadOnlyDictionary<string, string> tags)
     {
         if (tags.GetValueOrDefault("amenity") == "fuel") return "gas";
         if (!tags.TryGetValue("shop", out var shop)) return null;
         if (shop is "furniture" or "interior_decoration" or "bed" or "carpet") return "furniture";
-        if (shop is "clothes" or "fashion" or "shoes" or "outdoor") return "clothing";
+        if (shop is "clothes" or "fashion" or "shoes" or "tailor") return "clothing";
         if (shop is "supermarket" or "grocery" or "bakery" or "butcher" or "greengrocer" or "deli") return "food";
         if (shop == "convenience") return "convenience";
+        if (shop is "hardware" or "doityourself" or "tools") return "hardware";
+        if (shop is "sports" or "outdoor" or "hunting" or "fishing" or "bicycle") return "sportingGoods";
+        if (shop is "weapons" or "gun") return "weapons";
+        if (shop is "car" or "motorcycle") return "vehicles";
         return "general";
     }
 
