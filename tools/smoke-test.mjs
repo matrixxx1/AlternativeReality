@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=46`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=53`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -10,6 +10,8 @@ if (!clientHtml.includes('bodyHeatValue') || !clientHtml.includes('equipmentOffh
   throw new Error('Climate, offhand, or store-flag client controls are missing.');
 if (!clientHtml.includes('Inventory</strong>') || !clientScript.includes("configureInventoryItem") || !clientScript.includes("Take 1"))
   throw new Error('Server-config inventory controls are missing.');
+if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('Drop 1'))
+  throw new Error('Inventory drop controls are missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -37,7 +39,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 20) throw new Error(`Expected protocol 20, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 25) throw new Error(`Expected protocol 25, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
@@ -116,7 +118,7 @@ try {
     first.socket.send(JSON.stringify({type:'purchaseBase',doorId:door.id}));
     const outcome=await first.waitFor(message=>message.type==='basePurchased'||message.type==='error',10000,after);
     if(outcome.type==='basePurchased'){replacementDoor=door;basePurchase=outcome;break;}
-    if(!/already another player/i.test(outcome.message))throw new Error(`Unexpected base-purchase rejection: ${outcome.message}`);
+    if(!/(already another player|commercial properties)/i.test(outcome.message))throw new Error(`Unexpected base-purchase rejection: ${outcome.message}`);
   }
   if(!replacementDoor||!basePurchase)throw new Error('No unassigned building door was available for the base-purchase test.');
   if(basePurchase.priceCents!==basePurchase.privateState?.base?.purchasePriceCents||basePurchase.player?.walletCents!==walletBeforeBasePurchase||basePurchase.privateState?.base?.buildingId!==replacementDoor.properties.buildingId)throw new Error('God Mode base purchase did not retain the normal price, preserve wallet funds, or persist the selected building.');

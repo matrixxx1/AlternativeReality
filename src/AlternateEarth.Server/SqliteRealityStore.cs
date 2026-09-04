@@ -42,7 +42,8 @@ public sealed class SqliteRealityStore
                 DirtBikeGasGallons REAL NOT NULL DEFAULT 0, MotorcycleGasGallons REAL NOT NULL DEFAULT 0,
                 EquippedWeapon TEXT NOT NULL DEFAULT 'fist',
                 BodyHeat REAL NOT NULL DEFAULT 50, EquippedHat TEXT NOT NULL DEFAULT 'none',
-                EquippedShirt TEXT NOT NULL DEFAULT 'none', EquippedPants TEXT NOT NULL DEFAULT 'none',
+                EquippedShirt TEXT NOT NULL DEFAULT 'none', EquippedPants TEXT NOT NULL DEFAULT 'none', WantedLevel INTEGER NOT NULL DEFAULT 0,
+                EBikeRemainingMeters REAL NOT NULL DEFAULT 1609.344,
                 Version INTEGER NOT NULL, UpdatedUtc TEXT NOT NULL,
                 FOREIGN KEY (RealityId) REFERENCES Reality(Id)
             );
@@ -101,11 +102,18 @@ public sealed class SqliteRealityStore
                 FurnitureJson TEXT NOT NULL, UpdatedUtc TEXT NOT NULL,
                 PRIMARY KEY (AccountId, RealityId)
             );
+            CREATE TABLE IF NOT EXISTS PlayerQuests (
+                RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, QuestId TEXT NOT NULL,
+                QuestJson TEXT NOT NULL, UpdatedUtc TEXT NOT NULL,
+                PRIMARY KEY (RealityId, PlayerId, QuestId)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Stamina", "REAL NOT NULL DEFAULT 10", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Water", "REAL NOT NULL DEFAULT 10", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "WantedLevel", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "EBikeRemainingMeters", "REAL NOT NULL DEFAULT 1609.344", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "WalletCents", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "GodMode", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "FoodProtectedUntilUtc", "TEXT", cancellationToken);
@@ -165,6 +173,18 @@ public sealed class SqliteRealityStore
         return entities;
     }
 
+    public async Task<IReadOnlyList<string>> LoadRemovedEntityIdsAsync(string realityId, CancellationToken cancellationToken = default)
+    {
+        var ids = new List<string>();
+        await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT EntityId FROM RealityDeltas WHERE RealityId=$reality AND Operation='removed'";
+        command.Parameters.AddWithValue("$reality", realityId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) ids.Add(reader.GetString(0));
+        return ids;
+    }
+
     public async Task SaveEntityAsync(string realityId, CanonicalEntity entity, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
@@ -215,7 +235,7 @@ public sealed class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -232,7 +252,7 @@ public sealed class SqliteRealityStore
             DirtBikeGasGallons: Math.Clamp(reader.GetDouble(22), 0, 2), MotorcycleGasGallons: Math.Clamp(reader.GetDouble(23), 0, 4),
             EquippedWeapon: reader.IsDBNull(24) ? "fist" : reader.GetString(24), BodyHeat: Math.Clamp(reader.GetDouble(25), 0, 100),
             EquippedHat: reader.IsDBNull(26) ? "none" : reader.GetString(26), EquippedShirt: reader.IsDBNull(27) ? "none" : reader.GetString(27),
-            EquippedPants: reader.IsDBNull(28) ? "none" : reader.GetString(28));
+            EquippedPants: reader.IsDBNull(28) ? "none" : reader.GetString(28), WantedLevel: reader.GetInt32(29), EBikeRemainingMeters: reader.GetDouble(30));
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default)
@@ -240,8 +260,8 @@ public sealed class SqliteRealityStore
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $bodyHeat, $equippedHat, $equippedShirt, $equippedPants, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $bodyHeat, $equippedHat, $equippedShirt, $equippedPants, $wantedLevel, $eBikeRemaining, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
                 Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina, Water = excluded.Water,
                 WalletCents = excluded.WalletCents, GodMode = excluded.GodMode,
@@ -250,7 +270,7 @@ public sealed class SqliteRealityStore
                 MagicHikingShoesOn=excluded.MagicHikingShoesOn, MagicRunningShoesOn=excluded.MagicRunningShoesOn, HatOn=excluded.HatOn,
                 DirtBikeGasGallons=excluded.DirtBikeGasGallons, MotorcycleGasGallons=excluded.MotorcycleGasGallons,
                 EquippedWeapon=excluded.EquippedWeapon, BodyHeat=excluded.BodyHeat, EquippedHat=excluded.EquippedHat,
-                EquippedShirt=excluded.EquippedShirt, EquippedPants=excluded.EquippedPants,
+                EquippedShirt=excluded.EquippedShirt, EquippedPants=excluded.EquippedPants, WantedLevel=excluded.WantedLevel, EBikeRemainingMeters=excluded.EBikeRemainingMeters,
                 Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
@@ -283,6 +303,8 @@ public sealed class SqliteRealityStore
         command.Parameters.AddWithValue("$equippedHat", player.EquippedHat);
         command.Parameters.AddWithValue("$equippedShirt", player.EquippedShirt);
         command.Parameters.AddWithValue("$equippedPants", player.EquippedPants);
+        command.Parameters.AddWithValue("$wantedLevel", player.WantedLevel);
+        command.Parameters.AddWithValue("$eBikeRemaining", player.EBikeRemainingMeters);
         command.Parameters.AddWithValue("$version", player.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -416,6 +438,32 @@ public sealed class SqliteRealityStore
         command.CommandText = "INSERT INTO PlayerRelationships (RealityId,PlayerId,ActorId,FriendRating) VALUES ($r,$p,$a,$f) ON CONFLICT(RealityId,PlayerId,ActorId) DO UPDATE SET FriendRating=excluded.FriendRating";
         command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", relationship.PlayerId);
         command.Parameters.AddWithValue("$a", relationship.ActorId); command.Parameters.AddWithValue("$f", relationship.FriendRating);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<QuestState>> LoadQuestsAsync(string realityId, string playerId, CancellationToken cancellationToken = default)
+    {
+        var result = new List<QuestState>();
+        await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT QuestJson FROM PlayerQuests WHERE RealityId=$r AND PlayerId=$p ORDER BY UpdatedUtc";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var quest = JsonSerializer.Deserialize<QuestState>(reader.GetString(0), SharedJson.Options);
+            if (quest is not null) result.Add(quest);
+        }
+        return result;
+    }
+
+    public async Task SaveQuestAsync(string realityId, QuestState quest, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO PlayerQuests (RealityId,PlayerId,QuestId,QuestJson,UpdatedUtc) VALUES ($r,$p,$q,$j,$u) ON CONFLICT(RealityId,PlayerId,QuestId) DO UPDATE SET QuestJson=excluded.QuestJson,UpdatedUtc=excluded.UpdatedUtc";
+        command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", quest.PlayerId); command.Parameters.AddWithValue("$q", quest.Id);
+        command.Parameters.AddWithValue("$j", JsonSerializer.Serialize(quest, SharedJson.Options)); command.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

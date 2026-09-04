@@ -393,6 +393,57 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BikeRaftAndMotorcycleDoNotContributeToPlayerWeight()
+    {
+        var configuration = new RealityConfiguration("weightless-travel-items", "Weightless Travel Items", 224, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "weightless-travel-items.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("traveler", new[]
+        {
+            new ItemStack("bike", 1), new ItemStack("inflatableRaft", 1), new ItemStack("motorcycle", 1), new ItemStack("rock", 2)
+        }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("traveler", "Traveler");
+
+        var inventory = world.GetPrivateState(player.Id).Inventory;
+
+        Assert.Equal(1, inventory.WeightPounds, 3);
+        Assert.Equal(0, inventory.Items.Single(item => item.ItemType == "bike").UnitWeightPounds);
+        Assert.Equal(0, inventory.Items.Single(item => item.ItemType == "inflatableRaft").UnitWeightPounds);
+        Assert.Equal(0, inventory.Items.Single(item => item.ItemType == "motorcycle").UnitWeightPounds);
+    }
+
+    [Fact]
+    public async Task DroppedItemBecomesCollectibleLootAndLastEquippedItemFallsBack()
+    {
+        var configuration = new RealityConfiguration("drop-inventory", "Drop Inventory", 225, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "drop-inventory.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("dropper", new[] { new ItemStack("knife", 1) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("dropper", "Dropper");
+        player = await world.SetEquipmentAsync(player.Id, "weapon", "knife");
+
+        var dropped = await world.DropInventoryItemAsync(player.Id, new DropItemRequest("knife"));
+
+        Assert.Equal("fist", dropped.Player.EquippedWeapon);
+        Assert.DoesNotContain(dropped.PrivateState.Inventory.Items, item => item.ItemType == "knife");
+        Assert.Equal(player.Position, dropped.Drop.Position);
+        Assert.Equal(player.LocationId, dropped.Drop.LocationId);
+        Assert.Equal("knife", Assert.Single(dropped.Drop.Items).ItemType);
+        var collected = await world.CollectLootAsync(player.Id, dropped.Drop.Id);
+        Assert.Equal(1, collected.Inventory.Items.Single(item => item.ItemType == "knife").Quantity);
+        Assert.Contains("1 × Knife", collected.Message);
+        Assert.DoesNotContain("supplies", collected.Message, StringComparison.OrdinalIgnoreCase);
+
+        var persisted = await store.LoadInventoryAsync(player.Id);
+        Assert.Equal(1, persisted.Items.Single(item => item.ItemType == "knife").Quantity);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.DropInventoryItemAsync(player.Id, new DropItemRequest("fist")));
+    }
+
+    [Fact]
     public async Task HomeStorageChestTransfersStacksWithoutCapacityLimit()
     {
         var configuration = new RealityConfiguration("home-item-storage", "Home Item Storage", 222, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -594,10 +645,15 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await world.SetGodModeAsync(player.Id, true);
         await world.SetTravelModeAsync(player.Id, TravelMode.Motorcycle);
 
-        var moved = await world.MoveAsync(player.Id, new MoveRequest(1, 0, 1, .05));
+        var destinationX = player.Position.X + .05;
+        var request = new MoveRequest(1, 0, 1, .05, destinationX, player.Position.Y);
+        var moved = await world.MoveAsync(player.Id, request);
+        var repeatedStaleRequest = await world.MoveAsync(player.Id, request);
 
         Assert.NotNull(moved);
+        Assert.NotNull(repeatedStaleRequest);
         Assert.InRange(moved.Player.Position.Distance2D(player.Position), 0, .050001);
+        Assert.InRange(repeatedStaleRequest.Player.Position.Distance2D(player.Position), 0, .050001);
     }
 
     [Fact]
@@ -710,6 +766,21 @@ public sealed class RealityWorldTests : IAsyncLifetime
         new(id, EntityKind.Building, new WorldPosition(region, x, y),
             new GeometryPoint[] { new(x - 5, y - 5), new(x + 5, y - 5), new(x + 5, y + 5), new(x - 5, y + 5), new(x - 5, y - 5) },
             new Dictionary<string, string> { ["building"] = "yes" });
+
+    [Fact]
+    public async Task EBikeBatteryExpiresAfterItsRemainingMileAndRemovesVehicle()
+    {
+        var configuration = new RealityConfiguration("ebike-test", "E-bike Test", 333, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "ebike.db")); await store.InitializeAsync(configuration);
+        var center = new LocalTangentProjection(configuration.Area.Region).Project(configuration.Area.Center);
+        await store.SaveCharacterAsync(configuration.Id, new PlayerState("rider", "Rider", center, EBikeRemainingMeters: .01));
+        await store.SaveInventoryAsync(new InventoryState("rider", new[] { new ItemStack("eBike", 1) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store); await world.InitializeAsync();
+        var player = await world.JoinAsync("rider", "Rider"); player = await world.SetTravelModeAsync(player.Id, TravelMode.EBike);
+        var movement = await world.MoveAsync(player.Id, new MoveRequest(1, 0, 1));
+        Assert.NotNull(movement); Assert.Equal(TravelMode.Walk, movement!.Player.TravelMode); Assert.Contains("battery died", movement.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(world.GetPrivateState(player.Id).Inventory.Items, item => item.ItemType == "eBike");
+    }
 
     [Fact]
     public async Task ClothingAndOffhandEquipmentDriveTemperatureAndLighting()

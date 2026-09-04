@@ -5,11 +5,11 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 20;
+    public const int Version = 25;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
-public sealed record MoveRequest(double X, double Y, long Sequence, double? MaximumDistanceMeters = null);
+public sealed record MoveRequest(double X, double Y, long Sequence, double? MaximumDistanceMeters = null, double? DestinationX = null, double? DestinationY = null);
 public sealed record PathRequest(double X, double Y, long Sequence);
 public sealed record SetTravelModeRequest(TravelMode Mode);
 public sealed record RebuildAreaRequest(bool GodMode);
@@ -21,8 +21,17 @@ public sealed record ExitDungeonRequest();
 public sealed record ChangeDungeonLevelRequest(int Direction);
 public sealed record CombatRequest(string TargetId, string Weapon);
 public sealed record RequestTradeRequest(string MerchantId);
-public sealed record ConfirmTradeRequest(string MerchantId, IReadOnlyList<PurchaseLine> Purchases);
+public sealed record ConfirmTradeRequest(string MerchantId, IReadOnlyList<PurchaseLine> Purchases, IReadOnlyList<PurchaseLine>? Sales = null);
+public sealed record RequestQuestRequest(string ActorId);
+public sealed record AcceptQuestRequest(string QuestId);
+public sealed record CompleteQuestRequest(string QuestId, string ActorId);
+public sealed record AbandonQuestRequest(string QuestId);
+public sealed record CaptureQuestPetRequest(string ActorId);
+public sealed record ChopVegetationRequest(string EntityId);
+public sealed record AttackWorldObjectRequest(string EntityId);
+public sealed record PickLockRequest(string DoorId);
 public sealed record ConsumeItemRequest(string ItemType);
+public sealed record DropItemRequest(string ItemType, int Quantity = 1);
 public sealed record OpenChestRequest(string ChestId);
 public sealed record ChestSeenRequest(string ChestId);
 public sealed record RestAtBedRequest(string BedId);

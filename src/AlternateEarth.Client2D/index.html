@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=24">
+  <link rel="stylesheet" href="styles.css?v=27">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -18,11 +18,10 @@
   </header>
   <section id="telemetryPanel" class="panel telemetry-panel" data-collapsible="Player status">
     <div class="gps-row"><span>Your GPS</span><strong id="playerGpsValue">—</strong></div>
-    <div class="gps-row"><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
+    <div id="destinationGpsRow" class="gps-row" hidden><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
     <div><span>Terrain</span><strong id="terrainValue">—</strong></div>
     <div><span>Elevation</span><strong id="elevationValue">—</strong></div>
-    <div><span>Speed</span><strong id="speedValue">0.0 mph</strong></div>
-    <div><span>Distance</span><strong id="distanceValue">—</strong></div>
+    <div id="destinationDistanceRow" hidden><span>Distance</span><strong id="distanceValue">—</strong></div>
     <div><span>Camera</span><strong id="cameraValue">0 m</strong></div>
     <div><span>Visible range</span><strong id="visibilityValue">100 m</strong></div>
     <div><span>Weather</span><strong id="weatherValue">Loading…</strong></div>
@@ -31,9 +30,8 @@
     <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
     <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
     <div class="water"><span>Water</span><strong id="waterValue">●●●●●●●●●●</strong></div>
-    <div class="body-heat"><span>Body heat</span><strong id="bodyHeatValue">Comfortable · 50%</strong></div>
-    <div><span>Gas</span><strong id="gasValue">—</strong></div>
-    <div><span>Wallet</span><strong id="walletValue">$0.00</strong></div>
+    <div class="body-heat"><span>Heat</span><strong id="bodyHeatValue">Comfortable · 50%</strong></div>
+    <div><span>Wanted</span><strong id="wantedValue">None</strong></div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
     <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
     <button id="centerButton" type="button">Center on player</button>
@@ -45,6 +43,7 @@
       <button type="button" data-mode="run">Run</button>
       <button type="button" data-mode="skateboard">Skateboard</button>
       <button type="button" data-mode="bike">Bike</button>
+      <button type="button" data-mode="eBike">E-bike</button>
       <button type="button" data-mode="dirtBike">Dirt bike</button>
       <button type="button" data-mode="motorcycle">Motorcycle</button>
       <button type="button" data-mode="raft">Raft</button>
@@ -125,11 +124,14 @@
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
     <button id="enterBuildingButton" type="button" hidden>Enter building</button>
+    <button id="pickLockButton" type="button" hidden>Pick lock</button>
     <button id="goUpstairsButton" type="button" hidden>Go upstairs</button>
     <button id="goDownstairsButton" type="button" hidden>Go downstairs</button>
     <button id="leaveDungeonButton" type="button" hidden>Leave dungeon</button>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
+    <button id="questButton" type="button" hidden>Quest</button>
+    <button id="capturePetButton" type="button" hidden>Capture pet</button>
     <button id="stalkButton" type="button" hidden>Stalk</button>
     <button id="continuousAttackButton" type="button" hidden>Attack</button>
     <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
@@ -142,7 +144,14 @@
     <h2 id="tradeTitle">Merchant</h2>
     <div id="tradeFriend"></div>
     <div id="tradeOffers"></div>
-    <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm purchase</button></div>
+    <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm trade</button></div>
+  </section>
+  <section id="questLog" class="panel quest-log" data-collapsible="Quests">
+    <strong>Quests</strong><div id="questList"><small>No active quests.</small></div>
+  </section>
+  <section id="questWindow" class="panel quest-window" hidden>
+    <h2 id="questTitle">Quest</h2><p id="questDescription"></p><strong id="questReward"></strong>
+    <div class="trade-actions"><button id="questAbandon" type="button" hidden>Abandon</button><button id="questClose" type="button">Close</button><button id="questAccept" type="button" hidden>Accept</button><button id="questComplete" type="button" hidden>Complete</button></div>
   </section>
   <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
     <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
@@ -181,6 +190,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=46"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>

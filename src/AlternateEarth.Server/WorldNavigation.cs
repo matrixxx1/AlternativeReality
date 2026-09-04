@@ -75,6 +75,15 @@ public sealed class WorldNavigation
             TravelMode.Bike when effectiveTerrain is TerrainType.Road or TerrainType.Pavement => SpeedFor(effectiveTerrain) * 4,
             TravelMode.Bike when effectiveTerrain == TerrainType.Sidewalk => SpeedFor(effectiveTerrain) * 3,
             TravelMode.Bike => SpeedFor(effectiveTerrain) * 2.6,
+            TravelMode.EBike => effectiveTerrain switch
+            {
+                TerrainType.Road or TerrainType.Pavement => MilesPerHour(25),
+                TerrainType.Sidewalk => MilesPerHour(15),
+                TerrainType.Grass or TerrainType.Sand => MilesPerHour(20),
+                TerrainType.Forest or TerrainType.Mud => MilesPerHour(12),
+                TerrainType.ShallowWater => MilesPerHour(4),
+                _ => 0
+            },
             TravelMode.Raft when effectiveTerrain is TerrainType.ShallowWater or TerrainType.DeepWater => MilesPerHour(3),
             TravelMode.Raft => MilesPerHour(.5),
             TravelMode.DirtBike => effectiveTerrain switch
@@ -114,7 +123,7 @@ public sealed class WorldNavigation
         TravelMode.Skateboard => terrain is TerrainType.Road or TerrainType.Pavement or TerrainType.Sidewalk,
         TravelMode.Bike => terrain != TerrainType.DeepWater,
         TravelMode.Raft => terrain is TerrainType.ShallowWater or TerrainType.DeepWater,
-        TravelMode.DirtBike or TravelMode.Motorcycle => terrain != TerrainType.DeepWater,
+        TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle => terrain != TerrainType.DeepWater,
         _ => true
     };
 
@@ -141,7 +150,7 @@ public sealed class WorldNavigation
                 case EntityKind.Building when entity.Geometry.Count >= 3:
                     if (PointInPolygon(x, y, entity.Geometry) || DistanceToGeometry(x, y, entity.Geometry) <= radius) return true;
                     break;
-                case EntityKind.Tree or EntityKind.Bush:
+                case EntityKind.Tree or EntityKind.Bush or EntityKind.ResourceNode:
                     if (Distance(x, y, entity.Position.X, entity.Position.Y) <= radius + Width(entity, .85)) return true;
                     break;
                 case EntityKind.Fence:

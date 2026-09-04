@@ -266,7 +266,7 @@ public sealed class DeterministicWorldGenerator
         {
             (EntityKind.Animal, "rabbit", 8), (EntityKind.Animal, "dog", 3), (EntityKind.Animal, "cat", 4),
             (EntityKind.Animal, "bird", 10), (EntityKind.Animal, "deer", 5), (EntityKind.Animal, "cougar", 1),
-            (EntityKind.Animal, "bear", 1), (EntityKind.Npc, "resident", 8)
+            (EntityKind.Animal, "bear", 1), (EntityKind.Npc, "resident", 18)
         };
         var bounds = reality.Area.Bounds;
         var random = new Random(StableSeed(reality.Seed + 104729, reality));

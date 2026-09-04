@@ -23,10 +23,16 @@ public sealed partial class RealityWorld
     private readonly Random _actorRandom;
     private GeographicDataset? _geographic;
     private readonly ConcurrentDictionary<string, CanonicalEntity> _baseEntities = new();
+    private readonly ConcurrentDictionary<string, byte> _removedBaseEntityIds = new();
     private readonly ConcurrentDictionary<string, ElevationSample> _elevationSamples = new();
     private readonly ConcurrentDictionary<string, WorldBounds> _loadedAreas = new();
     private WorldBounds? _loadedBounds;
     private WorldNavigation? _navigation;
+    private DateOnly? _lastUfoDay;
+    private DateOnly? _lastTrexDay;
+    private DateOnly? _lastEventBearDay;
+    private readonly ConcurrentDictionary<string, byte> _ufoHits = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _eventAttackCooldowns = new();
 
     public RealityWorld(RealityConfiguration configuration, DeterministicWorldGenerator generator, IWeatherProvider weatherProvider, SqliteRealityStore store)
     {
@@ -61,6 +67,8 @@ public sealed partial class RealityWorld
         _movementConfiguration = await _store.LoadMovementConfigurationAsync(Configuration.Id, cancellationToken) ?? DefaultMovementConfiguration;
         foreach (var entity in await _store.LoadActiveEntitiesAsync(Configuration.Id, cancellationToken))
             _realityEntities[entity.Id] = entity;
+        foreach (var entityId in await _store.LoadRemovedEntityIdsAsync(Configuration.Id, cancellationToken))
+            _removedBaseEntityIds[entityId] = 0;
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
         _loadedAreas["0:0"] = Configuration.Area.Bounds;
         await RefreshWeatherAsync(cancellationToken);
@@ -120,7 +128,7 @@ public sealed partial class RealityWorld
             existing?.DirtBikeGasGallons ?? 0, existing?.MotorcycleGasGallons ?? 0, existing?.EquippedWeapon ?? "fist",
             Math.Clamp(existing?.BodyHeat ?? 50, 0, 100), 100,
             existing is { EquippedHat: not "none" } ? existing.EquippedHat : existing?.HatOn == true ? "hat" : "none",
-            existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none");
+            existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none", existing?.WantedLevel ?? 0, existing?.EBikeRemainingMeters ?? 1609.344);
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
         var offhand = ActiveOffhand(player);
         player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser" };
@@ -131,6 +139,8 @@ public sealed partial class RealityWorld
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         foreach (var relationship in await _store.LoadRelationshipsAsync(Configuration.Id, characterId, cancellationToken))
             _relationships[(characterId, relationship.ActorId)] = relationship.FriendRating;
+        foreach (var quest in await _store.LoadQuestsAsync(Configuration.Id, characterId, cancellationToken))
+            _quests[(characterId, quest.Id)] = quest;
         foreach (var areaKey in await _store.LoadWorldMapDiscoveryAsync(Configuration.Id, characterId, cancellationToken))
             _revealedWorldAreas[(characterId, areaKey)] = 0;
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
@@ -231,9 +241,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
         if (player.LocationId != "outdoor") return await MoveInDungeonAsync(player, request, cancellationToken);
-        var length = Math.Sqrt((request.X * request.X) + (request.Y * request.Y));
-        var directionX = length > 1 ? request.X / length : request.X;
-        var directionY = length > 1 ? request.Y / length : request.Y;
+        var (directionX, directionY, remainingDistance) = ResolveMovementVector(player, request);
         var now = DateTimeOffset.UtcNow;
         var previous = _lastMovement.AddOrUpdate(characterId, now, (_, old) => now);
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
@@ -250,6 +258,7 @@ public sealed partial class RealityWorld
         var reducedStaminaDrain = wearingMagicHikingShoes || wearingMagicRunningShoes && WorldNavigation.MagicRunningShoesReduceStaminaOn(currentTerrain);
         var metersPerSecond = ConfiguredSpeedMetersPerSecond(player, currentTerrain, staminaFraction, wearingMagicHikingShoes, wearingMagicRunningShoes);
         var maximumStep = request.MaximumDistanceMeters is > 0 and < double.MaxValue ? request.MaximumDistanceMeters.Value : double.MaxValue;
+        if (remainingDistance is not null) maximumStep = Math.Min(maximumStep, remainingDistance.Value);
         var step = Math.Min(metersPerSecond * elapsed * Configuration.GameSpeed, maximumStep);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
@@ -292,10 +301,12 @@ public sealed partial class RealityWorld
         var distance = player.Position.Distance2D(next);
         var dirtBikeGas = player.DirtBikeGasGallons;
         var motorcycleGas = player.MotorcycleGasGallons;
+        var eBikeRemaining = player.EBikeRemainingMeters;
         if (!player.GodMode && distance > .001)
         {
             if (player.TravelMode == TravelMode.DirtBike) dirtBikeGas = FuelAfterTravel(dirtBikeGas, distance, DirtBikeMilesPerGallon);
             if (player.TravelMode == TravelMode.Motorcycle) motorcycleGas = FuelAfterTravel(motorcycleGas, distance, MotorcycleMilesPerGallon);
+            if (player.TravelMode == TravelMode.EBike) eBikeRemaining = Math.Max(0, eBikeRemaining - distance);
         }
         var updated = player with
         {
@@ -304,19 +315,42 @@ public sealed partial class RealityWorld
             Stamina = player.TravelMode == TravelMode.Run && distance > .001 && !(player.FoodProtectedUntilUtc > now) ? Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, reducedStaminaDrain)) : player.Stamina,
             DirtBikeGasGallons = dirtBikeGas,
             MotorcycleGasGallons = motorcycleGas,
+            EBikeRemainingMeters = eBikeRemaining,
             Version = player.Version + 1
         };
+        if (!player.GodMode && player.TravelMode == TravelMode.EBike && eBikeRemaining <= .001)
+        {
+            RemoveInventory(characterId, "eBike", 1); updated = updated with { TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0 };
+            await SaveInventoryAsync(characterId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
+            return new(updated, distance > .001, false, false, false, false, "The e-bike battery died after one mile. The e-bike disappeared from your inventory.");
+        }
         await SavePlayerAsync(updated, cancellationToken);
         return new(updated, distance > .001, blocked && distance <= .001, false, false, false, null);
+    }
+
+    private static (double DirectionX, double DirectionY, double? RemainingDistance) ResolveMovementVector(PlayerState player, MoveRequest request)
+    {
+        if (request.DestinationX is double destinationX && request.DestinationY is double destinationY &&
+            double.IsFinite(destinationX) && double.IsFinite(destinationY))
+        {
+            var targetX = destinationX - player.Position.X;
+            var targetY = destinationY - player.Position.Y;
+            var remaining = Math.Sqrt(targetX * targetX + targetY * targetY);
+            return remaining > .0001 ? (targetX / remaining, targetY / remaining, remaining) : (0, 0, 0);
+        }
+
+        var length = Math.Sqrt(request.X * request.X + request.Y * request.Y);
+        return length > 1 ? (request.X / length, request.Y / length, null) : (request.X, request.Y, null);
     }
 
     public async Task<PlayerState> SetTravelModeAsync(string characterId, TravelMode mode, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
-        if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.DirtBike or TravelMode.Motorcycle)
-            throw new InvalidOperationException("Bikes, dirt bikes, and motorcycles cannot be used inside a dungeon or Home.");
+        if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle)
+            throw new InvalidOperationException("Bikes, e-bikes, dirt bikes, and motorcycles cannot be used inside a dungeon or Home.");
         if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
         if (!player.GodMode && mode == TravelMode.Bike && InventoryQuantity(characterId, "bike") <= 0) throw new InvalidOperationException("You need a bike in your inventory.");
+        if (!player.GodMode && mode == TravelMode.EBike && InventoryQuantity(characterId, "eBike") <= 0) throw new InvalidOperationException("You need an e-bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.DirtBike && InventoryQuantity(characterId, "dirtBike") <= 0) throw new InvalidOperationException("You need a dirt bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.Motorcycle && InventoryQuantity(characterId, "motorcycle") <= 0) throw new InvalidOperationException("You need a motorcycle in your inventory.");
         if (!player.GodMode && mode == TravelMode.DirtBike && player.DirtBikeGasGallons <= 0) throw new InvalidOperationException("Your dirt bike is out of gas. Use a gallon of gas while the dirt bike is selected.");
@@ -332,7 +366,7 @@ public sealed partial class RealityWorld
             await SavePlayerAsync(drowned, cancellationToken);
             return drowned;
         }
-        var updated = player with { TravelMode = mode, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+        var updated = player with { TravelMode = mode, SpeedMetersPerSecond = 0, EBikeRemainingMeters = mode == TravelMode.EBike && player.EBikeRemainingMeters <= 0 ? 1609.344 : player.EBikeRemainingMeters, Version = player.Version + 1 };
         await SavePlayerAsync(updated, cancellationToken);
         return updated;
     }
@@ -384,9 +418,40 @@ public sealed partial class RealityWorld
         var changed = new List<ActorState>();
         lock (_actorRandom)
         {
+            var now = DateTimeOffset.UtcNow; var today = DateOnly.FromDateTime(now.UtcDateTime);
+            var dailyMinute = (StableInt($"ufo:{Configuration.Seed}:{today:yyyy-MM-dd}") & int.MaxValue) % 1440;
+            if (_lastUfoDay != today && now.TimeOfDay >= TimeSpan.FromMinutes(dailyMinute) && _loadedBounds is { } ufoBounds)
+            {
+                _lastUfoDay = today; var random = new Random(StableInt($"ufo-route:{Configuration.Seed}:{today:yyyy-MM-dd}"));
+                var y = ufoBounds.MinimumY + random.NextDouble() * Math.Max(1, ufoBounds.MaximumY - ufoBounds.MinimumY);
+                var ufo = new ActorState($"ufo:{today:yyyyMMdd}", EntityKind.Npc, "ufo", "UFO", new WorldPosition(Configuration.Area.Region, ufoBounds.MinimumX - 25, y, 100), "east", true);
+                _actors[ufo.Id] = ufo; changed.Add(ufo);
+            }
+            if (_loadedBounds is { } eventBounds)
+            {
+                var trexMinute = (StableInt($"trex:{Configuration.Seed}:{today:yyyy-MM-dd}") & int.MaxValue) % 1440;
+                if (_lastTrexDay != today && now.TimeOfDay >= TimeSpan.FromMinutes(trexMinute))
+                {
+                    _lastTrexDay = today; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
+                    var trex = new ActorState($"trex:{today:yyyyMMdd}", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10)); _actors[trex.Id] = trex; changed.Add(trex);
+                }
+                var bearMinute = (StableInt($"event-bear:{Configuration.Seed}:{today:yyyy-MM-dd}") & int.MaxValue) % 1440;
+                if (_lastEventBearDay != today && now.TimeOfDay >= TimeSpan.FromMinutes(bearMinute))
+                {
+                    _lastEventBearDay = today; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
+                    var bear = new ActorState($"event-bear:{today:yyyyMMdd}", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(10)); _actors[bear.Id] = bear; changed.Add(bear);
+                }
+            }
             foreach (var pair in _actors)
             {
                 var actor = pair.Value;
+                if (actor.EventEndsAtUtc is { } eventEnd && eventEnd <= now) { _actors.TryRemove(actor.Id, out _); _actorRoutes.TryRemove(actor.Id, out _); continue; }
+                if (actor.Subtype == "ufo")
+                {
+                    var ufoPosition = actor.Position with { X = actor.Position.X + 40 * elapsed.TotalSeconds };
+                    var updatedUfo = actor with { Position = ufoPosition, Facing = "east", IsMoving = true, Version = actor.Version + 1 };
+                    _actors[actor.Id] = updatedUfo; changed.Add(updatedUfo); continue;
+                }
                 if (!_actorRoutes.TryGetValue(actor.Id, out var route) || route.Count == 0)
                 {
                     route = CreateActorRoute(actor);
@@ -470,7 +535,7 @@ public sealed partial class RealityWorld
         {
             await _store.ClearTransientWorldStateAsync(Configuration.Id, cancellationToken);
             _realityEntities.Clear();
-            _baseEntities.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
+            _baseEntities.Clear(); _removedBaseEntityIds.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _quests.Clear(); _questOffers.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
             ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
             _loadedAreas["0:0"] = Configuration.Area.Bounds;
             _baseBuildings.Clear();
@@ -527,7 +592,7 @@ public sealed partial class RealityWorld
         var actorEntities = generated.Features.Where(entity => entity.Kind is EntityKind.Animal or EntityKind.Npc).ToArray();
         var staticEntities = generated.Features.Where(entity => entity.Kind is not (EntityKind.Animal or EntityKind.Npc)).ToArray();
         _geographic ??= generated with { Features = staticEntities };
-        foreach (var entity in staticEntities) _baseEntities[entity.Id] = entity;
+        foreach (var entity in staticEntities) if (!_removedBaseEntityIds.ContainsKey(entity.Id)) _baseEntities[entity.Id] = entity;
         foreach (var sample in generated.Elevation) _elevationSamples[$"{sample.X:F1}:{sample.Y:F1}"] = sample;
         var bounds = generated.Area.Bounds;
         _loadedBounds = _loadedBounds is null ? bounds : new WorldBounds(Math.Min(_loadedBounds.MinimumX, bounds.MinimumX), Math.Min(_loadedBounds.MinimumY, bounds.MinimumY), Math.Max(_loadedBounds.MaximumX, bounds.MaximumX), Math.Max(_loadedBounds.MaximumY, bounds.MaximumY));
@@ -542,18 +607,65 @@ public sealed partial class RealityWorld
             var id = $"chest:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{chestIndex}";
             _outdoorChests.TryAdd(id, new TreasureChestState(id, safe, "outdoor"));
         }
+        string[] looseItemTypes = ["pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas"];
+        var looseRandom = new Random(StableInt($"loose-items:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
+        for (var itemIndex = 0; itemIndex < 14; itemIndex++)
+        {
+            var candidate = new WorldPosition(generated.Area.Region,
+                bounds.MinimumX + looseRandom.NextDouble() * (bounds.MaximumX - bounds.MinimumX),
+                bounds.MinimumY + looseRandom.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
+            var position = Navigation.FindNearestWalkable(candidate);
+            var itemType = looseItemTypes[looseRandom.Next(looseItemTypes.Length)];
+            var id = $"loot:world:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{itemIndex}";
+            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, 1) }, DateTimeOffset.MaxValue));
+        }
+        var newspaperRandom = new Random(StableInt($"newspapers:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
+        var residentialBuildingIds = staticEntities.Where(entity => entity.Kind == EntityKind.Building && !entity.Properties.ContainsKey("merchantCategory")).Select(entity => entity.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var door in staticEntities.Where(entity => entity.Kind == EntityKind.Door).OrderBy(entity => entity.Id))
+        {
+            if (newspaperRandom.NextDouble() > .78) continue;
+            var buildingId = door.Properties.GetValueOrDefault("buildingId");
+            if (buildingId is null || !residentialBuildingIds.Contains(buildingId)) continue;
+            var angle = double.TryParse(door.Properties.GetValueOrDefault("facingDegrees"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var degrees) ? degrees * Math.PI / 180 : 0;
+            var nearDoor = door.Position with { X = door.Position.X + Math.Cos(angle) * 1.4, Y = door.Position.Y + Math.Sin(angle) * 1.4 };
+            var position = Navigation.FindNearestWalkable(nearDoor);
+            var id = $"loot:newspaper:{door.Id}";
+            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack("newspaper", 1) }, DateTimeOffset.MaxValue));
+        }
+        var roadsideDoors = staticEntities.Where(entity => entity.Kind == EntityKind.Door).OrderBy(entity => entity.Id).ToArray();
+        var mailboxRandom = new Random(StableInt($"mailboxes:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
+        foreach (var door in roadsideDoors)
+        {
+            if (mailboxRandom.NextDouble() > .72) continue;
+            var angle = double.TryParse(door.Properties.GetValueOrDefault("facingDegrees"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var degrees) ? degrees * Math.PI / 180 : 0;
+            var position = Navigation.FindNearestWalkable(door.Position with { X = door.Position.X + Math.Cos(angle) * 3, Y = door.Position.Y + Math.Sin(angle) * 3 });
+            var mailbox = new CanonicalEntity($"mailbox:{door.Id}", EntityKind.ResourceNode, position, Array.Empty<GeometryPoint>(), new Dictionary<string, string> { ["subtype"] = "mailbox", ["buildingId"] = door.Properties.GetValueOrDefault("buildingId") ?? string.Empty }, IsBaseEntity: true);
+            if (!_removedBaseEntityIds.ContainsKey(mailbox.Id)) _baseEntities.TryAdd(mailbox.Id, mailbox);
+        }
+        var roads = staticEntities.Where(entity => entity.Kind == EntityKind.Road && entity.Geometry.Count > 1).ToArray();
+        var litterTypes = new[] { "pencil", "pen", "marker", "newspaper", "metal" };
+        for (var index = 0; index < Math.Min(18, roads.Length * 2); index++)
+        {
+            var road = roads[mailboxRandom.Next(roads.Length)]; var segment = mailboxRandom.Next(road.Geometry.Count - 1); var amount = mailboxRandom.NextDouble();
+            var a = road.Geometry[segment]; var b = road.Geometry[segment + 1];
+            var position = Navigation.FindNearestWalkable(new WorldPosition(generated.Area.Region, a.X + (b.X - a.X) * amount, a.Y + (b.Y - a.Y) * amount));
+            var itemType = litterTypes[mailboxRandom.Next(litterTypes.Length)]; var id = $"loot:litter:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{index}";
+            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, 1) }, DateTimeOffset.MaxValue));
+        }
+        _navigation = new WorldNavigation(_loadedBounds, _baseEntities.Values.Concat(_realityEntities.Values).ToArray(), _elevationSamples.Values.ToArray());
         foreach (var entity in actorEntities)
         {
             var safe = Navigation.FindNearestWalkable(entity.Position);
             var identity = StableInt(entity.Id) & int.MaxValue;
             var merchantCategory = entity.Properties.GetValueOrDefault("merchantCategory");
             var merchant = entity.Kind == EntityKind.Npc && (merchantCategory is not null || identity % 4 == 0);
+            var questGiver = entity.Kind == EntityKind.Npc && !merchant && identity % 3 == 0;
             var maximumHealth = entity.Kind == EntityKind.Animal && entity.Properties.GetValueOrDefault("subtype") is "bear" or "cougar" ? 8 : 5;
             var travel = entity.Kind == EntityKind.Npc ? (TravelMode)(identity % 10 == 0 ? 3 : identity % 8 == 0 ? 2 : 0) : TravelMode.Walk;
             _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, entity.Properties.GetValueOrDefault("subtype") ?? "unknown",
                 entity.Properties.GetValueOrDefault("name") ?? "Wanderer", safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
                 IsMerchant: merchant, TravelMode: travel, MerchantCategory: merchantCategory,
-                EquippedWeapon: merchant ? "pistol" : "none");
+                EquippedWeapon: merchant ? "pistol" : "none", IsQuestGiver: questGiver);
         }
     }
 
@@ -621,13 +733,16 @@ public sealed partial class RealityWorld
     private static double ActorSpeed(string subtype) => subtype switch
     {
         "rabbit" => 2.2, "dog" => 1.8, "cat" => 1.4, "bird" => 2.6,
-        "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, "storeEmployee" => 1.1, _ => 1.25
+        "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, "eventBear" => 4, "tRex" => 6, "storeEmployee" => 1.1, _ => 1.25
     };
 
     private string ActorSpeech(ActorState actor)
     {
+        if (actor.Subtype == "ufo") return "VMMMMMMMM…";
+        if (actor.Subtype == "tRex") return "ROOOAAAR!";
         if (actor.Kind == EntityKind.Npc)
         {
+            if (actor.Subtype == "policeOfficer") return "Stop! You're under arrest!";
             if (actor.IsMerchant)
             {
                 var offers = BaseMerchantOffers(actor);
@@ -635,6 +750,7 @@ public sealed partial class RealityWorld
                 var displayName = offer.DisplayName ?? (_itemConfigurations.TryGetValue(offer.ItemType, out var good) ? good.DisplayName : offer.ItemType);
                 return $"For sale! {displayName} for ${offer.UnitPriceCents / 100.0:F2} today. Friends pay less!";
             }
+            if (actor.IsQuestGiver && _actorRandom.NextDouble() < .55) return "I could use your help. Come talk to me!";
             var jokes = new[]
             {
                 "Why did the scarecrow win an award? It was outstanding in its field!",

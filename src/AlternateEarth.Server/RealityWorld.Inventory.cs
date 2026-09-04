@@ -149,6 +149,33 @@ public sealed partial class RealityWorld
         return new ConfiguredInventoryAdjustment(GetPrivateState(playerId), updatedPlayer, message);
     }
 
+    public async Task<DroppedInventoryItem> DropInventoryItemAsync(string playerId, DropItemRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(playerId, out var currentPlayer)) throw new InvalidOperationException("Unknown player.");
+        var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("That item cannot be dropped.");
+        if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
+        if (!_itemConfigurations.ContainsKey(itemType)) throw new InvalidOperationException("Unknown inventory item.");
+        if (!RemoveInventory(playerId, itemType, request.Quantity))
+            throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
+
+        var droppedStack = InventoryStack(itemType, request.Quantity);
+        var drop = new LootDropState(
+            $"loot:{Guid.NewGuid():N}",
+            currentPlayer.Position,
+            currentPlayer.LocationId,
+            0,
+            new[] { droppedStack },
+            DateTimeOffset.MaxValue);
+        _loot[drop.Id] = drop;
+
+        var player = NormalizeEquipmentAfterInventoryChange(currentPlayer);
+        await SaveInventoryAsync(playerId, cancellationToken);
+        await SavePlayerAsync(player, cancellationToken);
+        return new DroppedInventoryItem(player, GetPrivateState(playerId), drop, $"Dropped {request.Quantity} {DisplayItem(itemType)}.");
+    }
+
     private PlayerState NormalizeEquipmentAfterInventoryChange(PlayerState player)
     {
         var godMode = player.GodMode;
@@ -175,3 +202,4 @@ public sealed partial class RealityWorld
 }
 
 public sealed record ConfiguredInventoryAdjustment(PlayerPrivateState PrivateState, PlayerState? Player, string Message);
+public sealed record DroppedInventoryItem(PlayerState Player, PlayerPrivateState PrivateState, LootDropState Drop, string Message);

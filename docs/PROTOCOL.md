@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v20
+# Renderer-neutral protocol v25
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -6,17 +6,23 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 
 | Type | Logical payload | Server validation |
 |---|---|---|
-| `moveRequest` | direction `x`, `y`; client `sequence`; optional remaining-distance cap | normalizes direction, bounds elapsed time/speed, prevents fast travel from overshooting its destination, clamps world bounds |
+| `moveRequest` | direction `x`, `y`; client `sequence`; optional remaining-distance cap and waypoint coordinates | recomputes direction and distance from the authoritative position, bounds elapsed time/speed, prevents queued fast travel from overshooting, and clamps world bounds |
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
 | `setTravelMode` | walk, run, skateboard, bike, dirt bike, motorcycle, or raft | validates terrain, equipment ownership, motorized-vehicle fuel, and indoor vehicle restrictions |
 | `setEquipment` | logical hat, shirt, pants, shoes, offhand, or weapon slot and item; null to unequip | validates ownership and slot compatibility; offhand light equipment is mutually exclusive, and the weapon slot supports a true empty state while fists remain permanently available |
 | `updateItemConfiguration` | item ID, damage, range, additive speed/visibility modifiers, minimum price, maximum price | requires authoritative God Mode, validates safe bounds, persists server-wide rules, and invalidates existing merchant quotes |
 | `configureInventoryItem` | item ID and `take` or `give` action | requires authoritative God Mode; `take` adds one to account-wide Home inventory, while `give` removes one from Home first and falls back to the backpack |
+| `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist cannot be dropped |
 | `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, current location, and the active four-hour door-lock cycle; dungeon session state is fresh on entry and discarded on exit |
 | `changeDungeonLevel` | stair direction `-1` up or `1` down | requires a multi-level dungeon, valid floor boundary, and proximity to the shared stairwell |
 | `moveFurniture`, `placeFurniture`, `rotateFurniture`, `storeFurniture` | furniture instance and requested logical Home position/action | requires the owner's Home; validates walls, doors, exit clearance, other furniture, rotation, and storage rules before persisting |
+| `requestQuest`, `acceptQuest`, `completeQuest`, `abandonQuest`, `captureQuestPet` | actor/quest identifiers only | quest generation, objectives, inventory transfer, and rewards remain server-authoritative |
+| `chopVegetation`, `attackWorldObject` | logical world entity identifier | validates weapon, range, rewards, persistent vegetation deltas, crimes, wanted level, and delayed police response |
+| `pickLock` | door ID | requires a lock-pick set (or God Mode), validates 3 m range, rolls 15% success, and applies witnessed-crime / 10% police-call rules server-side |
+
+Daily UFOs are ordinary logical actors with subtype `ufo`; green-beam strikes use the existing authoritative `combatEvent` shape with weapon `greenBeam` and 10-heart damage.
 | `openHomeStorage`, `transferHomeStorage` | built-in chest ID, item ID, direction, and quantity | requires the owner's Home and its actual storage chest; deposits persist without a capacity limit, while withdrawals enforce backpack category slots and weight |
 | `purchaseBase` | logical building door ID | validates proximity, account ownership, and the normal displayed price; changes the account-wide base, with God Mode bypassing affordability and deduction |
 | `attack` | target ID plus the client's current weapon hint | ignores spoofed weapon strength and uses the server-persisted equipped weapon; validates ownership, ammo, range, accuracy, damage, death, fallback, and relationship changes |
@@ -64,7 +70,7 @@ Snapshots carry authoritative door-lock state and the current cycle's UTC end ti
 
 Dirt-bike and motorcycle tanks are separate authoritative character fields. Movement consumes gas from distance traveled at 50 mpg and 45 mpg respectively; an empty tank blocks motorized movement. God Mode neither checks nor consumes gasoline.
 
-Inventory stacks include their category, per-unit weight, and whether they are physically carried. Distinct carried item types consume one category slot per stack: 3 weapon, 3 quest, and 6 other stacks. Quantity does not consume additional slots, but it multiplies stack weight. The server rejects acquisitions or chest withdrawals above 50 pounds. Carried weight reduces normal movement speed by one percent per pound; God Mode bypasses the speed penalty but not inventory categorization. The permanent fist is virtual and free. Dirt bikes and motorcycles are parked assets rather than carried cargo.
+Inventory stacks include their category, per-unit weight, and whether they are physically carried. Distinct carried item types consume one category slot per stack: 3 weapon, 3 quest, and 6 other stacks. Quantity does not consume additional slots, but it multiplies stack weight. The server rejects acquisitions or chest withdrawals above 50 pounds. Carried weight reduces normal movement speed by one percent per pound; God Mode bypasses the speed penalty but not inventory categorization. The permanent fist is virtual and free. Bikes, inflatable rafts, and motorcycles currently add no player-carried weight; dirt bikes and motorcycles are parked assets rather than backpack cargo.
 
 Merchant offers use deterministic UTC four-hour rotation buckets. Reopening a seller within the same bucket returns the same stock and prices for that player; the next bucket produces a newly randomized inventory and quote.
 

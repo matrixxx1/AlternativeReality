@@ -37,7 +37,8 @@ public enum TravelMode
     Bike,
     Raft,
     DirtBike,
-    Motorcycle
+    Motorcycle,
+    EBike
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -97,7 +98,9 @@ public sealed record PlayerState(
     double MaximumBodyHeat = 100,
     string EquippedHat = "none",
     string EquippedShirt = "none",
-    string EquippedPants = "none");
+    string EquippedPants = "none",
+    int WantedLevel = 0,
+    double EBikeRemainingMeters = 1609.344);
 
 public sealed record ActorState(
     string Id,
@@ -116,7 +119,10 @@ public sealed record ActorState(
     string LocationId = "outdoor",
     string? MerchantCategory = null,
     string EquippedWeapon = "none",
-    string? FactionId = null);
+    string? FactionId = null,
+    bool IsQuestGiver = false,
+    DateTimeOffset? EventStartedAtUtc = null,
+    DateTimeOffset? EventEndsAtUtc = null);
 
 public enum InventoryCategory { Weapon, Quest, Other }
 public sealed record ItemStack(
@@ -151,8 +157,16 @@ public sealed record MerchantOffer(
     string? DisplayName = null,
     string? ImageKey = null,
     IReadOnlyDictionary<string, string>? Properties = null);
-public sealed record TradeQuote(string MerchantId, string MerchantName, double FriendRating, IReadOnlyList<MerchantOffer> Offers);
+public sealed record TradeQuote(string MerchantId, string MerchantName, double FriendRating, IReadOnlyList<MerchantOffer> Offers, IReadOnlyList<MerchantOffer>? BuyOffers = null);
 public sealed record PurchaseLine(string ItemType, int Quantity);
+public sealed record QuestState(
+    string Id, string PlayerId, string GiverId, string GiverName, string Kind, string Status,
+    string Title, string Description, long RewardCents,
+    string? RequiredItemType = null, int RequiredQuantity = 0,
+    string? TargetActorId = null, string? TargetName = null,
+    string? DestinationActorId = null, string? DestinationName = null,
+    string? DestinationClue = null);
+public sealed record QuestInteraction(QuestState Quest, bool IsOffer, bool CanComplete, string InteractionActorId);
 public sealed record RelationshipState(string PlayerId, string ActorId, double FriendRating);
 public sealed record DungeonRoom(double X, double Y, double Width, double Height);
 public sealed record DungeonWall(double X1, double Y1, double X2, double Y2, double DoorStart = -1, double DoorEnd = -1);
@@ -186,7 +200,8 @@ public sealed record PlayerPrivateState(
     ServerConfigurationState? ServerConfiguration = null,
     IReadOnlyList<string>? RevealedWorldAreas = null,
     IReadOnlyList<CanonicalEntity>? HomeStorage = null,
-    InventoryState? HomeItemStorage = null);
+    InventoryState? HomeItemStorage = null,
+    IReadOnlyList<QuestState>? Quests = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null);
 
 public sealed record ChatMessage(
