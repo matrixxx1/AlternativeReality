@@ -478,35 +478,35 @@ public sealed partial class RealityWorld
         {
             if (key == "ufo")
             {
-                actors.Add(new ActorState("ufo:manual", EntityKind.Npc, "ufo", "UFO", anchor with { X = anchor.X - 35, Z = 100 }, "east", true, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes)));
+                actors.Add(new ActorState("ufo:manual", EntityKind.Npc, "ufo", "UFO", anchor with { X = anchor.X - 35, Z = 100 }, "east", true, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes), EventName: _eventConfiguration.UfoEventName));
             }
             else if (key is "trex" or "tyrannosaurus")
             {
-                actors.Add(CreateEventDinosaur("trex:manual", "tRex", "Rex", anchor, 18, 50, now.AddMinutes(_eventConfiguration.TrexDurationMinutes), now));
+                actors.Add(CreateEventDinosaur("trex:manual", "tRex", "Rex", anchor, 18, 50, now.AddMinutes(_eventConfiguration.TrexDurationMinutes), now, _eventConfiguration.TrexEventName));
             }
             else if (key is "brontosaurus" or "bronto")
             {
-                actors.Add(CreateEventDinosaur("brontosaurus:manual", "brontosaurus", "Bronto", anchor, 22, 80, now.AddMinutes(_eventConfiguration.BrontosaurusDurationMinutes), now));
+                actors.Add(CreateEventDinosaur("brontosaurus:manual", "brontosaurus", "Bronto", anchor, 22, 80, now.AddMinutes(_eventConfiguration.BrontosaurusDurationMinutes), now, _eventConfiguration.BrontosaurusEventName));
             }
             else if (key is "stegosaurus" or "stegosaur")
             {
-                actors.Add(CreateEventDinosaur("stegosaurus:manual", "stegosaurus", "Steggy", anchor, 18, 45, now.AddMinutes(_eventConfiguration.StegosaurusDurationMinutes), now));
+                actors.Add(CreateEventDinosaur("stegosaurus:manual", "stegosaurus", "Steggy", anchor, 18, 45, now.AddMinutes(_eventConfiguration.StegosaurusDurationMinutes), now, _eventConfiguration.StegosaurusEventName));
             }
             else if (key is "raptor" or "raptors")
             {
                 var packCenter = CreateEventPosition(anchor, 16);
                 for (var index = 0; index < 3; index++)
-                    actors.Add(CreateEventDinosaur($"raptor:manual:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now));
+                    actors.Add(CreateEventDinosaur($"raptor:manual:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now, _eventConfiguration.RaptorEventName));
             }
             else if (key is "giant" or "landofgiants" or "landofthegiants")
             {
-                actors.Add(CreateEventDinosaur("giant:manual", "giant", "The Giant", anchor, 20, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now));
+                actors.Add(CreateEventDinosaur("giant:manual", "giant", "The Giant", anchor, 20, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now, _eventConfiguration.LandOfGiantsEventName));
             }
             else if (key is "bear" or "greatbear")
             {
                 var angle = _actorRandom.NextDouble() * Math.PI * 2;
                 var position = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * 14, Y = anchor.Y + Math.Sin(angle) * 14 });
-                actors.Add(new ActorState("event-bear:manual", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes)));
+                actors.Add(new ActorState("event-bear:manual", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes), EventName: _eventConfiguration.BearEventName));
             }
             else throw new InvalidOperationException("Choose UFO, T-Rex, brontosaurus, stegosaurus, raptors, Land of the Giants, or bear.");
 
@@ -527,10 +527,10 @@ public sealed partial class RealityWorld
         return Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(angle) * distance, Y = anchor.Y + Math.Sin(angle) * distance });
     }
 
-    private ActorState CreateEventDinosaur(string id, string subtype, string name, WorldPosition anchor, double distance, double health, DateTimeOffset endsAt, DateTimeOffset startsAt)
+    private ActorState CreateEventDinosaur(string id, string subtype, string name, WorldPosition anchor, double distance, double health, DateTimeOffset endsAt, DateTimeOffset startsAt, string eventName)
     {
         var position = distance <= 0 ? Navigation.FindNearestWalkable(anchor) : CreateEventPosition(anchor, distance);
-        return new ActorState(id, EntityKind.Animal, subtype, name, position, MaximumHealthHearts: health, HealthHearts: health, EventStartedAtUtc: startsAt, EventEndsAtUtc: endsAt);
+        return new ActorState(id, EntityKind.Animal, subtype, name, position, MaximumHealthHearts: health, HealthHearts: health, EventStartedAtUtc: startsAt, EventEndsAtUtc: endsAt, EventName: eventName);
     }
 
     public IReadOnlyList<ActorState> AdvanceActors(TimeSpan elapsed)
@@ -545,7 +545,7 @@ public sealed partial class RealityWorld
                 _lastUfoCycle = ufoCycle; var random = new Random(StableInt($"ufo-route:{Configuration.Seed}:{ufoCycle}"));
                 var y = ufoBounds.MinimumY + random.NextDouble() * Math.Max(1, ufoBounds.MaximumY - ufoBounds.MinimumY);
                 var ufo = new ActorState($"ufo:{ufoCycle}", EntityKind.Npc, "ufo", "UFO", new WorldPosition(Configuration.Area.Region, ufoBounds.MinimumX - 25, y, 100), "east", true,
-                    EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes));
+                    EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes), EventName: _eventConfiguration.UfoEventName);
                 _actors[ufo.Id] = ufo; changed.Add(ufo);
             }
             if (_loadedBounds is { } eventBounds)
@@ -554,20 +554,20 @@ public sealed partial class RealityWorld
                 if (_lastTrexCycle != trexCycle)
                 {
                     _lastTrexCycle = trexCycle; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
-                    var trex = new ActorState($"trex:{trexCycle}", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.TrexDurationMinutes)); _actors[trex.Id] = trex; changed.Add(trex);
+                    var trex = new ActorState($"trex:{trexCycle}", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.TrexDurationMinutes), EventName: _eventConfiguration.TrexEventName); _actors[trex.Id] = trex; changed.Add(trex);
                 }
                 var brontosaurusCycle = ScheduledEventCycle(now, "brontosaurus", _eventConfiguration.BrontosaurusIntervalHours);
                 if (_lastBrontosaurusCycle != brontosaurusCycle)
                 {
                     _lastBrontosaurusCycle = brontosaurusCycle;
-                    var brontosaurus = CreateEventDinosaur($"brontosaurus:{brontosaurusCycle}", "brontosaurus", "Bronto", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 80, now.AddMinutes(_eventConfiguration.BrontosaurusDurationMinutes), now);
+                    var brontosaurus = CreateEventDinosaur($"brontosaurus:{brontosaurusCycle}", "brontosaurus", "Bronto", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 80, now.AddMinutes(_eventConfiguration.BrontosaurusDurationMinutes), now, _eventConfiguration.BrontosaurusEventName);
                     _actors[brontosaurus.Id] = brontosaurus; changed.Add(brontosaurus);
                 }
                 var stegosaurusCycle = ScheduledEventCycle(now, "stegosaurus", _eventConfiguration.StegosaurusIntervalHours);
                 if (_lastStegosaurusCycle != stegosaurusCycle)
                 {
                     _lastStegosaurusCycle = stegosaurusCycle;
-                    var stegosaurus = CreateEventDinosaur($"stegosaurus:{stegosaurusCycle}", "stegosaurus", "Steggy", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 45, now.AddMinutes(_eventConfiguration.StegosaurusDurationMinutes), now);
+                    var stegosaurus = CreateEventDinosaur($"stegosaurus:{stegosaurusCycle}", "stegosaurus", "Steggy", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 45, now.AddMinutes(_eventConfiguration.StegosaurusDurationMinutes), now, _eventConfiguration.StegosaurusEventName);
                     _actors[stegosaurus.Id] = stegosaurus; changed.Add(stegosaurus);
                 }
                 var raptorCycle = ScheduledEventCycle(now, "raptors", _eventConfiguration.RaptorIntervalHours);
@@ -577,7 +577,7 @@ public sealed partial class RealityWorld
                     var packCenter = new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY));
                     for (var index = 0; index < 3; index++)
                     {
-                        var raptor = CreateEventDinosaur($"raptor:{raptorCycle}:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now);
+                        var raptor = CreateEventDinosaur($"raptor:{raptorCycle}:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now, _eventConfiguration.RaptorEventName);
                         _actors[raptor.Id] = raptor; changed.Add(raptor);
                     }
                 }
@@ -585,14 +585,14 @@ public sealed partial class RealityWorld
                 if (_lastLandOfGiantsCycle != landOfGiantsCycle)
                 {
                     _lastLandOfGiantsCycle = landOfGiantsCycle;
-                    var giant = CreateEventDinosaur($"giant:{landOfGiantsCycle}", "giant", "The Giant", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now);
+                    var giant = CreateEventDinosaur($"giant:{landOfGiantsCycle}", "giant", "The Giant", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now, _eventConfiguration.LandOfGiantsEventName);
                     _actors[giant.Id] = giant; changed.Add(giant);
                 }
                 var bearCycle = ScheduledEventCycle(now, "event-bear", _eventConfiguration.BearIntervalHours);
                 if (_lastEventBearCycle != bearCycle)
                 {
                     _lastEventBearCycle = bearCycle; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
-                    var bear = new ActorState($"event-bear:{bearCycle}", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes)); _actors[bear.Id] = bear; changed.Add(bear);
+                    var bear = new ActorState($"event-bear:{bearCycle}", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes), EventName: _eventConfiguration.BearEventName); _actors[bear.Id] = bear; changed.Add(bear);
                 }
             }
             foreach (var pair in _actors)

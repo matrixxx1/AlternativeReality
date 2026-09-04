@@ -1061,6 +1061,13 @@ public sealed partial class RealityWorld
             if (value < minimum || value > maximum) throw new InvalidOperationException($"{name} must be between {minimum} and {maximum}.");
             return value;
         }
+        static string EventName(string? value, string label)
+        {
+            var name = (value ?? string.Empty).Trim();
+            if (name.Length is < 3 or > 60 || name.Any(char.IsControl))
+                throw new InvalidOperationException($"{label} must be 3 to 60 printable characters.");
+            return name;
+        }
         var updated = new ServerEventConfiguration(
             InRange(request.WeatherRefreshMinutes, 1, 1_440, "Weather refresh"),
             InRange(request.StreetLightsOnHour, 0, 23, "Street-light on hour"),
@@ -1084,7 +1091,14 @@ public sealed partial class RealityWorld
             InRange(request.RaptorIntervalHours, 1, 168, "Raptor interval"),
             InRange(request.RaptorDurationMinutes, 1, 120, "Raptor duration"),
             InRange(request.LandOfGiantsIntervalHours, 1, 168, "Land of the Giants interval"),
-            InRange(request.LandOfGiantsDurationMinutes, 1, 120, "Land of the Giants duration"));
+            InRange(request.LandOfGiantsDurationMinutes, 1, 120, "Land of the Giants duration"),
+            EventName(request.UfoEventName, "UFO event name"),
+            EventName(request.TrexEventName, "T-Rex event name"),
+            EventName(request.BrontosaurusEventName, "Brontosaurus event name"),
+            EventName(request.StegosaurusEventName, "Stegosaurus event name"),
+            EventName(request.RaptorEventName, "Raptor event name"),
+            EventName(request.LandOfGiantsEventName, "Land of the Giants event name"),
+            EventName(request.BearEventName, "Bear event name"));
         if (updated.StreetLightsOnHour == updated.StreetLightsOffHour) throw new InvalidOperationException("Street-light on and off hours must differ.");
         if (updated.WeatherMode is not ("live" or "clear" or "rain" or "snow" or "fog" or "storm")) throw new InvalidOperationException("Weather mode must be live, clear, rain, snow, fog, or storm.");
         if (updated.TemperatureCelsius is < -90 or > 60) throw new InvalidOperationException("Temperature must be between -90 and 60 °C.");

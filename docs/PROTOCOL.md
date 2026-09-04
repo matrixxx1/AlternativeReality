@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v32
+# Renderer-neutral protocol v33
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -14,7 +14,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `configureInventoryItem` | item ID and `take` or `give` action | requires authoritative God Mode; `take` adds one to account-wide Home inventory, while `give` removes one from Home first and falls back to the backpack |
 | `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist and personal flags cannot be dropped |
 | `updateMovementConfiguration` | base speed, base visibility, terrain modifiers, travel-mode modifiers | requires authoritative God Mode, validates safe bounds, and persists additive movement/visibility rules |
-| `updateServerEvents` | simulated clock offset, weather mode/temperature, light/merchant/door refreshes, and UFO/T-Rex/brontosaurus/stegosaurus/raptor-pack/Land-of-the-Giants/bear intervals and durations | requires authoritative God Mode, validates bounded values, persists the reality-wide schedule, and never changes the host operating-system clock |
+| `updateServerEvents` | simulated clock offset, weather mode/temperature, light/merchant/door refreshes, and a display name, frequency, and duration for each UFO/T-Rex/brontosaurus/stegosaurus/raptor-pack/Land-of-the-Giants/bear event | requires authoritative God Mode, validates bounded values and 3-60 character event names, persists the reality-wide schedule, and never changes the host operating-system clock |
 | `setGodMode`, `setLights`, `setEquipment`, `setMagicHikingShoes`, `setMagicRunningShoes` | requested administrative, light, and equipped-clothing state | persists state, prevents footwear bonus stacking, and bypasses ownership and fuel checks only while God Mode is active |
 | `triggerWorldEvent` | UFO, T-Rex, brontosaurus, stegosaurus, raptor-pack, Land of the Giants, or bear event type | requires authoritative God Mode and creates or resets bounded manual event actors near the triggering player's outdoor position; the raptor event creates a pack of three |
 | `enterDungeon`, `exitDungeon`, `restAtBed` | logical door/bed intent | validates proximity, ownership, current location, and the active configured door-lock cycle; dungeon session state is fresh on entry and discarded on exit |
@@ -57,8 +57,8 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | `objectCreated` / `objectRemoved` | shared reality-delta visibility changes, including showing an owner's flags on join and hiding them on disconnect |
 | `chunkSnapshot` | authoritative base and reality state for requested scope |
 | `playerJoined`, `playerMoved`, `playerUpdated`, `playerLeft` | multiplayer presence, health, and travel mode |
-| `actorsMoved` | server-simulated wildlife and NPC position/state changes |
-| `worldEventTriggered` | authoritative manual event actor list and announcement for every connected client; `actor` retains the first actor for older clients |
+| `actorsMoved` | server-simulated wildlife and NPC position/state changes; active event actors retain their name and UTC start/end times |
+| `worldEventTriggered` | authoritative manual event actor list and configured announcement for every connected client; `actor` retains the first actor for older clients |
 | `doorLocksChanged` | replacement door-lock state and the end of the configured active cycle |
 | `privateState`, `dungeonEntered`, `dungeonLevelChanged`, `dungeonUpdated`, `dungeonExited` | character-private inventory, base, relationships, fog, floor number, and interior state |
 | `tradeQuote`, `tradeCompleted`, `basePurchased`, `combatEvent`, `chestOpened`, `chestItemsTaken`, `lootCollected` | authoritative gameplay outcomes |
@@ -73,7 +73,7 @@ The exploration client sends movement, path, equipment, attack, trade, area, and
 | `error` | rejected command with safe message |
 | `pong` | liveness response |
 
-Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. They never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.
+Messages contain `EntityKind`, meter positions, geometry, properties, IDs, and versions. Event actors additionally carry the configured logical `eventName`, `eventStartedAtUtc`, and `eventEndsAtUtc`; clients use those values to show a grouped live countdown and direction without becoming authoritative. Messages never mention a sprite, texture, scene, model, animation, or renderer. Version negotiation will reject incompatible clients before binary serialization or mod manifests are introduced.
 
 Interior state carries the normalized source-building footprint, exterior-wall count, doorway, current level, total level count, optional shared stair position, and footprint-derived difficulty. Buildings up to about 2,000 square feet start at Difficulty 1, buildings near 10,000 square feet reach about Difficulty 50, and anything above Difficulty 50 is a Stronghold. Difficulty biases floor count, inhabitant population, health, and weapon loadouts; Homes and stores remain safe, single-level exceptions.
 

@@ -104,17 +104,7 @@ public sealed class RealitySocketHub
                     case "triggerWorldEvent":
                         var eventRequest = root.Deserialize<TriggerWorldEventRequest>(SharedJson.Options)!;
                         var eventActors = _world.TriggerWorldEvent(characterId, eventRequest.EventType);
-                        var eventName = eventActors[0].Subtype switch
-                        {
-                            "tRex" => "T-Rex portal",
-                            "brontosaurus" => "brontosaurus portal",
-                            "stegosaurus" => "stegosaurus portal",
-                            "raptor" => "raptor-pack portal",
-                            "giant" => "Land of the Giants portal",
-                            "eventBear" => "great bear",
-                            _ => "UFO flyover"
-                        };
-                        await BroadcastAsync(new { type = "worldEventTriggered", actor = eventActors[0], actors = eventActors, message = $"God Mode triggered a {eventName}." }, null, cancellationToken);
+                        await BroadcastAsync(new { type = "worldEventTriggered", actor = eventActors[0], actors = eventActors, message = $"God Mode triggered {eventActors[0].EventName}." }, null, cancellationToken);
                         break;
                     case "setLights":
                         var lightRequest=root.Deserialize<SetLightsRequest>(SharedJson.Options)!;var litPlayer=await _world.SetLightsAsync(characterId,lightRequest.FlashlightOn,lightRequest.LanternOn,lightRequest.LaserOn,cancellationToken);await BroadcastAsync(new{type="playerUpdated",player=litPlayer},null,cancellationToken);break;

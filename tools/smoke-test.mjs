@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=53`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=74`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -16,6 +16,8 @@ if (!clientHtml.includes('miniMap') || !clientHtml.includes('placeFlagButton') |
   throw new Error('Personal flag or mini-map client controls are missing.');
 if (!clientHtml.includes('brontosaurusIntervalConfig') || !clientHtml.includes('stegosaurusIntervalConfig') || !clientHtml.includes('raptorIntervalConfig') || !clientHtml.includes('landOfGiantsIntervalConfig') || !clientScript.includes('drawBrontosaurusActor') || !clientScript.includes('drawStegosaurusActor') || !clientScript.includes('drawRaptorActor') || !clientScript.includes('drawGiantActor'))
   throw new Error('Dinosaur event controls or renderers are missing.');
+if (!clientHtml.includes('activeEventsPanel') || !clientHtml.includes('ufoEventNameConfig') || !clientHtml.includes('landOfGiantsEventNameConfig') || !clientScript.includes('renderActiveEvents'))
+  throw new Error('Active-event panel or configurable event-name controls are missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -43,7 +45,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 32) throw new Error(`Expected protocol 32, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 33) throw new Error(`Expected protocol 33, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
@@ -170,6 +172,7 @@ try {
     second.waitFor(message=>message.type==='worldEventTriggered'&&message.actors?.every(actor=>actor.subtype==='raptor'),10000,raptorStartB)
   ]);
   if(raptorEventA.actors.length!==3||raptorEventB.actors.length!==3)throw new Error('Raptor event did not synchronize a three-actor pack.');
+  if(!raptorEventA.actors.every(actor=>actor.eventName&&actor.eventEndsAtUtc))throw new Error('Raptor event did not include its authoritative name and countdown deadline.');
   const giantStartA=first.messageCount()-1,giantStartB=second.messageCount()-1;
   first.socket.send(JSON.stringify({type:'triggerWorldEvent',eventType:'landOfGiants'}));
   const [giantEventA,giantEventB]=await Promise.all([
@@ -177,6 +180,7 @@ try {
     second.waitFor(message=>message.type==='worldEventTriggered'&&message.actor?.subtype==='giant',10000,giantStartB)
   ]);
   if(giantEventA.actors.length!==1||giantEventB.actors.length!==1)throw new Error('Land of the Giants did not synchronize its giant actor.');
+  if(!giantEventA.actor.eventName||!giantEventA.actor.eventEndsAtUtc)throw new Error('Land of the Giants did not include its authoritative name and countdown deadline.');
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
   const flagRemovedStart=second.messageCount()-1;first.socket.close();await second.waitFor(message=>message.type==='objectRemoved'&&message.entityId===ownFlag.entity.id,10000,flagRemovedStart);

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=41">
+  <link rel="stylesheet" href="styles.css?v=42">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -42,6 +42,10 @@
       <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
       <button id="serverConfigButton" type="button" hidden>Server config</button>
     </div>
+  </section>
+  <section id="activeEventsPanel" class="panel active-events-panel" data-collapsible="Active server events" hidden>
+    <div class="active-events-heading"><strong>Server events</strong><span>Happening now</span></div>
+    <div id="activeEventsList" class="active-events-list" aria-live="polite"></div>
   </section>
   <section id="miniMapPanel" class="panel minimap-panel" data-collapsible="Mini map">
     <strong>Mini map</strong>
@@ -202,13 +206,13 @@
         <div class="server-event-row"><label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
         <div class="server-event-row"><label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
         <div class="server-event-row"><label>Door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
-        <div class="server-event-row world-event-row"><label>UFO event interval (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>T-Rex portal interval (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Brontosaurus portal interval (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Stegosaurus portal interval (hours)<input id="stegosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="stegosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="stegosaurus">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Raptor pack portal interval (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Land of the Giants interval (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Great bear interval (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="ufoEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="trexEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="brontosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="stegosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="stegosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="stegosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="stegosaurus">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="raptorEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Event name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
       </div>
       <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save server events</button><button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button></div>
     </section>
@@ -242,6 +246,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=73"></script>
+  <script src="app.js?v=74"></script>
 </body>
 </html>

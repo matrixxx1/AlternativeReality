@@ -122,7 +122,8 @@ public sealed record ActorState(
     string? FactionId = null,
     bool IsQuestGiver = false,
     DateTimeOffset? EventStartedAtUtc = null,
-    DateTimeOffset? EventEndsAtUtc = null);
+    DateTimeOffset? EventEndsAtUtc = null,
+    string? EventName = null);
 
 public enum InventoryCategory { Weapon, Quest, Other }
 public sealed record ItemStack(
@@ -172,7 +173,14 @@ public sealed record ServerEventConfiguration(
     int RaptorIntervalHours = 24,
     int RaptorDurationMinutes = 10,
     int LandOfGiantsIntervalHours = 24,
-    int LandOfGiantsDurationMinutes = 10);
+    int LandOfGiantsDurationMinutes = 10,
+    string UfoEventName = "UFO Flyover",
+    string TrexEventName = "T-Rex Portal",
+    string BrontosaurusEventName = "Brontosaurus Portal",
+    string StegosaurusEventName = "Stegosaurus Portal",
+    string RaptorEventName = "Raptor Pack",
+    string LandOfGiantsEventName = "Land of the Giants",
+    string BearEventName = "The Great Bear");
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,

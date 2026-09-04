@@ -196,6 +196,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         {
             Assert.NotNull(actor.EventStartedAtUtc);
             Assert.NotNull(actor.EventEndsAtUtc);
+            Assert.False(string.IsNullOrWhiteSpace(actor.EventName));
             Assert.Contains(actor.Id, actorIds);
         });
     }
@@ -792,7 +793,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var admin = await world.JoinAsync("event-admin", "EventAdmin");
         var other = await world.JoinAsync("event-other", "EventOther");
         await world.SetGodModeAsync(admin.Id, true);
-        var request = new UpdateServerEventsRequest(30, 20, 6, 10, 180, 120, 12, 3, 36, 15, 48, 20, 240, "rain", 11.5, 18, 11, 30, 12, 8, 9, 20, 14);
+        var request = new UpdateServerEventsRequest(30, 20, 6, 10, 180, 120, 12, 3, 36, 15, 48, 20, 240, "rain", 11.5, 18, 11, 30, 12, 8, 9, 20, 14,
+            "Sky Watch", "Jurassic Hour", "Long Neck Alert", "Spiked Tail", "Raptor Rush", "Big Trouble", "Bear Warning");
 
         var updated = await world.UpdateServerEventConfigurationAsync(admin.Id, request);
 
@@ -804,10 +806,14 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(8, updated.RaptorIntervalHours);
         Assert.Equal(20, updated.LandOfGiantsIntervalHours);
         Assert.Equal(14, updated.LandOfGiantsDurationMinutes);
+        Assert.Equal("Sky Watch", updated.UfoEventName);
+        Assert.Equal("Big Trouble", updated.LandOfGiantsEventName);
+        Assert.Equal("Sky Watch", Assert.Single(world.TriggerWorldEvent(admin.Id, "ufo")).EventName);
         Assert.Equal(11.5, world.Weather.TemperatureCelsius);
         var persisted = await store.LoadServerEventConfigurationAsync(configuration.Id);
         Assert.Equal(updated, persisted);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(other.Id, request));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(admin.Id, request with { UfoEventName = "x" }));
     }
 
     [Fact]
