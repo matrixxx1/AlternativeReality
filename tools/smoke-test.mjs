@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=80`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=82`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -28,6 +28,8 @@ if (!clientScript.includes('Probed: ½ speed') || !clientScript.includes('abduct
   throw new Error('Probed telemetry or UFO abduction animation is missing.');
 if (!clientScript.includes("candle:'🕯'") || !clientScript.includes('candleActive') || !clientScript.includes('Candle lit'))
   throw new Error('Timed candle art, lighting, or countdown telemetry is missing.');
+if (!clientScript.includes('initializeDraggablePanels') || !clientScript.includes('floatPanel') || !clientScript.includes('dockPanel') || !clientScript.includes('panel-dock-target'))
+  throw new Error('Detachable control-rail panel behavior is missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);

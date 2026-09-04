@@ -19,6 +19,16 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .panel-collapsed { width:28px !important; min-width:28px !important; max-width:28px !important; height:26px !important; min-height:26px !important; max-height:26px !important; padding:0 !important; overflow:hidden !important; }
 .panel-collapsed > :not(.panel-collapse-button) { display:none !important; }
 .panel-collapsed .panel-collapse-button { top:3px; right:3px; }
+.panel-drag-handle { min-height:22px; margin:-4px 22px 7px -2px; padding:3px 7px; display:flex; align-items:center; justify-content:space-between; gap:10px; color:#f2d889; background:rgba(8,18,13,.5); border:1px solid rgba(217,181,92,.3); border-radius:2px; cursor:grab; touch-action:none; user-select:none; font:700 10px/1.2 monospace; letter-spacing:.04em; text-transform:uppercase; }
+.panel-drag-handle::before { content:'⠿'; color:#9e8751; font-size:14px; }
+.panel-drag-handle span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.panel-drag-handle small { color:#98a193; font:700 8px/1 monospace; letter-spacing:.08em; }
+.panel-drag-handle:hover,.panel-drag-handle:focus-visible { color:#fff3b0; background:#294632; outline:1px solid #f1d574; }
+.panel-dragging .panel-drag-handle { cursor:grabbing; }
+.panel.floating-panel { position:fixed !important; inset:auto !important; right:auto !important; bottom:auto !important; min-width:280px; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); margin:0 !important; transform:none !important; overflow:auto; box-shadow:0 0 0 2px #533c1e,8px 10px 22px rgba(0,0,0,.55); }
+.panel.floating-panel.panel-dragging { opacity:.94; box-shadow:0 0 0 2px #f1d574,12px 14px 28px rgba(0,0,0,.62); }
+.right-rail.panel-dock-target { box-shadow:inset 0 0 0 3px #f1d574,-7px 0 18px rgba(0,0,0,.42); }
+.right-rail.panel-dock-target::after { content:'Drop to dock window'; position:fixed; z-index:1000; right:18px; top:48px; padding:8px 12px; color:#14231c; background:#f1d574; border:2px solid #533c1e; border-radius:3px; font:800 11px/1 monospace; text-transform:uppercase; pointer-events:none; }
 .title-panel { top: 14px; left: 14px; min-width: 290px; padding: 10px 14px; }
 .eyebrow { color: #e4c86d; font: 700 10px/1.3 monospace; letter-spacing: 1.8px; }
 h1 { margin: 3px 0 4px; font-size: 20px; }
