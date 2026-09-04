@@ -290,7 +290,7 @@ public sealed class RealitySocketHub
                         break;
                     case "pathRequest":
                         var pathRequest = root.Deserialize<PathRequest>(SharedJson.Options)!;
-                        await connection.SendAsync(new { type = "taskStatus", task = _world.IsAreaLoaded(pathRequest.X, pathRequest.Y) ? "Finding route…" : "Loading area and finding route…" }, cancellationToken);
+                        await connection.SendAsync(new { type = "taskStatus", task = _world.IsAreaLoadRequiredForPath(characterId, pathRequest.X, pathRequest.Y) ? "Loading area and finding route…" : "Finding route…" }, cancellationToken);
                         var pathResult = await _world.FindPathAsync(characterId, pathRequest, cancellationToken);
                         if (pathResult.Expanded) await connection.SendAsync(new { type = "worldExpanded", snapshot = _world.CreateSnapshot() }, cancellationToken);
                         if (pathResult.Result.Success)

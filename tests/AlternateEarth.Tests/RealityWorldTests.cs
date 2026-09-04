@@ -80,6 +80,31 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DungeonPathDoesNotWaitForAnOutdoorAreaLoad()
+    {
+        var configuration = new RealityConfiguration("dungeon-path", "Dungeon Path", 118, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var building = Building("path-home", region, 20, 20);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "dungeon-path.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("path-account", "PathUser", "hash", "salt", "token", "path-character"), "PathUser");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("path-character", "PathUser", "path-account");
+
+        Assert.True(world.IsAreaLoadRequiredForPath(player.Id, 5_000, 5_000));
+        await world.SetGodModeAsync(player.Id, true);
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+
+        Assert.False(world.IsAreaLoadRequiredForPath(player.Id, entered.Player.Position.X, entered.Player.Position.Y));
+        var path = await world.FindPathAsync(player.Id, new PathRequest(entered.Player.Position.X, entered.Player.Position.Y, 1));
+        Assert.True(path.Result.Success);
+        Assert.False(path.Expanded);
+    }
+
+    [Fact]
     public async Task MotorizedTravelRequiresFuelAndGodModeBypassesConsumption()
     {
         var configuration = new RealityConfiguration("fuel-test", "Fuel Test", 18, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

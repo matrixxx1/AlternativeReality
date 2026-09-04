@@ -695,6 +695,8 @@ public sealed partial class RealityWorld
 
     public Task<bool> LoadAreaAsync(double x,double y,CancellationToken cancellationToken=default)=>EnsureAreaLoadedAsync(x,y,cancellationToken);
     public bool IsAreaLoaded(double x, double y) => _loadedAreas.ContainsKey(AreaKeyFor(x, y));
+    public bool IsAreaLoadRequiredForPath(string characterId, double x, double y) =>
+        _players.TryGetValue(characterId, out var player) && player.LocationId == "outdoor" && !IsAreaLoaded(x, y);
 
     public string AreaKeyFor(double x, double y)
     {
