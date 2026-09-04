@@ -265,7 +265,8 @@ public sealed record WeatherState(
     DateTimeOffset? SunsetUtc = null,
     string MoonPhase = "Unknown",
     double MoonIllumination = 0,
-    bool IsAvailable = true)
+    bool IsAvailable = true,
+    double WindDirectionDegrees = 0)
 {
     public static WeatherState Unavailable { get; } = new(
         "Weather unavailable", -1, 0, 0, 0, true, DateTimeOffset.MinValue, "none", IsAvailable: false);

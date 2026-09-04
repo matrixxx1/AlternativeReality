@@ -14,7 +14,7 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
     {
         var latitude = coordinate.Latitude.ToString("F6", CultureInfo.InvariantCulture);
         var longitude = coordinate.Longitude.ToString("F6", CultureInfo.InvariantCulture);
-        var uri = $"v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,is_day&daily=sunrise,sunset&forecast_days=1&timezone=UTC";
+        var uri = $"v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,is_day&daily=sunrise,sunset&forecast_days=1&timezone=UTC";
         using var response = await _httpClient.GetAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
@@ -42,7 +42,8 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
             sunrise,
             sunset,
             moonPhase,
-            moonIllumination);
+            moonIllumination,
+            WindDirectionDegrees: current.GetProperty("wind_direction_10m").GetDouble());
     }
 
     private static DateTimeOffset? ParseUtc(string? value) =>

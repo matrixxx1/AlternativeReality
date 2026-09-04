@@ -16,6 +16,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<string, Queue<WorldPosition>> _actorRoutes = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _nextActorSpeech = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastMovement = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastRaftDrift = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastChat = new();
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly SemaphoreSlim _areaLoadLock = new(1, 1);
@@ -147,7 +148,7 @@ public sealed partial class RealityWorld
         var date = now.Date;
         var sunrise = new DateTimeOffset(date.AddHours(7), now.Offset).ToUniversalTime();
         var sunset = new DateTimeOffset(date.AddHours(19), now.Offset).ToUniversalTime();
-        return new WeatherState(profile.Item1, profile.Item2, temperatureCelsius ?? (mode.Equals("snow", StringComparison.OrdinalIgnoreCase) ? -3 : 18), profile.Item3, profile.Item4, isDay, DateTimeOffset.UtcNow, "server override", sunrise, sunset, Weather.MoonPhase, Weather.MoonIllumination);
+        return new WeatherState(profile.Item1, profile.Item2, temperatureCelsius ?? (mode.Equals("snow", StringComparison.OrdinalIgnoreCase) ? -3 : 18), profile.Item3, profile.Item4, isDay, DateTimeOffset.UtcNow, "server override", sunrise, sunset, Weather.MoonPhase, Weather.MoonIllumination, WindDirectionDegrees: Weather.WindDirectionDegrees);
     }
 
     private static int ServerUtcOffsetMinutes(DateTimeOffset utcNow) =>
@@ -294,6 +295,7 @@ public sealed partial class RealityWorld
     {
         _players.TryRemove(characterId, out _);
         _lastMovement.TryRemove(characterId, out _);
+        _lastRaftDrift.TryRemove(characterId, out _);
         _lastChat.TryRemove(characterId, out _);
         _lastIdleHeal.TryRemove(characterId, out _);
         _playerAccounts.TryRemove(characterId, out _);

@@ -464,11 +464,24 @@
     ctx.save();ctx.translate(x,y+vibration);ctx.rotate(.24*direction);ctx.fillStyle=shirt;ctx.fillRect(-s*.34,-s*1.12,s*.72,s*.68);ctx.strokeStyle='#292421';ctx.lineWidth=Math.max(2,s*.18);ctx.beginPath();ctx.moveTo(-s*.18,-s*.48);ctx.lineTo(-s*.54,s*.12);ctx.moveTo(s*.12,-s*.46);ctx.lineTo(s*.35,s*.16);ctx.stroke();ctx.strokeStyle=skin;ctx.lineWidth=Math.max(2,s*.13);ctx.beginPath();ctx.moveTo(s*.27,-s*.88);ctx.lineTo(s*.72*direction,-s*.4);ctx.stroke();ctx.fillStyle=skin;ctx.beginPath();ctx.arc(-s*.02*direction,-s*1.34,s*.32,0,Math.PI*2);ctx.fill();ctx.restore();ctx.restore();
     if(moving){ctx.fillStyle='rgba(205,214,214,.25)';for(let i=0;i<2;i++){const drift=(now/13+i*s*.7)%(s*1.35);ctx.beginPath();ctx.arc(x-direction*(s*1.05+drift),y+s*(.18-i*.1),s*(.12+i*.04),0,Math.PI*2);ctx.fill();}}
   }
+  function drawRaftRider(x,y,skin,shirt,moving,now,phase,facing,s){
+    const angle={north:0,south:Math.PI,east:Math.PI/2,west:-Math.PI/2}[facing]??0,bob=Math.sin(now/520+phase*3)*s*.025,row=moving?Math.sin(now/165+phase*7):0;
+    ctx.save();ctx.translate(x,y+bob);ctx.rotate(angle);
+    ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(0,s*.2,s*1.02,s*1.58,0,0,Math.PI*2);ctx.fill();
+    if(moving){ctx.strokeStyle='rgba(190,238,239,.55)';ctx.lineWidth=Math.max(1.5,s*.08);for(const side of[-1,1]){ctx.beginPath();ctx.moveTo(side*s*.48,s*1.25);ctx.quadraticCurveTo(side*s*(1.15+Math.abs(row)*.25),s*(1.7+row*.12),side*s*1.48,s*2.05);ctx.stroke();}}
+    const hull=ctx.createLinearGradient(-s,0,s,0);hull.addColorStop(0,'#ad5b2d');hull.addColorStop(.48,'#ef9b4b');hull.addColorStop(1,'#8b431f');ctx.fillStyle=hull;ctx.strokeStyle='#40271c';ctx.lineWidth=Math.max(2,s*.13);ctx.beginPath();ctx.ellipse(0,0,s*.88,s*1.52,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#304d55';ctx.strokeStyle='#e2b06b';ctx.lineWidth=Math.max(1.5,s*.07);ctx.beginPath();ctx.ellipse(0,s*.04,s*.55,s*1.13,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#b9753d';for(const seatY of[-s*.34,s*.42])ctx.fillRect(-s*.55,seatY-s*.07,s*1.1,s*.14);
+    for(const side of[-1,1]){const stroke=side*row*s*.34,gripX=side*s*.2,endX=side*s*1.55,endY=s*(.28+side*row*.38);ctx.strokeStyle='#79502d';ctx.lineWidth=Math.max(2,s*.09);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(gripX,-s*.2);ctx.lineTo(endX,endY);ctx.stroke();ctx.fillStyle='#d8a45e';ctx.save();ctx.translate(endX,endY);ctx.rotate(-side*.62+row*.18);ctx.beginPath();ctx.ellipse(0,side*s*.18,s*.16,s*.42,0,0,Math.PI*2);ctx.fill();ctx.restore();}
+    ctx.strokeStyle='#292421';ctx.lineWidth=Math.max(2,s*.18);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-s*.16,-s*.12);ctx.lineTo(-s*.38,s*.28);ctx.lineTo(-s*.18,s*.63);ctx.moveTo(s*.16,-s*.12);ctx.lineTo(s*.38,s*.28);ctx.lineTo(s*.18,s*.63);ctx.stroke();
+    ctx.fillStyle=shirt;ctx.beginPath();ctx.roundRect(-s*.38,-s*.88,s*.76,s*.72,s*.16);ctx.fill();ctx.strokeStyle=skin;ctx.lineWidth=Math.max(2,s*.14);ctx.beginPath();ctx.moveTo(-s*.3,-s*.68);ctx.lineTo(-s*.2,-s*.22);ctx.moveTo(s*.3,-s*.68);ctx.lineTo(s*.2,-s*.22);ctx.stroke();ctx.fillStyle=skin;ctx.beginPath();ctx.arc(0,-s*1.1,s*.34,0,Math.PI*2);ctx.fill();ctx.restore();
+  }
   function drawPersonShape(x,y,skin,shirt,moving,now,phase,mode='walk',facing='south'){
     const s=Math.max(5,state.scale*.46),cycle=Math.sin(now/105+phase*6);
     if(mode==='bike'||mode==='eBike'){drawBikeRider(x,y,skin,mode==='eBike'?'#4ba6b8':shirt,moving,now,phase,facing,s);return;}
     if(mode==='dirtBike'){drawDirtBikeRider(x,y,skin,shirt,moving,now,phase,facing,s);return;}
     if(mode==='motorcycle'){drawMotorcycleRider(x,y,skin,shirt,moving,now,phase,facing,s);return;}
+    if(mode==='raft'){drawRaftRider(x,y,skin,shirt,moving,now,phase,facing,s);return;}
     if(mode==='skateboard'){
       const direction=facing==='west'?-1:1,push=moving?Math.max(0,cycle):0,glide=moving?Math.sin(now/210+phase*5)*.05:0;
       ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(x,y+s*.72,s*1.05,s*.24,0,0,Math.PI*2);ctx.fill();

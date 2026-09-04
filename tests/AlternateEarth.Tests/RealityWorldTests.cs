@@ -1155,6 +1155,34 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task IdleRaftDriftsDownwindAndRemainsOnWater()
+    {
+        var configuration = new RealityConfiguration("raft-drift", "Raft Drift", 334, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var water = new CanonicalEntity("test-lake", EntityKind.Water, new WorldPosition(region, 0, 0),
+            new GeometryPoint[] { new(-25, -25), new(25, -25), new(25, 25), new(-25, 25), new(-25, -25) },
+            new Dictionary<string, string> { ["natural"] = "water" });
+        var weather = new WeatherState("Breezy", 1, 18, 0, 18, true, DateTimeOffset.UtcNow, "test", WindDirectionDegrees: 90);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "raft-drift.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveCharacterAsync(configuration.Id, new PlayerState("rafter", "Rafter", new WorldPosition(region, 0, 0), TravelMode: TravelMode.Raft, GodMode: true));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(water)), new FixedWeatherProvider(weather), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("rafter", "Rafter");
+        Assert.Equal(TerrainType.DeepWater, player.Terrain);
+        Assert.Equal(90, world.Weather.WindDirectionDegrees);
+
+        await Task.Delay(1050);
+        var changed = await world.AdvanceVitalsAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+        var drifted = Assert.Single(changed, item => item.Id == player.Id);
+
+        Assert.True(drifted.Position.X < player.Position.X, "An east wind should drift the raft westward.");
+        Assert.InRange(Math.Abs(drifted.Position.Y - player.Position.Y), 0, .02);
+        Assert.Contains(drifted.Terrain, new[] { TerrainType.ShallowWater, TerrainType.DeepWater });
+        Assert.Equal(0, drifted.SpeedMetersPerSecond);
+    }
+
+    [Fact]
     public async Task ClothingAndOffhandEquipmentDriveTemperatureAndLighting()
     {
         var configuration = new RealityConfiguration("climate-test", "Climate Test", 901, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

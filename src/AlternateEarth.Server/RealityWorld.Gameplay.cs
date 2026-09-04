@@ -321,13 +321,57 @@ public sealed partial class RealityWorld
                     _lastIdleHeal[pair.Key] = now;
                 }
             }
-            if (updated.Stamina == player.Stamina && updated.Water == player.Water && updated.WalletCents == player.WalletCents && updated.HealthHearts == player.HealthHearts && updated.BodyHeat == player.BodyHeat && updated.WantedLevel == player.WantedLevel && updated.CandleUntilUtc == player.CandleUntilUtc) continue;
+            updated = ApplyIdleRaftDrift(pair.Key, updated, idle, now);
+            if (updated.Position == player.Position && updated.Stamina == player.Stamina && updated.Water == player.Water && updated.WalletCents == player.WalletCents && updated.HealthHearts == player.HealthHearts && updated.BodyHeat == player.BodyHeat && updated.WantedLevel == player.WantedLevel && updated.CandleUntilUtc == player.CandleUntilUtc) continue;
             updated = updated with { SpeedMetersPerSecond = idle > TimeSpan.FromSeconds(.5) ? 0 : updated.SpeedMetersPerSecond, Version = player.Version + 1 };
             if (await SavePlayerAsync(updated, cancellationToken)) changed.Add(updated);
         }
         foreach (var expired in _loot.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) _loot.TryRemove(expired, out _);
         foreach (var expired in _outdoorChests.Where(pair => pair.Value.ExpiresAtUtc <= now).Select(pair => pair.Key).ToArray()) { _outdoorChests.TryRemove(expired, out _); _chestContents.TryRemove(expired, out _); }
         return changed;
+    }
+
+    private PlayerState ApplyIdleRaftDrift(string playerId, PlayerState player, TimeSpan idle, DateTimeOffset now)
+    {
+        if (player.TravelMode != TravelMode.Raft || player.LocationId != "outdoor" ||
+            player.Terrain is not (TerrainType.ShallowWater or TerrainType.DeepWater) ||
+            !Weather.IsAvailable || Weather.WindSpeedKilometersPerHour <= 0)
+        {
+            _lastRaftDrift.TryRemove(playerId, out _);
+            return player;
+        }
+        if (idle < TimeSpan.FromSeconds(1))
+        {
+            _lastRaftDrift[playerId] = now;
+            return player;
+        }
+
+        var previous = _lastRaftDrift.GetOrAdd(playerId, now.AddSeconds(-1));
+        var driftSeconds = Math.Min(2, (now - previous).TotalSeconds);
+        if (driftSeconds < .95) return player;
+        _lastRaftDrift[playerId] = now;
+
+        var windSpeedMetersPerSecond = Weather.WindSpeedKilometersPerHour / 3.6;
+        var driftSpeed = Math.Clamp(windSpeedMetersPerSecond * .03, 0, .35);
+        if (driftSpeed < .005) return player;
+        // Meteorological bearings describe where wind comes from; a free raft moves downwind.
+        var downwindRadians = (Weather.WindDirectionDegrees + 180) * Math.PI / 180;
+        var distance = driftSpeed * driftSeconds;
+        var candidate = player.Position with
+        {
+            X = player.Position.X + Math.Sin(downwindRadians) * distance,
+            Y = player.Position.Y + Math.Cos(downwindRadians) * distance
+        };
+        if (!_loadedAreas.Values.Any(area => area.Contains(candidate.X, candidate.Y)) ||
+            !Navigation.CanTraverse(player.Position, candidate)) return player;
+        var terrain = Navigation.TerrainAt(candidate.X, candidate.Y);
+        if (terrain is not (TerrainType.ShallowWater or TerrainType.DeepWater)) return player;
+        return player with
+        {
+            Position = candidate with { Z = Navigation.ElevationAt(candidate.X, candidate.Y) },
+            Terrain = terrain,
+            SpeedMetersPerSecond = 0
+        };
     }
 
     private PlayerState ApplyBodyTemperature(PlayerState player, TimeSpan idle, TimeSpan elapsed)

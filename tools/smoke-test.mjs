@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=83`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=84`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -32,6 +32,8 @@ if (!clientScript.includes('initializeDraggablePanels') || !clientScript.include
   throw new Error('Detachable control-rail panel behavior is missing.');
 if (!clientHtml.includes('serverTimeModeConfig') || !clientScript.includes('serverUtcOffsetMinutes') || !clientScript.includes('updateServerTimePreview') || !clientScript.includes("serverTimeMode:mode") || !clientScript.includes("case 'serverEventsChanged'"))
   throw new Error('Auto/manual advancing server-clock controls are missing.');
+if (!clientScript.includes('drawRaftRider') || !clientScript.includes("mode==='raft'") || !clientScript.includes('quadraticCurveTo'))
+  throw new Error('Seated raft rendering or rowing animation is missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -59,7 +61,8 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 37) throw new Error(`Expected protocol 37, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 38) throw new Error(`Expected protocol 38, received ${welcomeA.protocolVersion}.`);
+  if (!Number.isFinite(welcomeA.snapshot.weather?.windDirectionDegrees)) throw new Error('Weather snapshot did not include an authoritative wind bearing.');
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
