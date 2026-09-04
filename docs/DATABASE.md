@@ -23,4 +23,4 @@ The prototype writes character movement and player-created structures. Character
 
 Character rows also persist the body-heat meter and equipped hat, shirt/jacket, pants/shorts, and renderer-neutral light booleans used by the mutually exclusive offhand slot. Schema initialization adds these columns in place for existing realities.
 
-All database files, write-ahead logs, downloaded geography, elevation responses, and generated geographic caches remain under `data/` and are ignored by Git.
+All database files, write-ahead logs, and final generated canonical world blocks remain under `data/` and are ignored by Git. New source geography/elevation responses are transient; legacy provider cache files are consumed once and deleted when that block is converted.

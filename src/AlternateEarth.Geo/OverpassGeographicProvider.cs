@@ -9,13 +9,13 @@ namespace AlternateEarth.Geo;
 public sealed class OverpassGeographicProvider : IGeographicProvider
 {
     private readonly HttpClient _httpClient;
-    private readonly string _cacheDirectory;
+    private readonly string _legacyCacheDirectory;
     private readonly IElevationProvider _elevationProvider;
 
     public OverpassGeographicProvider(HttpClient httpClient, string cacheDirectory, IElevationProvider elevationProvider)
     {
         _httpClient = httpClient;
-        _cacheDirectory = cacheDirectory;
+        _legacyCacheDirectory = cacheDirectory;
         _elevationProvider = elevationProvider;
         Directory.CreateDirectory(cacheDirectory);
     }
@@ -26,27 +26,28 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             FormattableString.Invariant($"v4:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
-        var canonicalCachePath = Path.Combine(_cacheDirectory, $"area-{cacheKey}.json");
+        var canonicalCachePath = Path.Combine(_legacyCacheDirectory, $"area-{cacheKey}.json");
         if (File.Exists(canonicalCachePath))
         {
             var cachedJson = await File.ReadAllTextAsync(canonicalCachePath, cancellationToken);
             var cached = JsonSerializer.Deserialize<GeographicDataset>(cachedJson, SharedJson.Options);
             if (cached is not null)
             {
+                TryDelete(canonicalCachePath);
                 return cached with { Features = NormalizeMerchantCategories(cached.Features) };
             }
         }
 
-        var rawCachePath = Path.Combine(_cacheDirectory, $"overpass-{cacheKey}.json");
+        var rawCachePath = Path.Combine(_legacyCacheDirectory, $"overpass-{cacheKey}.json");
         string rawJson;
         if (File.Exists(rawCachePath))
         {
             rawJson = await File.ReadAllTextAsync(rawCachePath, cancellationToken);
+            TryDelete(rawCachePath);
         }
         else
         {
             rawJson = await DownloadOverpassAsync(BuildQuery(area), cancellationToken);
-            await File.WriteAllTextAsync(rawCachePath, rawJson, cancellationToken);
         }
 
         var features = ParseFeatures(rawJson, area);
@@ -60,12 +61,14 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             elevation = FlatElevationProvider.CreateGrid(area, 5);
         }
 
-        var dataset = new GeographicDataset(Name, area, features, elevation, DateTimeOffset.UtcNow);
-        await File.WriteAllTextAsync(
-            canonicalCachePath,
-            JsonSerializer.Serialize(dataset, SharedJson.Options),
-            cancellationToken);
-        return dataset;
+        return new GeographicDataset(Name, area, features, elevation, DateTimeOffset.UtcNow);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private async Task<string> DownloadOverpassAsync(string query, CancellationToken cancellationToken)

@@ -144,6 +144,7 @@ public sealed class GenerationTests
             var road = Assert.Single(dataset.Features);
             Assert.Equal(EntityKind.Road, road.Kind);
             Assert.Equal(2, road.Geometry.Count);
+            Assert.Empty(Directory.GetFiles(directory));
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
