@@ -39,7 +39,7 @@
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.socket = new WebSocket(`${scheme}//${location.host}/ws?characterId=${encodeURIComponent(storedId)}&name=${encodeURIComponent(playerName)}`);
     state.socket.addEventListener('open', () => setStatus('Connected — synchronizing world', true));
-    state.socket.addEventListener('close', () => { state.areaLoading=false;state.loadingArea=null;state.loadingStarted=0;setWorldTask(null);setStatus('Disconnected — retrying', false); setTimeout(connect, 1500); });
+    state.socket.addEventListener('close', () => { state.areaLoading=false;state.loadingArea=null;state.loadingStarted=0;state.path=[];state.target=null;state.moveInFlight=false;setWorldTask(null);setStatus('Disconnected — route cancelled, retrying', false);setTimeout(connect,1500); });
     state.socket.addEventListener('message', event => handle(JSON.parse(event.data)));
   }
   async function bootstrap(){try{const setupResponse=await fetch('/api/reality/setup');const setup=await setupResponse.json();if(setup.required){ui.accountSetup.hidden=true;ui.realitySetup.hidden=false;return;}ui.realitySetup.hidden=true;const response=await fetch('/api/account/me');if(response.ok){ui.accountSetup.hidden=true;connect();}else ui.accountSetup.hidden=false;}catch{ui.accountSetup.hidden=false;ui.accountError.textContent='The local reality server is unavailable.';}}

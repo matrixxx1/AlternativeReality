@@ -130,6 +130,32 @@ public sealed class GenerationTests
     }
 
     [Fact]
+    public async Task OverpassImporterDeduplicatesFullAndSkeletonWays()
+    {
+        const string response = """
+            {"elements":[
+              {"type":"node","id":1,"lat":45.5000,"lon":-122.5000},
+              {"type":"node","id":2,"lat":45.5002,"lon":-122.5002},
+              {"type":"way","id":10,"nodes":[1,2]},
+              {"type":"way","id":10,"nodes":[1,2],"tags":{"highway":"residential","name":"One Road"}}
+            ]}
+            """;
+        var directory = Path.Combine(Path.GetTempPath(), $"alternative-reality-overpass-duplicates-{Guid.NewGuid():N}");
+        try
+        {
+            using var client = new HttpClient(new StaticJsonHandler(response)) { BaseAddress = new Uri("https://example.test/") };
+            var provider = new OverpassGeographicProvider(client, directory, new FlatElevationProvider());
+
+            var dataset = await provider.GetAreaAsync(new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+
+            var road = Assert.Single(dataset.Features);
+            Assert.Equal(EntityKind.Road, road.Kind);
+            Assert.Equal("One Road", road.Properties["name"]);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task OverpassImporterClassifiesSpecialtyRetailers()
     {
         const string response = """

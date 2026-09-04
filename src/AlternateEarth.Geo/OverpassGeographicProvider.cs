@@ -159,9 +159,18 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             }
         }
 
+        // Overpass can return the same way once with tags from `out body` and again
+        // as an untagged skeleton from the recursive node expansion. Keep one
+        // deterministic, information-rich representation per OSM way ID.
+        var waysById = ways
+            .GroupBy(way => way.Id)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(way => way.Tags.Count).ThenByDescending(way => way.Nodes.Length).First());
+
         var projection = new LocalTangentProjection(area.Region);
         var result = new List<CanonicalEntity>();
-        foreach (var way in ways)
+        foreach (var way in waysById.Values)
         {
             var kind = Classify(way.Tags);
             if (kind is null)
@@ -214,7 +223,6 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             result.Add(new CanonicalEntity($"geo:osm:node:{node.Id}", EntityKind.PointOfInterest, position, Array.Empty<GeometryPoint>(), properties));
         }
 
-        var waysById = ways.ToDictionary(way => way.Id);
         foreach (var relation in relations.Where(relation => relation.Tags.GetValueOrDefault("boundary") == "administrative" && relation.Tags.GetValueOrDefault("admin_level") == "4" || relation.Tags.GetValueOrDefault("aeroway") == "aerodrome"))
         {
             var kind = relation.Tags.GetValueOrDefault("aeroway") == "aerodrome" ? EntityKind.Airport : EntityKind.StateBoundary;
