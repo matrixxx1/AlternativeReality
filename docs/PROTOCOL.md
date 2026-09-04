@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v35
+# Renderer-neutral protocol v36
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -9,7 +9,7 @@ The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser
 | `moveRequest` | direction `x`, `y`; client `sequence`; optional remaining-distance cap and waypoint coordinates | recomputes direction and distance from the authoritative position, bounds elapsed time/speed, prevents queued fast travel from overshooting, and clamps world bounds |
 | `pathRequest` | destination `x`, `y`; client `sequence` | bounds range, avoids deep water and canonical collision geometry, applies terrain traversal costs |
 | `setTravelMode` | walk, run, skateboard, bike, dirt bike, motorcycle, or raft | validates terrain, equipment ownership, motorized-vehicle fuel, and indoor vehicle restrictions |
-| `setEquipment` | logical hat, shirt, pants, shoes, offhand, or weapon slot and item; null to unequip | validates ownership and slot compatibility; offhand light equipment is mutually exclusive, and the weapon slot supports a true empty state while fists remain permanently available |
+| `setEquipment` | logical hat, shirt, pants, shoes, offhand, or weapon slot and item; null to unequip | validates ownership and slot compatibility; offhand light equipment is mutually exclusive, candles are consumed on ignition and expire after one minute, and the weapon slot supports a true empty state while fists remain permanently available |
 | `updateItemConfiguration` | item ID, damage, range, additive speed/visibility modifiers, minimum price, maximum price | requires authoritative God Mode, validates safe bounds, persists server-wide rules, and invalidates existing merchant quotes |
 | `configureInventoryItem` | item ID and `take` or `give` action | requires authoritative God Mode; `take` adds one to account-wide Home inventory, while `give` removes one from Home first and falls back to the backpack |
 | `dropItem` | item ID and quantity | removes owned inventory server-side, normalizes equipment/travel state, and creates collectible ground loot; the permanent fist and personal flags cannot be dropped |
@@ -90,3 +90,5 @@ Merchant offers use deterministic server-configured rotation buckets. Reopening 
 `pathResult` contains renderer-neutral meter waypoints. `pathUnavailable`, `movementBlocked`, `playerFell`, and `playerDied` explain authoritative navigation outcomes. `weatherChanged` carries the current condition, temperature, precipitation, wind, daylight state, sunrise, sunset, moon phase, observation time, and provider; clients independently decide how to present those facts.
 
 `PlayerState.bodyHeat` is the authoritative 0–100 thermal meter. Current hourly weather, outdoor movement, equipped clothing, indoor recovery, hypothermia damage, overheating stamina drain, death reset, and God Mode protection are all evaluated by the server.
+
+`PlayerState.candleUntilUtc` is the authoritative candle burn deadline. A non-God player consumes one candle when it enters the offhand slot; unequipping clears the deadline without refunding or consuming another candle. God Mode skips inventory consumption. The deadline is persisted and cleared by the server vitals tick when it expires.

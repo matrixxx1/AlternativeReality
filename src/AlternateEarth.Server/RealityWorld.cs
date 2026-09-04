@@ -1138,12 +1138,12 @@ public sealed partial class RealityWorld
             SetBaseReturnPosition(player.Id, home.BuildingId);
             return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
                 HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = home.Id,
-                FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, Version = player.Version + 1 };
+                FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
         }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
             HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = "outdoor",
-            FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, Version = player.Version + 1 };
+            FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
     }
 
     private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken)

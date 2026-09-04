@@ -1175,6 +1175,56 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandleIsAOneMinuteConsumableOffhandUnlessGodModeIsActive()
+    {
+        var configuration = new RealityConfiguration("candle-test", "Candle Test", 903, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "candle.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("reader", new[] { new ItemStack("candle", 2) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("reader", "Reader");
+
+        var candle = world.GetPrivateState(player.Id).ServerConfiguration!.Items.Single(item => item.ItemType == "candle");
+        Assert.Equal(1, candle.MinimumPriceCents);
+        Assert.Equal(500, candle.MaximumPriceCents);
+        Assert.Equal(15, candle.VisibilityModifierMeters);
+
+        var beforeLighting = DateTimeOffset.UtcNow;
+        player = await world.SetEquipmentAsync(player.Id, "offhand", "candle");
+        Assert.NotNull(player.CandleUntilUtc);
+        Assert.InRange(player.CandleUntilUtc!.Value, beforeLighting.AddSeconds(59), DateTimeOffset.UtcNow.AddSeconds(61));
+        Assert.False(player.FlashlightOn); Assert.False(player.LanternOn); Assert.False(player.LaserOn);
+        Assert.Equal(1, world.GetPrivateState(player.Id).Inventory.Items.Single(item => item.ItemType == "candle").Quantity);
+
+        player = await world.SetEquipmentAsync(player.Id, "offhand", null);
+        Assert.Null(player.CandleUntilUtc);
+        Assert.Equal(1, world.GetPrivateState(player.Id).Inventory.Items.Single(item => item.ItemType == "candle").Quantity);
+
+        player = await world.SetGodModeAsync(player.Id, true);
+        player = await world.SetEquipmentAsync(player.Id, "offhand", "candle");
+        Assert.NotNull(player.CandleUntilUtc);
+        Assert.Equal(1, world.GetPrivateState(player.Id).Inventory.Items.Single(item => item.ItemType == "candle").Quantity);
+    }
+
+    [Fact]
+    public async Task ExpiredCandleIsExtinguishedByAuthoritativeVitalsTick()
+    {
+        var configuration = new RealityConfiguration("expired-candle", "Expired Candle", 904, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "expired-candle.db"));
+        await store.InitializeAsync(configuration);
+        var center = new LocalTangentProjection(configuration.Area.Region).Project(configuration.Area.Center);
+        await store.SaveCharacterAsync(configuration.Id, new PlayerState("sleeper", "Sleeper", center, CandleUntilUtc: DateTimeOffset.UtcNow.AddSeconds(-1)));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        await world.JoinAsync("sleeper", "Sleeper");
+
+        var changed = await world.AdvanceVitalsAsync(TimeSpan.FromMilliseconds(500), CancellationToken.None);
+
+        Assert.Null(Assert.Single(changed, item => item.Id == "sleeper").CandleUntilUtc);
+    }
+
+    [Fact]
     public async Task GodModeConfigInventoryUsesHomeBeforeBackpack()
     {
         var configuration = new RealityConfiguration("config-inventory", "Config Inventory", 902, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

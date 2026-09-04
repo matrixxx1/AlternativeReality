@@ -103,7 +103,8 @@ public sealed record PlayerState(
     double EBikeRemainingMeters = 1609.344,
     DateTimeOffset? EnergyDrinkBoostUntilUtc = null,
     DateTimeOffset? EnergyDrinkCrashUntilUtc = null,
-    DateTimeOffset? ProbedUntilUtc = null);
+    DateTimeOffset? ProbedUntilUtc = null,
+    DateTimeOffset? CandleUntilUtc = null);
 
 public sealed record ActorState(
     string Id,

@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=79`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=80`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -26,6 +26,8 @@ if (!clientScript.includes("energyDrink:'🥤'") || !clientScript.includes('upda
   throw new Error('Energy-drink inventory art, consumption control, or timed telemetry is missing.');
 if (!clientScript.includes('Probed: ½ speed') || !clientScript.includes('abductionVisual') || !clientScript.includes("combat.weapon==='greenBeam'"))
   throw new Error('Probed telemetry or UFO abduction animation is missing.');
+if (!clientScript.includes("candle:'🕯'") || !clientScript.includes('candleActive') || !clientScript.includes('Candle lit'))
+  throw new Error('Timed candle art, lighting, or countdown telemetry is missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -53,7 +55,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 35) throw new Error(`Expected protocol 35, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 36) throw new Error(`Expected protocol 36, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
@@ -103,6 +105,12 @@ try {
   first.socket.send(JSON.stringify({ type: 'setGodMode', enabled: true }));
   const god = await first.waitFor(message => message.type === 'playerUpdated' && message.player.id === welcomeA.playerId && message.player.godMode);
   if (god.player.walletCents < 50000 || god.player.water < 10 || god.player.stamina < 10) throw new Error('God Mode resources were not enforced.');
+  let candleStart=first.messageCount()-1;
+  first.socket.send(JSON.stringify({type:'setEquipment',slot:'offhand',itemType:'candle'}));
+  const litCandle=await first.waitFor(message=>message.type==='playerUpdated'&&message.player.id===welcomeA.playerId&&Date.parse(message.player.candleUntilUtc)>Date.now()&&!message.player.flashlightOn&&!message.player.lanternOn&&!message.player.laserOn,10000,candleStart);
+  candleStart=first.messageCount()-1;
+  first.socket.send(JSON.stringify({type:'setEquipment',slot:'offhand',itemType:null}));
+  await first.waitFor(message=>message.type==='playerUpdated'&&message.player.id===welcomeA.playerId&&!message.player.candleUntilUtc&&message.player.version>litCandle.player.version,10000,candleStart);
   const diagnosticsResponse=await fetch(`${baseUrl}/api/diagnostics`,{headers:{cookie:first.cookieHeader}}),diagnostics=await diagnosticsResponse.json();
   if(!diagnosticsResponse.ok||!Array.isArray(diagnostics.activeOperations))throw new Error('Server diagnostics did not expose the active map-task list.');
   let configActionStart=first.messageCount()-1;
@@ -194,5 +202,5 @@ try {
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
   const flagRemovedStart=second.messageCount()-1;first.socket.close();await second.waitFor(message=>message.type==='objectRemoved'&&message.entityId===ownFlag.entity.id,10000,flagRemovedStart);
-  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,dinosaurEventControls:true,raptorPackSynchronized:raptorEventA.actors.length,landOfGiantsSynchronized:giantEventA.actors.length,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,dinosaurEventControls:true,raptorPackSynchronized:raptorEventA.actors.length,landOfGiantsSynchronized:giantEventA.actors.length,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,timedCandleLighting:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
 } finally { first.socket.close(); second.socket.close(); }

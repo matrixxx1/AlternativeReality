@@ -181,13 +181,14 @@ public sealed partial class RealityWorld
         var godMode = player.GodMode;
         var travelMode = !godMode && TravelModeUnavailable(player.Id, player) ? TravelMode.Walk : player.TravelMode;
         var offhand = ActiveOffhand(player);
-        if (!godMode && offhand != "none" && InventoryQuantity(player.Id, offhand) <= 0) offhand = "none";
+        if (!godMode && offhand != "none" && offhand != "candle" && InventoryQuantity(player.Id, offhand) <= 0) offhand = "none";
         return player with
         {
             TravelMode = travelMode,
             FlashlightOn = offhand == "flashlight",
             LanternOn = offhand == "lantern",
             LaserOn = offhand == "laser",
+            CandleUntilUtc = offhand == "candle" ? player.CandleUntilUtc : null,
             MagicHikingShoesOn = godMode ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(player.Id, "magicHikingShoes") > 0,
             MagicRunningShoesOn = godMode ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(player.Id, "magicRunningShoes") > 0,
             EquippedHat = RetainedEquipment(player.Id, player.EquippedHat, HatItems, godMode),

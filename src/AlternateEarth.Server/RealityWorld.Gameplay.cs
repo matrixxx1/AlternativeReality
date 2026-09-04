@@ -45,6 +45,7 @@ public sealed partial class RealityWorld
         new("inflatableRaft","Inflatable raft","Safe travel through deep water",0,0,45_000,65_000,true,true,null,2.75,WeightPounds:0),
         new("flashlight","Flashlight","Directional light",0,0,1_000,5_000,true,true,null,0,50,WeightPounds:.5),
         new("lantern","Lantern","Circular area light",0,0,5_000,10_000,true,true,null,0,30,WeightPounds:1.5),
+        new("candle","Candle","Consumable one-minute circular light at half lantern strength",0,0,1,500,true,false,null,0,15,WeightPounds:.1),
         new("laser","Laser","Straight light beam until collision",0,0,20_000,40_000,true,true,null,0,150,WeightPounds:.25),
         new("magicHikingShoes","Magic hiking shoes","Additive movement and stamina bonus",0,0,10_000,40_000,true,true,null,3.5,WeightPounds:2),
         new("magicRunningShoes","Magic running shoes","Larger additive movement and conditional stamina bonus",0,0,10_000,40_000,true,true,null,7,WeightPounds:1.5),
@@ -99,7 +100,7 @@ public sealed partial class RealityWorld
     private static readonly HashSet<string> HatItems = new(["hat", "coolingHat", "warmHat"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> ShirtItems = new(["tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> PantsItems = new(["coolingShorts", "warmingPants"], StringComparer.OrdinalIgnoreCase);
-    private static readonly HashSet<string> OffhandItems = new(["flashlight", "lantern", "laser"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> OffhandItems = new(["flashlight", "lantern", "candle", "laser"], StringComparer.OrdinalIgnoreCase);
     private const double DirtBikeTankGallons = 2;
     private const double MotorcycleTankGallons = 4;
     private readonly ConcurrentDictionary<string, Dictionary<string, int>> _inventories = new();
@@ -165,7 +166,7 @@ public sealed partial class RealityWorld
         var runningShoesOn = enabled ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(playerId, "magicRunningShoes") > 0;
         if (hikingShoesOn && runningShoesOn) runningShoesOn = false;
         var offhand = ActiveOffhand(player);
-        if (!enabled && offhand != "none" && InventoryQuantity(playerId, offhand) <= 0) offhand = "none";
+        if (!enabled && offhand != "none" && offhand != "candle" && InventoryQuantity(playerId, offhand) <= 0) offhand = "none";
         var updated = player with
         {
             GodMode = enabled,
@@ -177,6 +178,7 @@ public sealed partial class RealityWorld
             FlashlightOn = offhand == "flashlight",
             LanternOn = offhand == "lantern",
             LaserOn = offhand == "laser",
+            CandleUntilUtc = offhand == "candle" ? player.CandleUntilUtc : null,
             MagicHikingShoesOn = hikingShoesOn,
             MagicRunningShoesOn = runningShoesOn,
             EquippedHat = RetainedEquipment(playerId, player.EquippedHat, HatItems, enabled),
@@ -245,11 +247,18 @@ public sealed partial class RealityWorld
         {
             if (itemType is not null && !OffhandItems.Contains(itemType)) throw new InvalidOperationException("That item cannot be equipped in your offhand.");
             if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
+            var lightingCandle = itemType?.Equals("candle", StringComparison.OrdinalIgnoreCase) == true;
+            if (lightingCandle && !player.GodMode)
+            {
+                if (!RemoveInventory(playerId, "candle", 1)) throw new InvalidOperationException("You need a candle in your inventory.");
+                await SaveInventoryAsync(playerId, cancellationToken);
+            }
             updated = player with
             {
                 FlashlightOn = itemType?.Equals("flashlight", StringComparison.OrdinalIgnoreCase) == true,
                 LanternOn = itemType?.Equals("lantern", StringComparison.OrdinalIgnoreCase) == true,
                 LaserOn = itemType?.Equals("laser", StringComparison.OrdinalIgnoreCase) == true,
+                CandleUntilUtc = lightingCandle ? DateTimeOffset.UtcNow.AddMinutes(1) : null,
                 Version = player.Version + 1
             };
         }
@@ -276,6 +285,7 @@ public sealed partial class RealityWorld
         {
             var player = pair.Value; var updated = player;
             var idle = _lastMovement.TryGetValue(pair.Key, out var lastMove) ? now - lastMove : TimeSpan.Zero;
+            if (player.CandleUntilUtc is { } candleUntil && candleUntil <= now) updated = updated with { CandleUntilUtc = null };
             if (player.WantedLevel > 0)
             {
                 var lastDecay = _lastWantedDecay.GetOrAdd(pair.Key, now);
@@ -311,7 +321,7 @@ public sealed partial class RealityWorld
                     _lastIdleHeal[pair.Key] = now;
                 }
             }
-            if (updated.Stamina == player.Stamina && updated.Water == player.Water && updated.WalletCents == player.WalletCents && updated.HealthHearts == player.HealthHearts && updated.BodyHeat == player.BodyHeat && updated.WantedLevel == player.WantedLevel) continue;
+            if (updated.Stamina == player.Stamina && updated.Water == player.Water && updated.WalletCents == player.WalletCents && updated.HealthHearts == player.HealthHearts && updated.BodyHeat == player.BodyHeat && updated.WantedLevel == player.WantedLevel && updated.CandleUntilUtc == player.CandleUntilUtc) continue;
             updated = updated with { SpeedMetersPerSecond = idle > TimeSpan.FromSeconds(.5) ? 0 : updated.SpeedMetersPerSecond, Version = player.Version + 1 };
             if (await SavePlayerAsync(updated, cancellationToken)) changed.Add(updated);
         }
@@ -375,7 +385,8 @@ public sealed partial class RealityWorld
         return godMode || InventoryQuantity(playerId, itemType) > 0 ? itemType : "none";
     }
 
-    private static string ActiveOffhand(PlayerState player) => player.LaserOn ? "laser" : player.LanternOn ? "lantern" : player.FlashlightOn ? "flashlight" : "none";
+    private static bool CandleActive(PlayerState player, DateTimeOffset? at = null) => player.CandleUntilUtc is { } until && until > (at ?? DateTimeOffset.UtcNow);
+    private static string ActiveOffhand(PlayerState player) => player.LaserOn ? "laser" : player.LanternOn ? "lantern" : player.FlashlightOn ? "flashlight" : CandleActive(player) ? "candle" : "none";
 
     public async Task<PlayerState> ConsumeItemAsync(string playerId, string itemType, CancellationToken cancellationToken = default)
     {
@@ -825,9 +836,9 @@ public sealed partial class RealityWorld
             "gas" => new HashSet<string>(["gallonOfGas", "food", "water", "energyDrink"], StringComparer.OrdinalIgnoreCase),
             "clothing" => new HashSet<string>(["hat", "coolingHat", "warmHat", "tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket", "coolingShorts", "warmingPants", "magicHikingShoes", "magicRunningShoes"], StringComparer.OrdinalIgnoreCase),
             "food" => new HashSet<string>(["food", "water", "energyDrink"], StringComparer.OrdinalIgnoreCase),
-            "convenience" => new HashSet<string>(["food", "water", "energyDrink"], StringComparer.OrdinalIgnoreCase),
+            "convenience" => new HashSet<string>(["food", "water", "energyDrink", "candle"], StringComparer.OrdinalIgnoreCase),
             "weapons" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet"], StringComparer.OrdinalIgnoreCase),
-            "hardware" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "bike", "flashlight", "lantern", "laser", "lockPickSet"], StringComparer.OrdinalIgnoreCase),
+            "hardware" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "bike", "flashlight", "lantern", "candle", "laser", "lockPickSet"], StringComparer.OrdinalIgnoreCase),
             "sportingGoods" => new HashSet<string>(["rock", "ballBearing", "knife", "sword", "slingshot", "crossbow", "arrow", "pistol", "rifle", "bullet", "skateboard", "bike", "magicHikingShoes", "magicRunningShoes", "inflatableRaft"], StringComparer.OrdinalIgnoreCase),
             "vehicles" => new HashSet<string>(["eBike", "dirtBike", "motorcycle", "gallonOfGas"], StringComparer.OrdinalIgnoreCase),
             _ => null
@@ -1038,6 +1049,7 @@ public sealed partial class RealityWorld
         if (player.HatOn) yield return "hat";
         if (player.FlashlightOn) yield return "flashlight";
         if (player.LanternOn) yield return "lantern";
+        if (CandleActive(player)) yield return "candle";
         if (player.LaserOn) yield return "laser";
         if (player.EquippedWeapon != "none") yield return player.EquippedWeapon;
     }
@@ -1311,7 +1323,7 @@ public sealed partial class RealityWorld
         }
         foreach (var player in _players.Values.ToArray())
         {
-            var sight = Weather.IsDay ? 45d : 16d + Math.Max(0, Weather.MoonIllumination) * 18d + (player.FlashlightOn?22:0) + (player.LanternOn?12:0) + (player.LaserOn?30:0);
+            var sight = Weather.IsDay ? 45d : 16d + Math.Max(0, Weather.MoonIllumination) * 18d + (player.FlashlightOn?22:0) + (player.LanternOn?12:0) + (CandleActive(player)?6:0) + (player.LaserOn?30:0);
             _dungeons.TryGetValue(player.LocationId, out var currentDungeon);
             var actors = player.LocationId == "outdoor" ? _actors.Values.ToArray() : currentDungeon?.Actors.ToArray() ?? Array.Empty<ActorState>();
             var target = actors.Select(actor => (Actor: actor, Rating: Relationship(player.Id, actor.Id)))

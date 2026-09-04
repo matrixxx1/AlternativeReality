@@ -122,6 +122,7 @@ public sealed class RealitySocketHub
                         var equipmentRequest = root.Deserialize<SetEquipmentRequest>(SharedJson.Options)!;
                         var equipmentPlayer = await _world.SetEquipmentAsync(characterId, equipmentRequest.Slot, equipmentRequest.ItemType, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = equipmentPlayer }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "updateItemConfiguration":
                         var itemConfiguration = await _world.UpdateItemConfigurationAsync(characterId, root.Deserialize<UpdateItemConfigurationRequest>(SharedJson.Options)!, cancellationToken);
