@@ -164,7 +164,13 @@ public sealed record ServerEventConfiguration(
     int BearDurationMinutes = 10,
     int ServerTimeOffsetMinutes = 0,
     string WeatherMode = "live",
-    double? TemperatureCelsius = null);
+    double? TemperatureCelsius = null,
+    int BrontosaurusIntervalHours = 24,
+    int BrontosaurusDurationMinutes = 10,
+    int StegosaurusIntervalHours = 24,
+    int StegosaurusDurationMinutes = 10,
+    int RaptorIntervalHours = 24,
+    int RaptorDurationMinutes = 10);
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,

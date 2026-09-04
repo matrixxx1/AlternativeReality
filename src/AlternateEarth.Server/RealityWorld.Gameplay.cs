@@ -1076,7 +1076,13 @@ public sealed partial class RealityWorld
             InRange(request.BearDurationMinutes, 1, 120, "Bear duration"),
             InRange(request.ServerTimeOffsetMinutes, -525_600, 525_600, "Server-time offset"),
             request.WeatherMode.Trim().ToLowerInvariant(),
-            request.TemperatureCelsius);
+            request.TemperatureCelsius,
+            InRange(request.BrontosaurusIntervalHours, 1, 168, "Brontosaurus interval"),
+            InRange(request.BrontosaurusDurationMinutes, 1, 120, "Brontosaurus duration"),
+            InRange(request.StegosaurusIntervalHours, 1, 168, "Stegosaurus interval"),
+            InRange(request.StegosaurusDurationMinutes, 1, 120, "Stegosaurus duration"),
+            InRange(request.RaptorIntervalHours, 1, 168, "Raptor interval"),
+            InRange(request.RaptorDurationMinutes, 1, 120, "Raptor duration"));
         if (updated.StreetLightsOnHour == updated.StreetLightsOffHour) throw new InvalidOperationException("Street-light on and off hours must differ.");
         if (updated.WeatherMode is not ("live" or "clear" or "rain" or "snow" or "fog" or "storm")) throw new InvalidOperationException("Weather mode must be live, clear, rain, snow, fog, or storm.");
         if (updated.TemperatureCelsius is < -90 or > 60) throw new InvalidOperationException("Temperature must be between -90 and 60 °C.");
@@ -1222,31 +1228,35 @@ public sealed partial class RealityWorld
             _actors.TryRemove(victim.Id, out _); _actorRoutes.TryRemove(victim.Id, out _);
             combat.Add(new CombatEvent(ufo.Id, victim.Id, "greenBeam", ufo.Position, victim.Position, true, 10, true, $"A UFO struck {victim.Name} with a green beam for 10 hearts.", 0));
         }
-        foreach (var originalPredator in _actors.Values.Where(actor => actor.Subtype is "tRex" or "eventBear").ToArray())
+        foreach (var originalPredator in _actors.Values.Where(actor => IsEventPredator(actor.Subtype)).ToArray())
         {
             var predator = originalPredator; PlayerState? playerVictim = null; ActorState? actorVictim = null; var nearest = 60d;
             foreach (var candidate in _players.Values.Where(item => item.LocationId == "outdoor")) { var distance = predator.Position.Distance2D(candidate.Position); if (distance < nearest) { nearest = distance; playerVictim = candidate; actorVictim = null; } }
-            foreach (var candidate in _actors.Values.Where(item => item.Id != predator.Id && item.Subtype is not ("ufo" or "tRex" or "eventBear") && item.LocationId == "outdoor")) { var distance = predator.Position.Distance2D(candidate.Position); if (distance < nearest) { nearest = distance; actorVictim = candidate; playerVictim = null; } }
+            foreach (var candidate in _actors.Values.Where(item => item.Id != predator.Id && item.Subtype != "ufo" && !IsEventPredator(item.Subtype) && item.LocationId == "outdoor")) { var distance = predator.Position.Distance2D(candidate.Position); if (distance < nearest) { nearest = distance; actorVictim = candidate; playerVictim = null; } }
             var targetPosition = playerVictim?.Position ?? actorVictim?.Position; if (targetPosition is null) continue;
-            if (nearest > 2.5)
+            var maximumAttackRange = EventPredatorMaximumAttackRange(predator.Subtype);
+            if (nearest > maximumAttackRange)
             {
-                var step = Math.Min(nearest, (predator.Subtype == "tRex" ? 6 : 4) * elapsed.TotalSeconds); var dx = (targetPosition.Value.X - predator.Position.X) / nearest; var dy = (targetPosition.Value.Y - predator.Position.Y) / nearest;
+                var step = Math.Min(Math.Max(0, nearest - maximumAttackRange * .82), ActorSpeed(predator.Subtype) * elapsed.TotalSeconds); var dx = (targetPosition.Value.X - predator.Position.X) / nearest; var dy = (targetPosition.Value.Y - predator.Position.Y) / nearest;
                 var next = predator.Position with { X = predator.Position.X + dx * step, Y = predator.Position.Y + dy * step };
                 if (Navigation.CanTraverse(predator.Position, next, true)) { predator = predator with { Position = next, Facing = Math.Abs(dx) > Math.Abs(dy) ? dx > 0 ? "east" : "west" : dy > 0 ? "north" : "south", IsMoving = true, Version = predator.Version + 1 }; _actors[predator.Id] = predator; changedActors[predator.Id] = predator; }
                 continue;
             }
             var victimId = playerVictim?.Id ?? actorVictim!.Id; var cooldownKey = $"{predator.Id}:{victimId}";
             if (_eventAttackCooldowns.TryGetValue(cooldownKey, out var lastAttack) && now - lastAttack < TimeSpan.FromSeconds(1)) continue; _eventAttackCooldowns[cooldownKey] = now;
+            var attack = SelectEventPredatorAttack(predator.Subtype, nearest);
             if (playerVictim is not null)
             {
-                var died = !playerVictim.GodMode && playerVictim.HealthHearts <= 10; var health = playerVictim.GodMode ? Math.Max(1, playerVictim.HealthHearts - 10) : Math.Max(0, playerVictim.HealthHearts - 10);
+                var died = !playerVictim.GodMode && playerVictim.HealthHearts <= attack.Damage; var health = playerVictim.GodMode ? Math.Max(1, playerVictim.HealthHearts - attack.Damage) : Math.Max(0, playerVictim.HealthHearts - attack.Damage);
                 var updated = died ? ResetPlayer(playerVictim with { HealthHearts = 0, Version = playerVictim.Version + 1 }) : playerVictim with { HealthHearts = health, Version = playerVictim.Version + 1 }; await SavePlayerAsync(updated, cancellationToken); changedPlayers.Add(updated);
-                combat.Add(new CombatEvent(predator.Id, playerVictim.Id, "bite", predator.Position, playerVictim.Position, true, 10, died, $"{predator.Name} attacked {playerVictim.Name} for 10 hearts.", updated.HealthHearts));
+                combat.Add(new CombatEvent(predator.Id, playerVictim.Id, attack.Weapon, predator.Position, playerVictim.Position, true, attack.Damage, died, $"{predator.Name} {attack.Description} {playerVictim.Name} for {attack.Damage:0.##} hearts.", updated.HealthHearts));
             }
             else
             {
-                _actors.TryRemove(actorVictim!.Id, out _); _actorRoutes.TryRemove(actorVictim.Id, out _);
-                combat.Add(new CombatEvent(predator.Id, actorVictim.Id, "bite", predator.Position, actorVictim.Position, true, 10, true, $"{predator.Name} killed {actorVictim.Name}.", 0));
+                var health = Math.Max(0, actorVictim!.HealthHearts - attack.Damage); var died = health <= 0;
+                if (died) { _actors.TryRemove(actorVictim.Id, out _); _actorRoutes.TryRemove(actorVictim.Id, out _); }
+                else { var updated = actorVictim with { HealthHearts = health, Version = actorVictim.Version + 1 }; _actors[updated.Id] = updated; changedActors[updated.Id] = updated; }
+                combat.Add(new CombatEvent(predator.Id, actorVictim.Id, attack.Weapon, predator.Position, actorVictim.Position, true, attack.Damage, died, died ? $"{predator.Name} killed {actorVictim.Name}." : $"{predator.Name} {attack.Description} {actorVictim.Name} for {attack.Damage:0.##} hearts.", health));
             }
         }
         foreach (var player in _players.Values.ToArray())
@@ -1290,6 +1300,46 @@ public sealed partial class RealityWorld
                 died ? $"{actor.Name} defeated {player.Name}." : $"{actor.Name} hit {player.Name} for {damage:0.##} heart{(damage == 1 ? "" : "s")} damage.", updated.HealthHearts));
         }
         return new HostileTick(changedActors.Values.ToArray(), changedPlayers, combat);
+    }
+
+    private static bool IsEventPredator(string subtype) => subtype is "tRex" or "eventBear" or "brontosaurus" or "stegosaurus" or "raptor";
+
+    private static double EventPredatorMaximumAttackRange(string subtype) => subtype switch
+    {
+        "brontosaurus" => 10,
+        "tRex" => 7,
+        "stegosaurus" => 5,
+        "raptor" => 1.8,
+        _ => 2.5
+    };
+
+    internal static IReadOnlyList<(string Weapon, double Damage, double RangeMeters)> EventPredatorAttackProfile(string subtype) => subtype switch
+    {
+        "brontosaurus" => new[] { ("brontosaurusTail", 5d, 10d), ("brontosaurusStomp", 10d, 3.5d) },
+        "stegosaurus" => new[] { ("stegosaurusTail", 4d, 5d) },
+        "raptor" => new[] { ("raptorBite", 3d, 1.8d) },
+        "tRex" => new[] { ("trexBite", 7d, 4.5d), ("trexTail", 3d, 7d) },
+        _ => new[] { ("bite", 10d, 2.5d) }
+    };
+
+    private (string Weapon, double Damage, string Description) SelectEventPredatorAttack(string subtype, double distance)
+    {
+        var attacks = EventPredatorAttackProfile(subtype).Where(attack => distance <= attack.RangeMeters).ToArray();
+        var selected = attacks.Length == 1 ? attacks[0] : attacks.Length > 1 ? attacks[NextActorRandom(attacks.Length)] : EventPredatorAttackProfile(subtype)[0];
+        var description = selected.Weapon switch
+        {
+            "brontosaurusTail" => "struck",
+            "brontosaurusStomp" => "stomped",
+            "stegosaurusTail" => "whipped",
+            "trexTail" => "tail-whipped",
+            _ => "bit"
+        };
+        return (selected.Weapon, selected.Damage, description);
+    }
+
+    private int NextActorRandom(int maximum)
+    {
+        lock (_actorRandom) return _actorRandom.Next(maximum);
     }
 
     private void SetActor(string locationId, ActorState actor)

@@ -10,10 +10,12 @@ if (!clientHtml.includes('bodyHeatValue') || !clientHtml.includes('equipmentOffh
   throw new Error('Climate, offhand, or store-flag client controls are missing.');
 if (!clientHtml.includes('Inventory</strong>') || !clientScript.includes("configureInventoryItem") || !clientScript.includes("Take 1"))
   throw new Error('Server-config inventory controls are missing.');
-if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('Drop 1'))
+if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('for(const amount of [1,10,50])'))
   throw new Error('Inventory drop controls are missing.');
 if (!clientHtml.includes('miniMap') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'"))
   throw new Error('Personal flag or mini-map client controls are missing.');
+if (!clientHtml.includes('brontosaurusIntervalConfig') || !clientHtml.includes('stegosaurusIntervalConfig') || !clientHtml.includes('raptorIntervalConfig') || !clientScript.includes('drawBrontosaurusActor') || !clientScript.includes('drawStegosaurusActor') || !clientScript.includes('drawRaptorActor'))
+  throw new Error('Dinosaur event controls or renderers are missing.');
 
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
@@ -41,7 +43,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 30) throw new Error(`Expected protocol 30, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 31) throw new Error(`Expected protocol 31, received ${welcomeA.protocolVersion}.`);
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
   if (playerA.locationId !== 'outdoor' || welcomeA.privateState?.dungeon) throw new Error('Brand-new account did not start at a random outdoor location.');
@@ -161,8 +163,15 @@ try {
   first.socket.send(JSON.stringify({ type: 'say', message: 'Hello from the smoke test' }));
   const [chatA, chatB] = await Promise.all([first.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId), second.waitFor(message => message.type === 'chatSaid' && message.chat.playerId === welcomeA.playerId)]);
   if (chatA.chat.message !== chatB.chat.message || chatA.chat.username !== first.username) throw new Error('Chat did not synchronize.');
+  const raptorStartA=first.messageCount()-1,raptorStartB=second.messageCount()-1;
+  first.socket.send(JSON.stringify({type:'triggerWorldEvent',eventType:'raptors'}));
+  const [raptorEventA,raptorEventB]=await Promise.all([
+    first.waitFor(message=>message.type==='worldEventTriggered'&&message.actors?.every(actor=>actor.subtype==='raptor'),10000,raptorStartA),
+    second.waitFor(message=>message.type==='worldEventTriggered'&&message.actors?.every(actor=>actor.subtype==='raptor'),10000,raptorStartB)
+  ]);
+  if(raptorEventA.actors.length!==3||raptorEventB.actors.length!==3)throw new Error('Raptor event did not synchronize a three-actor pack.');
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
   const flagRemovedStart=second.messageCount()-1;first.socket.close();await second.waitFor(message=>message.type==='objectRemoved'&&message.entityId===ownFlag.entity.id,10000,flagRemovedStart);
-  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,dinosaurEventControls:true,raptorPackSynchronized:raptorEventA.actors.length,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
 } finally { first.socket.close(); second.socket.close(); }

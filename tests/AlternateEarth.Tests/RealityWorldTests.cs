@@ -173,21 +173,42 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Contains("God Mode", denied.Message);
         await world.SetGodModeAsync(player.Id, true);
 
-        var ufo = world.TriggerWorldEvent(player.Id, "ufo");
-        var trex = world.TriggerWorldEvent(player.Id, "trex");
-        var bear = world.TriggerWorldEvent(player.Id, "bear");
+        var ufo = Assert.Single(world.TriggerWorldEvent(player.Id, "ufo"));
+        var trex = Assert.Single(world.TriggerWorldEvent(player.Id, "trex"));
+        var brontosaurus = Assert.Single(world.TriggerWorldEvent(player.Id, "brontosaurus"));
+        var stegosaurus = Assert.Single(world.TriggerWorldEvent(player.Id, "stegosaurus"));
+        var raptors = world.TriggerWorldEvent(player.Id, "raptors");
+        var bear = Assert.Single(world.TriggerWorldEvent(player.Id, "bear"));
         var actorIds = (world.CreateSnapshot().Actors ?? Array.Empty<ActorState>()).Select(actor => actor.Id).ToHashSet();
 
         Assert.Equal("ufo", ufo.Subtype);
         Assert.Equal("tRex", trex.Subtype);
+        Assert.Equal("brontosaurus", brontosaurus.Subtype);
+        Assert.Equal("stegosaurus", stegosaurus.Subtype);
+        Assert.Equal(3, raptors.Count);
+        Assert.All(raptors, raptor => Assert.Equal("raptor", raptor.Subtype));
         Assert.Equal("eventBear", bear.Subtype);
         Assert.Equal(100, ufo.Position.Z);
-        Assert.All(new[] { ufo, trex, bear }, actor =>
+        Assert.All(new[] { ufo, trex, brontosaurus, stegosaurus, bear }.Concat(raptors), actor =>
         {
             Assert.NotNull(actor.EventStartedAtUtc);
             Assert.NotNull(actor.EventEndsAtUtc);
             Assert.Contains(actor.Id, actorIds);
         });
+    }
+
+    [Theory]
+    [InlineData("tRex", "trexBite", 7, 4.5)]
+    [InlineData("tRex", "trexTail", 3, 7)]
+    [InlineData("brontosaurus", "brontosaurusTail", 5, 10)]
+    [InlineData("brontosaurus", "brontosaurusStomp", 10, 3.5)]
+    [InlineData("stegosaurus", "stegosaurusTail", 4, 5)]
+    [InlineData("raptor", "raptorBite", 3, 1.8)]
+    public void DinosaurEventAttacksUseSpeciesSpecificAuthoritativeDamage(string subtype, string weapon, double damage, double range)
+    {
+        var attack = Assert.Single(RealityWorld.EventPredatorAttackProfile(subtype), candidate => candidate.Weapon == weapon);
+        Assert.Equal(damage, attack.Damage);
+        Assert.Equal(range, attack.RangeMeters);
     }
 
     [Fact]
@@ -767,13 +788,16 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var admin = await world.JoinAsync("event-admin", "EventAdmin");
         var other = await world.JoinAsync("event-other", "EventOther");
         await world.SetGodModeAsync(admin.Id, true);
-        var request = new UpdateServerEventsRequest(30, 20, 6, 10, 180, 120, 12, 3, 36, 15, 48, 20, 240, "rain", 11.5);
+        var request = new UpdateServerEventsRequest(30, 20, 6, 10, 180, 120, 12, 3, 36, 15, 48, 20, 240, "rain", 11.5, 18, 11, 30, 12, 8, 9);
 
         var updated = await world.UpdateServerEventConfigurationAsync(admin.Id, request);
 
         Assert.Equal(30, updated.WeatherRefreshMinutes);
         Assert.Equal(240, updated.ServerTimeOffsetMinutes);
         Assert.Equal("rain", updated.WeatherMode);
+        Assert.Equal(18, updated.BrontosaurusIntervalHours);
+        Assert.Equal(30, updated.StegosaurusIntervalHours);
+        Assert.Equal(8, updated.RaptorIntervalHours);
         Assert.Equal(11.5, world.Weather.TemperatureCelsius);
         var persisted = await store.LoadServerEventConfigurationAsync(configuration.Id);
         Assert.Equal(updated, persisted);
