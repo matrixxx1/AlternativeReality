@@ -90,4 +90,27 @@ public sealed class PersistenceTests : IAsyncLifetime
         var resumed=await accounts.SetupOrLoginAsync("player-1","password");
         Assert.Equal(created.AccountId,resumed.AccountId);Assert.Equal(created.CharacterId,resumed.CharacterId);Assert.NotEqual(created.SessionToken,resumed.SessionToken);
     }
+
+    [Fact]
+    public async Task SmokeTestAccountsAreHiddenAndRemovedAfterOneHour()
+    {
+        var store = new SqliteRealityStore(Path.Combine(_directory, "smoke-accounts.db"));
+        await store.InitializeAsync(_reality);
+        await store.CreateAccountAsync(new AccountRecord("keeper-account", "Keeper", "hash", "salt", "keeper-token", "keeper-character"), "Keeper");
+        await store.CreateAccountAsync(new AccountRecord("marked-smoke", "SmokeA1b2c", "hash", "salt", "marked-token", "marked-character"), "SmokeA1b2c", true);
+        await store.CreateAccountAsync(new AccountRecord("legacy-smoke", "SmokeB3d4e", "hash", "salt", "legacy-token", "legacy-character"), "SmokeB3d4e");
+        await store.SaveInventoryAsync(new InventoryState("marked-character", new[] { new ItemStack("rock", 3) }));
+
+        await store.InitializeAsync(_reality); // Migrates legacy SmokeA/SmokeB names to the explicit marker.
+        var roster = await store.LoadAccountRosterAsync();
+        Assert.Single(roster);
+        Assert.Equal("Keeper", roster[0].Username);
+
+        var removed = await store.DeleteExpiredTestAccountsAsync(DateTimeOffset.UtcNow.AddHours(1));
+        Assert.Equal(2, removed.Count);
+        Assert.Null(await store.FindAccountByUsernameAsync("SmokeA1b2c"));
+        Assert.Null(await store.FindAccountByUsernameAsync("SmokeB3d4e"));
+        Assert.NotNull(await store.FindAccountByUsernameAsync("Keeper"));
+        Assert.Empty((await store.LoadInventoryAsync("marked-character")).Items);
+    }
 }

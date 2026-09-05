@@ -163,6 +163,19 @@ public sealed class SqliteRealityStore
         await EnsureColumnAsync(connection, "AccountBases", "Y", "REAL", cancellationToken);
         await EnsureColumnAsync(connection, "AccountBases", "LastActiveUtc", "TEXT", cancellationToken);
         await EnsureColumnAsync(connection, "Accounts", "LastSeenUtc", "TEXT", cancellationToken);
+        await EnsureColumnAsync(connection, "Accounts", "IsTestAccount", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+
+        // Older smoke runs predate the explicit marker. Their generated names are always
+        // SmokeA/SmokeB followed by exactly four hexadecimal characters.
+        command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Accounts
+            SET IsTestAccount = 1
+            WHERE length(Username) = 10
+              AND (Username LIKE 'SmokeA%' OR Username LIKE 'SmokeB%')
+              AND lower(substr(Username, 7, 4)) NOT GLOB '*[^0-9a-f]*';
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
 
         command = connection.CreateCommand();
         command.CommandText = """
@@ -665,12 +678,12 @@ public sealed class SqliteRealityStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken); return await reader.ReadAsync(cancellationToken) ? ReadAccount(reader) : null;
     }
 
-    public async Task CreateAccountAsync(AccountRecord account, string characterName, CancellationToken cancellationToken = default)
+    public async Task CreateAccountAsync(AccountRecord account, string characterName, bool isTestAccount = false, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var accountCommand = connection.CreateCommand(); accountCommand.Transaction = (SqliteTransaction)transaction;
-        accountCommand.CommandText = "INSERT INTO Accounts (Id,Username,PasswordHash,PasswordSalt,SessionTokenHash,ActiveCharacterId,CreatedUtc) VALUES ($id,$u,$h,$s,$t,$c,$now)";
-        accountCommand.Parameters.AddWithValue("$id",account.Id);accountCommand.Parameters.AddWithValue("$u",account.Username);accountCommand.Parameters.AddWithValue("$h",account.PasswordHash);accountCommand.Parameters.AddWithValue("$s",account.PasswordSalt);accountCommand.Parameters.AddWithValue("$t",account.SessionTokenHash);accountCommand.Parameters.AddWithValue("$c",account.ActiveCharacterId);accountCommand.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await accountCommand.ExecuteNonQueryAsync(cancellationToken);
+        accountCommand.CommandText = "INSERT INTO Accounts (Id,Username,PasswordHash,PasswordSalt,SessionTokenHash,ActiveCharacterId,CreatedUtc,IsTestAccount) VALUES ($id,$u,$h,$s,$t,$c,$now,$test)";
+        accountCommand.Parameters.AddWithValue("$id",account.Id);accountCommand.Parameters.AddWithValue("$u",account.Username);accountCommand.Parameters.AddWithValue("$h",account.PasswordHash);accountCommand.Parameters.AddWithValue("$s",account.PasswordSalt);accountCommand.Parameters.AddWithValue("$t",account.SessionTokenHash);accountCommand.Parameters.AddWithValue("$c",account.ActiveCharacterId);accountCommand.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));accountCommand.Parameters.AddWithValue("$test",isTestAccount?1:0);await accountCommand.ExecuteNonQueryAsync(cancellationToken);
         var character = connection.CreateCommand(); character.Transaction = (SqliteTransaction)transaction; character.CommandText="INSERT INTO AccountCharacters (Id,AccountId,Name,CreatedUtc) VALUES ($id,$a,$n,$now)";character.Parameters.AddWithValue("$id",account.ActiveCharacterId);character.Parameters.AddWithValue("$a",account.Id);character.Parameters.AddWithValue("$n",characterName);character.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await character.ExecuteNonQueryAsync(cancellationToken);await transaction.CommitAsync(cancellationToken);
     }
 
@@ -724,9 +737,75 @@ public sealed class SqliteRealityStore
     public async Task<IReadOnlyList<AccountRosterEntry>> LoadAccountRosterAsync(CancellationToken cancellationToken = default)
     {
         var accounts=new List<(string Id,string Username,DateTimeOffset? LastSeen)>();await using var connection=await OpenAsync(cancellationToken);
-        var accountCommand=connection.CreateCommand();accountCommand.CommandText="SELECT Id,Username,LastSeenUtc FROM Accounts ORDER BY Username COLLATE NOCASE";
+        var accountCommand=connection.CreateCommand();accountCommand.CommandText="SELECT Id,Username,LastSeenUtc FROM Accounts WHERE IsTestAccount=0 ORDER BY Username COLLATE NOCASE";
         await using(var reader=await accountCommand.ExecuteReaderAsync(cancellationToken))while(await reader.ReadAsync(cancellationToken))accounts.Add((reader.GetString(0),reader.GetString(1),reader.IsDBNull(2)?null:DateTimeOffset.Parse(reader.GetString(2),System.Globalization.CultureInfo.InvariantCulture)));
         var result=new List<AccountRosterEntry>();foreach(var account in accounts)result.Add(new AccountRosterEntry(account.Id,account.Username,account.LastSeen,await LoadAccountCharactersAsync(account.Id,cancellationToken)));return result;
+    }
+
+    public async Task<IReadOnlyList<ExpiredTestAccount>> DeleteExpiredTestAccountsAsync(DateTimeOffset cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var accounts = new List<(string Id, string Username)>();
+        var readAccounts = connection.CreateCommand(); readAccounts.Transaction = (SqliteTransaction)transaction;
+        readAccounts.CommandText = "SELECT Id,Username FROM Accounts WHERE IsTestAccount=1 AND CreatedUtc<=$cutoff";
+        readAccounts.Parameters.AddWithValue("$cutoff", cutoffUtc.ToString("O"));
+        await using (var reader = await readAccounts.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken)) accounts.Add((reader.GetString(0), reader.GetString(1)));
+
+        var removed = new List<ExpiredTestAccount>();
+        foreach (var account in accounts)
+        {
+            var characterIds = new List<string>();
+            var readCharacters = connection.CreateCommand(); readCharacters.Transaction = (SqliteTransaction)transaction;
+            readCharacters.CommandText = "SELECT Id FROM AccountCharacters WHERE AccountId=$account";
+            readCharacters.Parameters.AddWithValue("$account", account.Id);
+            await using (var reader = await readCharacters.ExecuteReaderAsync(cancellationToken))
+                while (await reader.ReadAsync(cancellationToken)) characterIds.Add(reader.GetString(0));
+
+            foreach (var characterId in characterIds)
+            {
+                foreach (var (table, column) in new[]
+                {
+                    ("Inventories", "OwnerId"), ("PlayerRelationships", "PlayerId"), ("DungeonDiscovery", "PlayerId"),
+                    ("WorldMapDiscovery", "PlayerId"), ("OpenedChests", "PlayerId"), ("PlayerQuests", "PlayerId"),
+                    ("Characters", "Id")
+                })
+                {
+                    var removeCharacterData = connection.CreateCommand(); removeCharacterData.Transaction = (SqliteTransaction)transaction;
+                    removeCharacterData.CommandText = $"DELETE FROM {table} WHERE {column}=$character";
+                    removeCharacterData.Parameters.AddWithValue("$character", characterId);
+                    await removeCharacterData.ExecuteNonQueryAsync(cancellationToken);
+                }
+                var removeOwnedEntities = connection.CreateCommand(); removeOwnedEntities.Transaction = (SqliteTransaction)transaction;
+                removeOwnedEntities.CommandText = "DELETE FROM RealityDeltas WHERE PropertiesJson LIKE $owner";
+                removeOwnedEntities.Parameters.AddWithValue("$owner", $"%\"owner\":\"{characterId}\"%");
+                await removeOwnedEntities.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            foreach (var table in new[] { "AccountBases", "HomeFurniture", "HomeShopListings", "AccountNotices", "HomeCashBalances" })
+            {
+                var removeAccountData = connection.CreateCommand(); removeAccountData.Transaction = (SqliteTransaction)transaction;
+                removeAccountData.CommandText = $"DELETE FROM {table} WHERE AccountId=$account";
+                removeAccountData.Parameters.AddWithValue("$account", account.Id);
+                await removeAccountData.ExecuteNonQueryAsync(cancellationToken);
+            }
+            var removeHomeInventory = connection.CreateCommand(); removeHomeInventory.Transaction = (SqliteTransaction)transaction;
+            removeHomeInventory.CommandText = "DELETE FROM Inventories WHERE OwnerId LIKE $owner";
+            removeHomeInventory.Parameters.AddWithValue("$owner", $"home-items:%:{account.Id}");
+            await removeHomeInventory.ExecuteNonQueryAsync(cancellationToken);
+            var removeCharacters = connection.CreateCommand(); removeCharacters.Transaction = (SqliteTransaction)transaction;
+            removeCharacters.CommandText = "DELETE FROM AccountCharacters WHERE AccountId=$account";
+            removeCharacters.Parameters.AddWithValue("$account", account.Id);
+            await removeCharacters.ExecuteNonQueryAsync(cancellationToken);
+            var removeAccount = connection.CreateCommand(); removeAccount.Transaction = (SqliteTransaction)transaction;
+            removeAccount.CommandText = "DELETE FROM Accounts WHERE Id=$account";
+            removeAccount.Parameters.AddWithValue("$account", account.Id);
+            await removeAccount.ExecuteNonQueryAsync(cancellationToken);
+            removed.Add(new ExpiredTestAccount(account.Id, account.Username, characterIds));
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return removed;
     }
 
     public async Task<bool> CharacterNameExistsAsync(string name,CancellationToken cancellationToken=default)
@@ -777,4 +856,5 @@ public sealed record PublicBaseClaim(string AccountId,string BuildingId,string O
 public sealed record AccountCharacter(string Id,string Name);
 public sealed record BaseAssignment(string BuildingId,WorldPosition? Position);
 public sealed record AccountRosterEntry(string AccountId,string Username,DateTimeOffset? LastSeenUtc,IReadOnlyList<AccountCharacter> Characters);
+public sealed record ExpiredTestAccount(string AccountId,string Username,IReadOnlyList<string> CharacterIds);
 public sealed record HomeShopListingRecord(string ItemType,int Quantity,long UnitPriceCents,string? Quality);

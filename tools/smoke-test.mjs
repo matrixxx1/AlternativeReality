@@ -38,7 +38,7 @@ if (!clientScript.includes('drawRaftRider') || !clientScript.includes("mode==='r
 async function connect(label) {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 4);
   const username = `${label}${suffix}`.slice(0, 10);
-  const response = await fetch(`${baseUrl}/api/account/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: `Smoke-${suffix}-password` }) });
+  const response = await fetch(`${baseUrl}/api/account/setup`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-alternativereality-smoke-test': '1' }, body: JSON.stringify({ username, password: `Smoke-${suffix}-password` }) });
   const setup = await response.json();
   if (!response.ok) throw new Error(setup.message || 'Account setup failed.');
   const cookie = response.headers.get('set-cookie') || '';

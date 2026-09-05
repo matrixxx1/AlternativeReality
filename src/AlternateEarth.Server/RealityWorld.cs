@@ -335,6 +335,37 @@ public sealed partial class RealityWorld
         _activeProbulatorBeams.TryRemove(characterId, out _);
     }
 
+    public void PurgeTestAccounts(IEnumerable<ExpiredTestAccount> accounts)
+    {
+        foreach (var account in accounts)
+        {
+            if (_baseBuildings.TryRemove(account.AccountId, out var buildingId)) _publicBaseClaims.TryRemove(buildingId, out _);
+            foreach (var claim in _publicBaseClaims.Where(pair => pair.Value.AccountId == account.AccountId).Select(pair => pair.Key).ToArray()) _publicBaseClaims.TryRemove(claim, out _);
+            _homeFurniture.TryRemove(account.AccountId, out _);
+            _homeItemStorage.TryRemove(account.AccountId, out _);
+            _homeCash.TryRemove(account.AccountId, out _);
+            foreach (var home in _dungeons.Keys.Where(key => key.StartsWith($"home:{account.AccountId}:", StringComparison.Ordinal)).ToArray()) _dungeons.TryRemove(home, out _);
+
+            foreach (var characterId in account.CharacterIds)
+            {
+                Leave(characterId);
+                _inventories.TryRemove(characterId, out _);
+                _returnPositions.TryRemove(characterId, out _);
+                _pendingPolice.TryRemove(characterId, out _);
+                _lastWantedDecay.TryRemove(characterId, out _);
+                _swatDeployedFor.TryRemove(characterId, out _);
+                _ufoHits.TryRemove(characterId, out _);
+                foreach (var key in _weaponQualities.Keys.Where(key => key.Player == characterId).ToArray()) _weaponQualities.TryRemove(key, out _);
+                foreach (var key in _relationships.Keys.Where(key => key.Player == characterId).ToArray()) _relationships.TryRemove(key, out _);
+                foreach (var key in _revealedWorldAreas.Keys.Where(key => key.Player == characterId).ToArray()) _revealedWorldAreas.TryRemove(key, out _);
+                foreach (var key in _quests.Keys.Where(key => key.Player == characterId).ToArray()) _quests.TryRemove(key, out _);
+                foreach (var key in _questOffers.Keys.Where(key => key.Player == characterId).ToArray()) _questOffers.TryRemove(key, out _);
+                foreach (var key in _lastPlayerAttack.Keys.Where(key => key.Player == characterId).ToArray()) _lastPlayerAttack.TryRemove(key, out _);
+                foreach (var entity in _realityEntities.Where(pair => pair.Value.Properties.GetValueOrDefault("owner") == characterId).Select(pair => pair.Key).ToArray()) _realityEntities.TryRemove(entity, out _);
+            }
+        }
+    }
+
     public async Task LeaveAsync(string characterId, CancellationToken cancellationToken = default)
     {
         _players.TryGetValue(characterId, out var player);
@@ -981,7 +1012,7 @@ public sealed partial class RealityWorld
 
     private void ApplyGeneratedWorld(GeographicDataset generated)
     {
-        var actorEntities = generated.Features.Where(entity => entity.Kind is EntityKind.Animal or EntityKind.Npc).ToArray();
+        var actorEntities = generated.Features.Where(entity => entity.Kind is EntityKind.Animal or EntityKind.Npc).ToList();
         var staticEntities = generated.Features.Where(entity => entity.Kind is not (EntityKind.Animal or EntityKind.Npc)).ToArray();
         _geographic ??= generated with { Features = staticEntities };
         foreach (var entity in staticEntities)
@@ -1066,6 +1097,16 @@ public sealed partial class RealityWorld
             _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, 1) }, DateTimeOffset.MaxValue));
         }
         _navigation = new WorldNavigation(_loadedBounds, _baseEntities.Values.Concat(_realityEntities.Values).ToArray(), _elevationSamples.Values.ToArray());
+        var residentRandom = new Random(StableInt($"additional-residents:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
+        for (var residentIndex = 0; residentIndex < 12; residentIndex++)
+        {
+            var id = $"resident:additional:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{residentIndex}";
+            var candidate = new WorldPosition(generated.Area.Region,
+                bounds.MinimumX + residentRandom.NextDouble() * (bounds.MaximumX - bounds.MinimumX),
+                bounds.MinimumY + residentRandom.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
+            actorEntities.Add(new CanonicalEntity(id, EntityKind.Npc, Navigation.FindNearestWalkable(candidate), Array.Empty<GeometryPoint>(),
+                new Dictionary<string, string> { ["subtype"] = "resident", ["name"] = FriendlyHumanName(id, residentIndex) }));
+        }
         foreach (var entity in actorEntities)
         {
             var safe = Navigation.FindNearestWalkable(entity.Position);

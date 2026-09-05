@@ -7,11 +7,15 @@ namespace AlternateEarth.Server;
 public sealed class AccountService
 {
     public const string CookieName = "alternative_reality_session";
+    public const string SmokeTestHeaderName = "X-AlternativeReality-Smoke-Test";
     private static readonly Regex UsernamePattern = new("^[A-Za-z0-9 -]{3,10}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly SqliteRealityStore _store;
     public AccountService(SqliteRealityStore store) => _store = store;
 
-    public async Task<AccountLogin> SetupOrLoginAsync(string username, string password, CancellationToken cancellationToken = default)
+    public Task<AccountLogin> SetupOrLoginAsync(string username, string password, CancellationToken cancellationToken = default) =>
+        SetupOrLoginAsync(username, password, false, cancellationToken);
+
+    public async Task<AccountLogin> SetupOrLoginAsync(string username, string password, bool isTestAccount, CancellationToken cancellationToken = default)
     {
         username = (username ?? string.Empty).Trim();
         if (!UsernamePattern.IsMatch(username)) throw new InvalidOperationException("Username must be 3-10 characters and contain only letters, numbers, spaces, and dashes.");
@@ -24,7 +28,7 @@ public sealed class AccountService
             if (await _store.CharacterNameExistsAsync(username, cancellationToken)) throw new InvalidOperationException("That character name is already in use on this server.");
             var salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)); var accountId = Guid.NewGuid().ToString("N"); var characterId = Guid.NewGuid().ToString("N");
             existing = new AccountRecord(accountId, username, HashPassword(password, salt), salt, HashToken(token), characterId);
-            await _store.CreateAccountAsync(existing, username, cancellationToken);
+            await _store.CreateAccountAsync(existing, username, isTestAccount, cancellationToken);
         }
         else await _store.UpdateSessionAsync(existing.Id, HashToken(token), cancellationToken);
         return new AccountLogin(existing.Id, existing.ActiveCharacterId, existing.Username, token);

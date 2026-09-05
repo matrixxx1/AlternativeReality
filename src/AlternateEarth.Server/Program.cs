@@ -64,6 +64,7 @@ builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<RealitySocketHub>();
 builder.Services.AddHostedService<WeatherRefreshService>();
 builder.Services.AddHostedService<ActorSimulationService>();
+builder.Services.AddHostedService<SmokeTestAccountCleanupService>();
 
 var app = builder.Build();
 var sourceClientDirectory = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "../AlternateEarth.Client2D"));
@@ -79,6 +80,8 @@ app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSecond
 
 var store = app.Services.GetRequiredService<SqliteRealityStore>();
 await store.InitializeAsync(configuration);
+var expiredSmokeAccounts = await store.DeleteExpiredTestAccountsAsync(DateTimeOffset.UtcNow.AddHours(-1));
+if (expiredSmokeAccounts.Count > 0) app.Logger.LogInformation("Removed {Count} expired smoke-test accounts during startup.", expiredSmokeAccounts.Count);
 var world = app.Services.GetRequiredService<RealityWorld>();
 if (!realitySetup.Required) await world.InitializeAsync();
 
@@ -159,7 +162,8 @@ app.MapPost("/api/account/setup", async (HttpContext context, AccountService acc
     try
     {
         if (setup.Required) return Results.BadRequest(new { message = "Choose the server's starting location before creating an account." });
-        var login = await accounts.SetupOrLoginAsync(request.Username, request.Password, context.RequestAborted);
+        var isSmokeTest = context.Request.Headers.TryGetValue(AccountService.SmokeTestHeaderName, out var marker) && marker.Count == 1 && marker[0] == "1";
+        var login = await accounts.SetupOrLoginAsync(request.Username, request.Password, isSmokeTest, context.RequestAborted);
         context.Response.Cookies.Append(AccountService.CookieName, login.SessionToken, new CookieOptions
         {
             HttpOnly = true,
