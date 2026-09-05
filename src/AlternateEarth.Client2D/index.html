@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=47">
+  <link rel="stylesheet" href="styles.css?v=48">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -52,6 +52,7 @@
     <canvas id="miniMap" width="372" height="220" aria-label="Nearby stores, players, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
     <div id="miniMapTooltip" class="minimap-tooltip" role="tooltip" hidden></div>
     <div class="minimap-legend"><span class="you">● You</span><span class="store">◆ Store</span><span class="player">● Player</span><span class="flag">⚑ Your flag</span><span class="home">⌂ Home</span></div>
+    <div class="minimap-hint">Click your Home or flags to teleport</div>
   </section>
   <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
     <strong>Performance</strong>
@@ -251,6 +252,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=84"></script>
+  <script src="app.js?v=85"></script>
 </body>
 </html>

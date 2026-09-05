@@ -305,6 +305,12 @@ public sealed class RealitySocketHub
                         if (teleport.Expanded) await connection.SendAsync(new { type = "worldExpanded", expanded = true, snapshot = _world.CreateSnapshot() }, cancellationToken);
                         await BroadcastAsync(new { type = "playerTeleported", player = teleport.Player }, null, cancellationToken);
                         break;
+                    case "mapFastTravel":
+                        await connection.SendAsync(new { type = "taskStatus", task = "Preparing mini-map fast travel…" }, cancellationToken);
+                        var fastTravel = await _world.MapFastTravelAsync(characterId, root.Deserialize<MapFastTravelRequest>(SharedJson.Options)!, cancellationToken);
+                        if (fastTravel.Expanded) await connection.SendAsync(new { type = "worldExpanded", expanded = true, snapshot = _world.CreateSnapshot() }, cancellationToken);
+                        await BroadcastAsync(new { type = "playerTeleported", player = fastTravel.Player }, null, cancellationToken);
+                        break;
                     case "say":
                         var chat = _world.Say(characterId, root.Deserialize<SayRequest>(SharedJson.Options)!);
                         await BroadcastAsync(new { type = "chatSaid", chat }, null, cancellationToken);

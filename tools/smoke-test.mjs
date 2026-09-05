@@ -2,7 +2,7 @@ const baseUrl = process.argv[2] || 'http://localhost:5080';
 const socketUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
 const [clientHtml, clientScript] = await Promise.all([
   fetch(baseUrl).then(response => response.text()),
-  fetch(`${baseUrl}/app.js?v=84`).then(response => response.text())
+  fetch(`${baseUrl}/app.js?v=85`).then(response => response.text())
 ]);
 if (!clientHtml.includes('stalkButton') || !clientHtml.includes('continuousAttackButton') || !clientScript.includes('maintainFollowCommand'))
   throw new Error('Continuous Stalk/Attack client controls are missing.');
@@ -12,7 +12,7 @@ if (!clientHtml.includes('Inventory</strong>') || !clientScript.includes("config
   throw new Error('Server-config inventory controls are missing.');
 if (!clientScript.includes("type:'dropItem'") || !clientScript.includes('for(const amount of [1,10,50])'))
   throw new Error('Inventory drop controls are missing.');
-if (!clientHtml.includes('miniMapTooltip') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'") || !clientScript.includes('miniMapMarkerAt') || !clientScript.includes('miniMapMarkers'))
+if (!clientHtml.includes('miniMapTooltip') || !clientHtml.includes('placeFlagButton') || !clientScript.includes("type:'placeFlag'") || !clientScript.includes('miniMapMarkerAt') || !clientScript.includes('miniMapMarkers') || !clientScript.includes("type:'mapFastTravel'"))
   throw new Error('Personal flag, categorized mini-map markers, or hover labels are missing.');
 if (!clientHtml.includes('Active tasks') || !clientScript.includes('setPerformanceTask') || !clientScript.includes('activeOperations') || !clientScript.includes('area-prefetch:'))
   throw new Error('Performance active-task lifecycle or map-area task reporting is missing.');
@@ -61,7 +61,7 @@ const [first, second] = await Promise.all([connect('SmokeA'), connect('SmokeB')]
 try {
   const [welcomeA, welcomeB] = await Promise.all([first.waitFor(message => message.type === 'welcome'), second.waitFor(message => message.type === 'welcome')]);
   let playerA = welcomeA.snapshot.players.find(player => player.id === welcomeA.playerId);
-  if (welcomeA.protocolVersion !== 38) throw new Error(`Expected protocol 38, received ${welcomeA.protocolVersion}.`);
+  if (welcomeA.protocolVersion !== 39) throw new Error(`Expected protocol 39, received ${welcomeA.protocolVersion}.`);
   if (!Number.isFinite(welcomeA.snapshot.weather?.windDirectionDegrees)) throw new Error('Weather snapshot did not include an authoritative wind bearing.');
   if (!welcomeA.snapshot.loadedAreas?.length) throw new Error('Snapshot did not identify its exact loaded geographic areas.');
   if (!welcomeA.privateState?.base) throw new Error('Authenticated player did not receive a persistent base assignment.');
@@ -82,6 +82,13 @@ try {
     second.waitFor(message=>message.type==='objectCreated'&&message.entity?.properties?.label===flagLabel,10000,flagStartB)
   ]);
   if(ownFlag.entity.properties.ownerName!==first.username||sharedFlag.entity.properties.owner!==welcomeA.playerId)throw new Error('Personal flag ownership was not synchronized.');
+  let fastTravelStart=first.messageCount()-1;
+  first.socket.send(JSON.stringify({type:'mapFastTravel',targetType:'home',targetId:welcomeA.privateState.base.buildingId}));
+  await first.waitFor(message=>message.type==='playerTeleported'&&message.player.id===welcomeA.playerId,10000,fastTravelStart);
+  fastTravelStart=first.messageCount()-1;
+  first.socket.send(JSON.stringify({type:'mapFastTravel',targetType:'flag',targetId:ownFlag.entity.id}));
+  const flagReturn=await first.waitFor(message=>message.type==='playerTeleported'&&message.player.id===welcomeA.playerId,10000,fastTravelStart);
+  if(Math.hypot(flagReturn.player.position.x-ownFlag.entity.position.x,flagReturn.player.position.y-ownFlag.entity.position.y)>.01||flagReturn.player.godMode)throw new Error('Non-God mini-map Home/flag fast travel failed.');
   let path = null;
   const playerArea=welcomeA.snapshot.loadedAreas.find(area=>playerA.position.x>=area.minimumX&&playerA.position.x<=area.maximumX&&playerA.position.y>=area.minimumY&&playerA.position.y<=area.maximumY);
   if(!playerArea)throw new Error(`The starting player (${playerA.position.x}, ${playerA.position.y}) was not inside a loaded area: ${JSON.stringify(welcomeA.snapshot.loadedAreas)}.`);
@@ -142,8 +149,9 @@ try {
   const godRide = await first.waitFor(message => message.type === 'movementBlocked' || message.type === 'playerMoved' && message.player.id === welcomeA.playerId && message.player.travelMode === 'dirtBike');
   if (godRide.type === 'movementBlocked' && /gas/i.test(godRide.message)) throw new Error('God Mode did not bypass the dirt-bike gas check.');
   if (godRide.type === 'playerMoved' && godRide.player.dirtBikeGasGallons !== godDirtBike.player.dirtBikeGasGallons) throw new Error('God Mode consumed dirt-bike gas.');
+  const godTeleportStart=first.messageCount()-1;
   first.socket.send(JSON.stringify({ type: 'teleport', x: seenByA.player.position.x + 1, y: seenByA.player.position.y, godMode: false }));
-  const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId);
+  const teleported = await first.waitFor(message => message.type === 'playerTeleported' && message.player.id === welcomeA.playerId,10000,godTeleportStart);
   const walletBeforeBasePurchase=teleported.player.walletCents;
   const unavailableBuildings=new Set([welcomeA.privateState.base.buildingId,welcomeB.privateState.base.buildingId]);
   const buildingsById=new Map(welcomeA.snapshot.baseEntities.filter(entity=>entity.kind==='building').map(entity=>[entity.id,entity]));
@@ -209,5 +217,5 @@ try {
   first.socket.send(JSON.stringify({ type: 'placeObject', objectType: 'must-be-rejected', x: teleported.player.position.x + 1, y: teleported.player.position.y, rotationDegrees: 0 }));
   const rejection = await first.waitFor(message => message.type === 'error' && message.message.includes('disabled'));
   const flagRemovedStart=second.messageCount()-1;first.socket.close();await second.waitFor(message=>message.type==='objectRemoved'&&message.entityId===ownFlag.entity.id,10000,flagRemovedStart);
-  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,dinosaurEventControls:true,raptorPackSynchronized:raptorEventA.actors.length,landOfGiantsSynchronized:giantEventA.actors.length,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,timedCandleLighting:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
+  console.log(JSON.stringify({ ok: true, protocol: welcomeA.protocolVersion, authenticatedAccounts: true, persistentCookie: true, randomOutdoorNewAccountSpawn: true, persistentBaseAssignment: true, personalFlagsSynchronized:true,offlineFlagsHidden:true,miniMapControls:true,miniMapFastTravel:true,dinosaurEventControls:true,raptorPackSynchronized:raptorEventA.actors.length,landOfGiantsSynchronized:giantEventA.actors.length,freeGodModePurchasesAtNormalPrice:true,serverConfigHomeInventory:!!configTake&&!!configGive,safeFurnishedHome:true, furnitureActionsAuthoritative:!!rotated&&!!stored,homeStoragePrivate:true,actors: welcomeA.snapshot.actors.length, travelMode: modeChanged.player.travelMode, weaponEquipmentAuthoritative:true,offhandEquipmentAuthoritative:true,timedCandleLighting:true,climateTelemetry:true,storeCategoryFlags:true,continuousStalkAttackControls:true,identifiedCombatDamage:true,equipmentOwnershipEnforced: true, motorVehicleOwnershipEnforced: true, godModeFuelBypass: true, chatSynchronized: true, movementSynchronized: true, serverPathfinding: true, objectPlacementRejected: rejection.message }, null, 2));
 } finally { first.socket.close(); second.socket.close(); }

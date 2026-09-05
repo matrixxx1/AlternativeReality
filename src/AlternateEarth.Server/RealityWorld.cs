@@ -470,15 +470,55 @@ public sealed partial class RealityWorld
         if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to teleport.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (player.LocationId != "outdoor") throw new InvalidOperationException("Leave the dungeon or Home before teleporting.");
-        var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
-        var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with { X = request.X, Y = request.Y });
+        return await TeleportToOutdoorPositionAsync(characterId, player, request.X, request.Y, false, cancellationToken);
+    }
+
+    public async Task<(PlayerState Player, bool Expanded)> MapFastTravelAsync(string characterId, MapFastTravelRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (player.LocationId != "outdoor") throw new InvalidOperationException("Leave the dungeon, store, or Home before using mini-map fast travel.");
+        var targetType = (request.TargetType ?? string.Empty).Trim();
+        var targetId = (request.TargetId ?? string.Empty).Trim();
+        WorldPosition target;
+        if (targetType.Equals("home", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!_playerAccounts.TryGetValue(characterId, out var accountId) ||
+                !_baseBuildings.TryGetValue(accountId, out var buildingId) ||
+                !string.Equals(buildingId, targetId, StringComparison.Ordinal))
+                throw new InvalidOperationException("That Home is not assigned to your account.");
+            var door = _baseEntities.Values.FirstOrDefault(entity => entity.Kind == EntityKind.Door && entity.Properties.GetValueOrDefault("buildingId") == buildingId)
+                ?? throw new InvalidOperationException("Your Home entrance is not available yet.");
+            target = door.Position;
+        }
+        else if (targetType.Equals("flag", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!_realityEntities.TryGetValue(targetId, out var flag) || !IsPersonalFlag(flag) ||
+                !string.Equals(flag.Properties.GetValueOrDefault("owner"), characterId, StringComparison.Ordinal))
+                throw new InvalidOperationException("That flag does not belong to you.");
+            target = flag.Position;
+        }
+        else throw new InvalidOperationException("Mini-map fast travel is available only for your Home and personal flags.");
+
+        return await TeleportToOutdoorPositionAsync(characterId, player, target.X, target.Y, true, cancellationToken);
+    }
+
+    private async Task<(PlayerState Player, bool Expanded)> TeleportToOutdoorPositionAsync(string characterId, PlayerState player,
+        double x, double y, bool normalizeTravelMode, CancellationToken cancellationToken)
+    {
+        var expanded = await EnsureAreaLoadedAsync(x, y, cancellationToken);
+        var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with { X = x, Y = y });
         var destination = Navigation.IsBlocked(requested.X, requested.Y) || Navigation.TerrainAt(requested.X, requested.Y) == TerrainType.DeepWater
             ? Navigation.FindNearestWalkable(requested)
             : requested with { Z = Navigation.ElevationAt(requested.X, requested.Y) };
+        var terrain = Navigation.TerrainAt(destination.X, destination.Y);
+        var travelMode = normalizeTravelMode && !WorldNavigation.SupportsTravelMode(terrain, player.TravelMode)
+            ? TravelMode.Walk
+            : player.TravelMode;
         var updated = player with
         {
             Position = destination,
-            Terrain = Navigation.TerrainAt(destination.X, destination.Y),
+            Terrain = terrain,
+            TravelMode = travelMode,
             SpeedMetersPerSecond = 0,
             Version = player.Version + 1
         };

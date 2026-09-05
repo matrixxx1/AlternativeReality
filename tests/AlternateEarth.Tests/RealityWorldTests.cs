@@ -739,6 +739,30 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MiniMapFastTravelAllowsOnlyPlayersOwnHomeAndFlagsWithoutGodMode()
+    {
+        var configuration = new RealityConfiguration("map-fast-travel", "Map Fast Travel", 227, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "map-fast-travel.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("fast-account", "Traveler", "hash", "salt", "token", "fast-player"), "Traveler");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("fast-home", region, 30, 30))), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("fast-player", "Traveler", "fast-account");
+        var flag = await world.PlaceFlagAsync(player.Id, new PlaceFlagRequest(player.Position.X, player.Position.Y, "Return point"));
+        var home = Assert.IsType<BaseState>(world.GetPrivateState(player.Id).Base);
+
+        var atHome = await world.MapFastTravelAsync(player.Id, new MapFastTravelRequest("home", home.BuildingId));
+        var atFlag = await world.MapFastTravelAsync(player.Id, new MapFastTravelRequest("flag", flag.Id));
+
+        Assert.False(player.GodMode);
+        Assert.InRange(atHome.Player.Position.Distance2D(home.Position), 0, 100);
+        Assert.InRange(atFlag.Player.Position.Distance2D(flag.Position), 0, .001);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.MapFastTravelAsync(player.Id, new MapFastTravelRequest("home", "somebody-elses-home")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.MapFastTravelAsync("unknown-player", new MapFastTravelRequest("flag", flag.Id)));
+    }
+
+    [Fact]
     public async Task HomeStorageChestTransfersStacksWithoutCapacityLimit()
     {
         var configuration = new RealityConfiguration("home-item-storage", "Home Item Storage", 222, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

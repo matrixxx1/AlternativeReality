@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 38;
+    public const int Version = 39;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -14,6 +14,7 @@ public sealed record PathRequest(double X, double Y, long Sequence);
 public sealed record SetTravelModeRequest(TravelMode Mode);
 public sealed record RebuildAreaRequest(bool GodMode);
 public sealed record TeleportRequest(double X, double Y, bool GodMode);
+public sealed record MapFastTravelRequest(string TargetType, string TargetId);
 public sealed record SayRequest(string Message);
 public sealed record SetGodModeRequest(bool Enabled);
 public sealed record TriggerWorldEventRequest(string EventType);

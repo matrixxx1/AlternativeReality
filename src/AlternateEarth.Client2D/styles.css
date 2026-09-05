@@ -147,6 +147,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .minimap-panel canvas { display:block; width:100%; height:auto; max-height:220px; background:#07120f; border:2px solid #6e5730; image-rendering:auto; }
 .minimap-legend { display:flex; flex-wrap:wrap; gap:5px 12px; margin-top:7px; color:#bfcabd; font:700 9px monospace; }
 .minimap-legend .you { color:#fff5a6; }.minimap-legend .store { color:#f2ce65; }.minimap-legend .player { color:#65d9ef; }.minimap-legend .flag { color:#ef6258; }.minimap-legend .home { color:#8ff09f; }
+.minimap-hint { margin-top:5px; color:#8fa198; font:700 9px monospace; }
 .minimap-tooltip { position:absolute; z-index:5; max-width:260px; pointer-events:none; padding:6px 8px; color:#fff8d8; background:rgba(17,24,20,.97); border:1px solid #d9b55c; box-shadow:2px 2px 7px rgba(0,0,0,.55); font:700 10px/1.35 monospace; white-space:normal; }
 .active-events-panel { padding:10px 12px; border-color:#e06b50; box-shadow:0 0 0 2px #5d2e23,3px 4px 0 rgba(0,0,0,.35); }
 .active-events-heading,.active-event-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
