@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=51">
+  <link rel="stylesheet" href="styles.css?v=52">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -125,6 +125,13 @@
         <input id="homeMoneyAmount" type="number" min="0.01" step="0.01" value="1.00" aria-label="Money amount">
         <button id="depositHomeMoney" type="button">Deposit</button><button id="withdrawHomeMoney" type="button">Withdraw</button>
       </div>
+      <nav class="home-storage-tabs" role="tablist" aria-label="Home storage item categories">
+        <button type="button" role="tab" data-home-storage-tab="vehicle" class="active">Vehicles</button>
+        <button type="button" role="tab" data-home-storage-tab="weapon">Weapons</button>
+        <button type="button" role="tab" data-home-storage-tab="ammo">Ammo</button>
+        <button type="button" role="tab" data-home-storage-tab="quest">Quest items</button>
+        <button type="button" role="tab" data-home-storage-tab="misc">Misc</button>
+      </nav>
       <div class="home-item-storage-columns">
         <div><strong>Backpack</strong><div id="backpackStorageItems" class="storage-transfer-items"></div></div>
         <div><strong>Chest</strong><div id="chestStorageItems" class="storage-transfer-items"></div></div>
@@ -200,17 +207,28 @@
   <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
     <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
     <nav class="server-config-tabs" role="tablist" aria-label="Server configuration sections">
-      <button type="button" role="tab" data-server-config-tab="inventory" class="active">Inventory Items</button>
+      <button type="button" role="tab" data-server-config-tab="vehicles" class="active">Vehicles</button>
+      <button type="button" role="tab" data-server-config-tab="weapons">Weapons</button>
+      <button type="button" role="tab" data-server-config-tab="ammo">Ammo</button>
       <button type="button" role="tab" data-server-config-tab="quests">Quest Items</button>
+      <button type="button" role="tab" data-server-config-tab="misc">Misc</button>
       <button type="button" role="tab" data-server-config-tab="movement">Terrain &amp; Movement</button>
       <button type="button" role="tab" data-server-config-tab="events">Server Events</button>
     </nav>
-    <section class="server-config-page" data-server-config-page="inventory">
-      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Accuracy</strong><strong>Attack sec</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
+    <section class="server-config-page" data-server-config-page="vehicles">
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigVehicles"></div></div>
+    </section>
+    <section class="server-config-page" data-server-config-page="weapons" hidden>
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigWeapons"></div></div>
+    </section>
+    <section class="server-config-page" data-server-config-page="ammo" hidden>
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigAmmo"></div></div>
     </section>
     <section class="server-config-page" data-server-config-page="quests" hidden>
-      <p>Items currently used by generated quests. Take 1 adds the item to Home inventory; Give 1 removes it from Home inventory first, then the backpack.</p>
-      <div id="serverConfigQuestItems" class="server-config-quest-items"></div>
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigQuestItems"></div></div>
+    </section>
+    <section class="server-config-page" data-server-config-page="misc" hidden>
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigMisc"></div></div>
     </section>
     <section class="server-config-page" data-server-config-page="movement" hidden>
       <p>Movement is additive: base speed + terrain + travel mode + every active item modifier. Dynamic characters and treasure are hidden beyond visible range; geographic scenery remains visible.</p>
@@ -277,6 +295,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=90"></script>
+  <script src="app.js?v=91"></script>
 </body>
 </html>

@@ -771,7 +771,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await store.InitializeAsync(configuration);
         await store.CreateAccountAsync(new AccountRecord("storage-account", "Storage", "hash", "salt", "token", "storage-player"), "Storage");
         await store.SaveInventoryAsync(new InventoryState("storage-player", new[] { new ItemStack("rock", 50), new ItemStack("ballBearing", 25) }));
-        await store.SaveInventoryAsync(new InventoryState("home-items:home-item-storage:storage-account", new[] { new ItemStack("quest:first", 1), new ItemStack("quest:second", 1), new ItemStack("quest:third", 1), new ItemStack("quest:fourth", 1) }));
+        await store.SaveInventoryAsync(new InventoryState("home-items:home-item-storage:storage-account", new[] { new ItemStack("quest:first", 1), new ItemStack("quest:second", 1), new ItemStack("quest:third", 1), new ItemStack("quest:fourth", 1), new ItemStack("eBike", 1, CarriedInBackpack: false) }));
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("storage-home", region, 20, 20))), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
         var player = await world.JoinAsync("storage-player", "Storage", "storage-account");
@@ -791,11 +791,16 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(35, withdrawn.PrivateState.HomeItemStorage!.Items.Single(item => item.ItemType == "rock").Quantity);
         var persisted = await store.LoadInventoryAsync("home-items:home-item-storage:storage-account");
         Assert.Equal(35, persisted.Items.Single(item => item.ItemType == "rock").Quantity);
+        var vehicleTaken = await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "eBike", 1, false));
+        Assert.Contains(vehicleTaken.PrivateState.Inventory.Items, item => item.ItemType == "eBike" && item.Quantity == 1);
+        Assert.DoesNotContain(vehicleTaken.PrivateState.HomeItemStorage!.Items, item => item.ItemType == "eBike");
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:first", 1, false));
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:second", 1, false));
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:third", 1, false));
         var questLimit = await Assert.ThrowsAsync<InvalidOperationException>(() => world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:fourth", 1, false)));
         Assert.Contains("quest-item slots", questLimit.Message);
+        await world.ExitDungeonAsync(player.Id);
+        Assert.Equal(TravelMode.EBike, (await world.SetTravelModeAsync(player.Id, TravelMode.EBike)).TravelMode);
     }
 
     [Fact]
