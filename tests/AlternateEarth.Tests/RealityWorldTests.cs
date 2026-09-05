@@ -1291,6 +1291,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.InRange(world.ConfiguredSpeedMetersPerSecond(pilot, TerrainType.Pavement) * 2.236936, 299, 301);
         var switchedOn = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
         Assert.Equal("Probulator active", switchedOn.Event.StatusEffect);
+        Assert.Equal(8, switchedOn.Event.Start.Distance2D(switchedOn.Event.End), 3);
+        Assert.Contains("downward", switchedOn.Event.Message, StringComparison.OrdinalIgnoreCase);
         Assert.True(switchedOn.Event.StatusEffectUntilUtc > DateTimeOffset.UtcNow.AddYears(100));
         var switchedOff = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
         Assert.Equal("Probulator inactive", switchedOff.Event.StatusEffect);

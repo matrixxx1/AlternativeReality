@@ -42,7 +42,7 @@ public sealed partial class RealityWorld
         new("rocket","Rocket","Rocket-launcher ammunition",0,0,50_000,200_000,WeightPounds:5),
         new("grenade","Grenade","Thrown explosive with an eight-meter blast radius",30,35,3_000,10_000,true,false,"grenade",WeightPounds:.9,Category:InventoryCategory.Weapon,Accuracy:.7),
         new("molotovCocktail","Molotov cocktail","Thrown incendiary with a six-meter fire radius lasting ten seconds",10,30,500,2_500,true,false,"molotovCocktail",WeightPounds:1.5,Category:InventoryCategory.Weapon,Accuracy:.68),
-        new("probulator","Probulator","UFO-mounted ten-second abduction beam",4,100,0,0,false,true,WeightPounds:0,Category:InventoryCategory.Weapon,CarriedInBackpack:false,Accuracy:.92),
+        new("probulator","Probulator","Continuous vertical cone-shaped abduction beam beneath the UFO",4,8,0,0,false,true,WeightPounds:0,Category:InventoryCategory.Weapon,CarriedInBackpack:false,Accuracy:.92),
         new("gorillaSmash","Gorilla smash","Stronghold gorilla melee attack",6,2.5,0,0,false,true,WeightPounds:0,Category:InventoryCategory.Weapon,CarriedInBackpack:false,Accuracy:.9,AttackIntervalSeconds:1.2),
         new("bullet","Bullet","Pistol and rifle ammunition",0,0,25,500,WeightPounds:.04),
         new("skateboard","Skateboard","Fast paved-surface travel",0,0,20_000,30_000,true,true,null,10.5,WeightPounds:5),
@@ -1207,16 +1207,8 @@ public sealed partial class RealityWorld
         if (player.LocationId != "outdoor") throw new InvalidOperationException("The UFO and its Probulator can only be used outdoors.");
         var configuration = _itemConfigurations["probulator"];
         var distance = player.Position.Distance2D(targetPosition);
-        if (distance > configuration.RangeMeters) throw new InvalidOperationException($"{targetName} is beyond the {configuration.RangeMeters:0.#}-meter Probulator range.");
-        var dx = targetPosition.X - player.Position.X; var dy = targetPosition.Y - player.Position.Y;
-        var length = Math.Max(.001, Math.Sqrt(dx * dx + dy * dy)); dx /= length; dy /= length;
-        var accuracy = Math.Clamp(configuration.Accuracy * (1 - Math.Clamp(distance / Math.Max(1, configuration.RangeMeters), 0, 1) * .7), .01, 1);
-        if (RandomNumberGenerator.GetInt32(1_000_000) >= accuracy * 1_000_000)
-        {
-            var missRadians = (8 + RandomNumberGenerator.GetInt32(18)) * Math.PI / 180 * (RandomNumberGenerator.GetInt32(2) == 0 ? -1 : 1);
-            (dx, dy) = (dx * Math.Cos(missRadians) - dy * Math.Sin(missRadians), dx * Math.Sin(missRadians) + dy * Math.Cos(missRadians));
-        }
-        return StartProbulator(player, dx, dy, $"{player.Name} aimed and switched on the Probulator.");
+        if (distance > configuration.RangeMeters) throw new InvalidOperationException($"Fly within {configuration.RangeMeters:0.#} meters of {targetName} so the Probulator cone can reach them.");
+        return StartProbulator(player, $"{player.Name} lowered and switched on the Probulator.");
     }
 
     public CombatResult ToggleProbulator(string playerId, ToggleProbulatorRequest request)
@@ -1230,18 +1222,16 @@ public sealed partial class RealityWorld
             return new CombatResult(new CombatEvent(playerId, string.Empty, "probulator", player.Position, player.Position, false, 0, false,
                 $"{player.Name} switched off the Probulator.", StatusEffect: "Probulator inactive", StatusEffectUntilUtc: now), player, null, GetInventoryState(playerId), null, null);
         }
-        var length = Math.Sqrt(request.DirectionX * request.DirectionX + request.DirectionY * request.DirectionY);
-        var dx = length > .001 && double.IsFinite(length) ? request.DirectionX / length : 0;
-        var dy = length > .001 && double.IsFinite(length) ? request.DirectionY / length : -1;
-        return StartProbulator(player, dx, dy, $"{player.Name} switched on the Probulator.");
+        _ = request;
+        return StartProbulator(player, $"{player.Name} switched on the downward Probulator cone.");
     }
 
-    private CombatResult StartProbulator(PlayerState player, double dx, double dy, string message)
+    private CombatResult StartProbulator(PlayerState player, string message)
     {
         var configuration = _itemConfigurations["probulator"];
         var now = DateTimeOffset.UtcNow; var ends = DateTimeOffset.MaxValue; var beamId = $"probulator:{player.Id}:{Guid.NewGuid():N}";
-        _activeProbulatorBeams[player.Id] = new ActiveProbulatorBeam(beamId, player.Id, dx, dy, configuration.RangeMeters, now, ends);
-        var end = player.Position with { X = player.Position.X + dx * configuration.RangeMeters, Y = player.Position.Y + dy * configuration.RangeMeters };
+        _activeProbulatorBeams[player.Id] = new ActiveProbulatorBeam(beamId, player.Id, configuration.RangeMeters, now, ends);
+        var end = player.Position with { X = player.Position.X + configuration.RangeMeters };
         return new CombatResult(new CombatEvent(player.Id, string.Empty, "probulator", player.Position, end, false, 0, false, message, StatusEffect: "Probulator active", StatusEffectUntilUtc: ends),
             player, null, GetInventoryState(player.Id), null, null);
     }
@@ -1582,13 +1572,7 @@ public sealed partial class RealityWorld
                 continue;
             }
             var damage = _itemConfigurations.GetValueOrDefault("probulator")?.Damage ?? 4;
-            bool Touches(WorldPosition position)
-            {
-                var x = position.X - pilot.Position.X; var y = position.Y - pilot.Position.Y;
-                var along = x * beam.DirectionX + y * beam.DirectionY;
-                if (along < 0 || along > beam.RangeMeters) return false;
-                return Math.Abs(x * beam.DirectionY - y * beam.DirectionX) <= 2.5;
-            }
+            bool Touches(WorldPosition position) => pilot.Position.Distance2D(position) <= beam.RadiusMeters;
             foreach (var target in _players.Values.Where(target => target.Id != pilot.Id && target.LocationId == "outdoor" && Configuration.PvpEnabled && Touches(target.Position)).ToArray())
             {
                 if (!_probulatorHits.TryAdd($"{beam.Id}:{target.Id}", 0)) continue;
@@ -2039,7 +2023,7 @@ public sealed partial class RealityWorld
 
 public sealed record HostileTick(IReadOnlyList<ActorState> Actors, IReadOnlyList<PlayerState> Players, IReadOnlyList<CombatEvent> Combat, IReadOnlyList<string>? RemovedWorldObjectIds = null);
 public sealed record CombatResult(CombatEvent Event, PlayerState Attacker, PlayerState? TargetPlayer, InventoryState Inventory, RelationshipState? Relationship, DungeonState? Dungeon, IReadOnlyList<CombatEvent>? Consequences = null);
-public sealed record ActiveProbulatorBeam(string Id, string PlayerId, double DirectionX, double DirectionY, double RangeMeters, DateTimeOffset StartedAtUtc, DateTimeOffset EndsAtUtc);
+public sealed record ActiveProbulatorBeam(string Id, string PlayerId, double RadiusMeters, DateTimeOffset StartedAtUtc, DateTimeOffset EndsAtUtc);
 public sealed record ActiveFireZone(string Id, string OwnerId, string LocationId, WorldPosition Position, double RadiusMeters, DateTimeOffset EndsAtUtc, DateTimeOffset LastDamageAtUtc);
 public sealed record BurningTarget(string TargetId, string OwnerId, bool IsPlayer, DateTimeOffset EndsAtUtc, DateTimeOffset LastDamageAtUtc);
 public sealed record ChestOpenResult(PlayerState Player, ChestContentsState Contents, string Message);

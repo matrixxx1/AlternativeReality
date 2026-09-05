@@ -86,7 +86,10 @@ public sealed partial class RealityWorld
                     SpeedModifierMph = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) && Math.Abs((item.SpeedModifierMph ?? 56.5) - 56.5) < .001
                         ? defaults.SpeedModifierMph
                         : item.SpeedModifierMph ?? defaults.SpeedModifierMph,
-                    Effect = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) ? defaults.Effect : item.Effect,
+                    RangeMeters = item.ItemType.Equals("probulator", StringComparison.OrdinalIgnoreCase) && Math.Abs(item.RangeMeters - 100) < .001
+                        ? defaults.RangeMeters
+                        : item.RangeMeters,
+                    Effect = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) || item.ItemType.Equals("probulator", StringComparison.OrdinalIgnoreCase) ? defaults.Effect : item.Effect,
                     VisibilityModifierMeters = item.VisibilityModifierMeters ?? defaults.VisibilityModifierMeters,
                     WeightPounds = defaults.WeightPounds,
                     Category = defaults.Category,
