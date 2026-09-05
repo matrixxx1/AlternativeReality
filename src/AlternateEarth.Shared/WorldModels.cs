@@ -219,7 +219,8 @@ public sealed record DungeonRoom(double X, double Y, double Width, double Height
 public sealed record DungeonWall(double X1, double Y1, double X2, double Y2, double DoorStart = -1, double DoorEnd = -1);
 public sealed record TreasureChestState(string Id, WorldPosition Position, string LocationId, DateTimeOffset? ExpiresAtUtc = null, bool IsOpened = false);
 public sealed record ChestContentsState(string ChestId, long MoneyCents, IReadOnlyList<ItemStack> Items);
-public sealed record LootDropState(string Id, WorldPosition Position, string LocationId, long MoneyCents, IReadOnlyList<ItemStack> Items, DateTimeOffset ExpiresAtUtc);
+public sealed record LootDropState(string Id, WorldPosition Position, string LocationId, long MoneyCents, IReadOnlyList<ItemStack> Items, DateTimeOffset ExpiresAtUtc,
+    string DropKind = "loot", string? OwnerName = null, string? OwnerId = null);
 public sealed record DungeonState(
     string Id, string BuildingId, double Width, double Height,
     IReadOnlyList<DungeonRoom> Rooms, IReadOnlyList<DungeonWall> Walls,
@@ -252,7 +253,8 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<CanonicalEntity>? HomeStorage = null,
     InventoryState? HomeItemStorage = null,
     IReadOnlyList<QuestState>? Quests = null,
-    bool CanEditHome = false);
+    bool CanEditHome = false,
+    long HomeStorageMoneyCents = 0);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
     WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null);
 
@@ -345,4 +347,5 @@ public sealed record WorldSnapshot(
     IReadOnlyList<WorldBounds>? LoadedAreas = null,
     IReadOnlyList<DoorLockState>? DoorLocks = null,
     DateTimeOffset? DoorLockCycleEndsAtUtc = null,
-    IReadOnlyList<PublicBaseState>? PublicBases = null);
+    IReadOnlyList<PublicBaseState>? PublicBases = null,
+    IReadOnlyList<LootDropState>? Graves = null);

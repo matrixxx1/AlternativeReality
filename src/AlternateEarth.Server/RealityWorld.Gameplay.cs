@@ -132,6 +132,8 @@ public sealed partial class RealityWorld
     private readonly ConcurrentDictionary<(string Player, string Area), byte> _revealedWorldAreas = new();
     private readonly ConcurrentDictionary<string, List<CanonicalEntity>> _homeFurniture = new();
     private readonly ConcurrentDictionary<string, Dictionary<string, int>> _homeItemStorage = new();
+    private readonly ConcurrentDictionary<string, long> _homeCash = new();
+    private readonly ConcurrentQueue<LootDropState> _deathDropAnnouncements = new();
     private readonly ConcurrentDictionary<(string Player, string Quest), QuestState> _quests = new();
     private readonly ConcurrentDictionary<(string Player, string Quest), QuestState> _questOffers = new();
     private readonly ConcurrentDictionary<string, PendingPoliceResponse> _pendingPolice = new();
@@ -177,7 +179,8 @@ public sealed partial class RealityWorld
             homeItemStorage = GetHomeItemStorage(homeAccount!);
         }
         var quests = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value).OrderBy(quest => quest.Status).ThenBy(quest => quest.Title).ToArray();
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage, Quests: quests, CanEditHome: canEditHome);
+        var homeStorageMoney = canEditHome && homeAccount is not null ? _homeCash.GetValueOrDefault(homeAccount) : 0;
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage, Quests: quests, CanEditHome: canEditHome, HomeStorageMoneyCents: homeStorageMoney);
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
@@ -350,7 +353,7 @@ public sealed partial class RealityWorld
                     updated = updated with { Stamina = Math.Max(0, updated.Stamina - (.05 + (updated.BodyHeat - 85) / 100) * elapsed.TotalSeconds) };
                 if (updated.BodyHeat <= .001)
                     updated = updated with { HealthHearts = Math.Max(0, updated.HealthHearts - elapsed.TotalSeconds / 120) };
-                if (updated.HealthHearts <= 0) updated = ResetPlayer(updated);
+                if (updated.HealthHearts <= 0) updated = await DieAndResetPlayerAsync(updated, cancellationToken);
                 else if (idle >= TimeSpan.FromSeconds(30) && updated.BodyHeat > 0 && player.HealthHearts < player.MaximumHealthHearts &&
                     (!_lastIdleHeal.TryGetValue(pair.Key, out var lastHeal) || now - lastHeal >= TimeSpan.FromSeconds(30)))
                 {
@@ -1132,7 +1135,7 @@ public sealed partial class RealityWorld
         if (playerTarget is not null && hit)
         {
             var remaining = playerTarget.GodMode ? Math.Max(1, targetHealth - damage) : Math.Max(0, targetHealth - damage);
-            updatedTarget = died ? ResetPlayer(playerTarget with { HealthHearts = 0 }) : playerTarget with { HealthHearts = remaining, Version = playerTarget.Version + 1 };
+            updatedTarget = died ? await DieAndResetPlayerAsync(playerTarget with { HealthHearts = 0 }, cancellationToken) : playerTarget with { HealthHearts = remaining, Version = playerTarget.Version + 1 };
             await SavePlayerAsync(updatedTarget, cancellationToken);
         }
         if (!player.GodMode && ammo is not null) await SaveInventoryAsync(playerId, cancellationToken);
@@ -1169,7 +1172,7 @@ public sealed partial class RealityWorld
             {
                 var blastDistance = target.Position.Distance2D(targetPosition); var splash = ShieldReducedDamage(target, Math.Max(1, baseDamage - (baseDamage - 1) * blastDistance / radius));
                 var remaining = target.GodMode ? Math.Max(1, target.HealthHearts - splash) : Math.Max(0, target.HealthHearts - splash); var blastKilled = remaining <= 0;
-                var blastTarget = blastKilled ? ResetPlayer(target with { HealthHearts = 0 }) : target with { HealthHearts = remaining, Version = target.Version + 1 };
+                var blastTarget = blastKilled ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { HealthHearts = remaining, Version = target.Version + 1 };
                 await SavePlayerAsync(blastTarget, cancellationToken);
                 consequences.Add(new CombatEvent(player.Id, target.Id, weapon + "Explosion", targetPosition, target.Position, true, splash, blastKilled, $"{target.Name} took {splash:0.##} hearts of blast damage.", blastTarget.HealthHearts));
             }
@@ -1181,7 +1184,7 @@ public sealed partial class RealityWorld
             {
                 giver = giver with { Position = updatedAttacker.Position with { X = updatedAttacker.Position.X + 4 }, EquippedWeapon = "pistol", Version = giver.Version + 1 }; _actors[giver.Id] = giver;
                 for (var shot = 0; shot < 15; shot++) consequences.Add(new CombatEvent(giver.Id, updatedAttacker.Id, "pistol", giver.Position, updatedAttacker.Position, true, 1, shot == 14, $"{giver.Name} shot {updatedAttacker.Name} for 1 heart after the pet was killed."));
-                updatedAttacker = ResetPlayer(updatedAttacker with { HealthHearts = 0, Version = updatedAttacker.Version + 1 });
+                updatedAttacker = await DieAndResetPlayerAsync(updatedAttacker with { HealthHearts = 0, Version = updatedAttacker.Version + 1 }, cancellationToken);
                 await SavePlayerAsync(updatedAttacker, cancellationToken);
             }
         }
@@ -1577,7 +1580,7 @@ public sealed partial class RealityWorld
                 var original = target.Position; var drop = FindNearbySafeDrop(target.Position, $"{beam.Id}:{target.Id}");
                 var defendedDamage = ShieldReducedDamage(target, damage);
                 var health = target.GodMode ? Math.Max(1, target.HealthHearts - defendedDamage) : Math.Max(0, target.HealthHearts - defendedDamage); var died = health <= 0;
-                var updated = died ? ResetPlayer(target with { HealthHearts = 0 }) : target with { Position = drop, Terrain = Navigation.TerrainAt(drop.X, drop.Y), TravelMode = TravelMode.Walk, EquippedWeapon = target.EquippedWeapon == "probulator" ? "fist" : target.EquippedWeapon, SpeedMetersPerSecond = 0, HealthHearts = health, Version = target.Version + 1 };
+                var updated = died ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { Position = drop, Terrain = Navigation.TerrainAt(drop.X, drop.Y), TravelMode = TravelMode.Walk, EquippedWeapon = target.EquippedWeapon == "probulator" ? "fist" : target.EquippedWeapon, SpeedMetersPerSecond = 0, HealthHearts = health, Version = target.Version + 1 };
                 if (!await SavePlayerAsync(updated, cancellationToken)) continue;
                 changedPlayers.Add(updated);
                 var dialogue = ProbulatorDialogue();
@@ -1621,7 +1624,7 @@ public sealed partial class RealityWorld
                 if (IsFireproof(target)) { _burningTargets.TryRemove(pair.Key, out _); continue; }
                 var burnDamage = ShieldReducedDamage(target, 2);
                 var health = target.GodMode ? Math.Max(1, target.HealthHearts - burnDamage) : Math.Max(0, target.HealthHearts - burnDamage); var died = health <= 0;
-                var updated = died ? ResetPlayer(target with { HealthHearts = 0 }) : target with { HealthHearts = health, Version = target.Version + 1 };
+                var updated = died ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { HealthHearts = health, Version = target.Version + 1 };
                 if (!await SavePlayerAsync(updated, cancellationToken)) continue;
                 if (died) _burningTargets.TryRemove(pair.Key, out _); changedPlayers.Add(updated); combat.Add(new CombatEvent(burning.OwnerId, target.Id, "molotovFire", target.Position, target.Position, true, burnDamage, died, $"{target.Name} took {burnDamage:0.##} hearts of fire damage.", updated.HealthHearts, StatusEffect: "Burning", StatusEffectUntilUtc: burning.EndsAtUtc));
             }
@@ -1688,7 +1691,7 @@ public sealed partial class RealityWorld
             {
                 var defendedDamage = ShieldReducedDamage(playerVictim, attack.Damage);
                 var died = !playerVictim.GodMode && playerVictim.HealthHearts <= defendedDamage; var health = playerVictim.GodMode ? Math.Max(1, playerVictim.HealthHearts - defendedDamage) : Math.Max(0, playerVictim.HealthHearts - defendedDamage);
-                var updated = died ? ResetPlayer(playerVictim with { HealthHearts = 0, Version = playerVictim.Version + 1 }) : playerVictim with { HealthHearts = health, Version = playerVictim.Version + 1 }; await SavePlayerAsync(updated, cancellationToken); changedPlayers.Add(updated);
+                var updated = died ? await DieAndResetPlayerAsync(playerVictim with { HealthHearts = 0, Version = playerVictim.Version + 1 }, cancellationToken) : playerVictim with { HealthHearts = health, Version = playerVictim.Version + 1 }; await SavePlayerAsync(updated, cancellationToken); changedPlayers.Add(updated);
                 combat.Add(new CombatEvent(predator.Id, playerVictim.Id, attack.Weapon, predator.Position, playerVictim.Position, true, defendedDamage, died, $"{predator.Name} {attack.Description} {playerVictim.Name} for {defendedDamage:0.##} hearts.", updated.HealthHearts));
             }
             else
@@ -1750,7 +1753,7 @@ public sealed partial class RealityWorld
             var weaponDamage = (weaponConfiguration?.Damage ?? .5) * WeaponQualityMultiplier(actor.WeaponQuality);
             var damage = hit ? ShieldReducedDamage(player, Math.Clamp(weaponDamage + Math.Min(2, hostility * .25), .25, 50)) : 0;
             var health = player.GodMode ? Math.Max(1, player.HealthHearts - damage) : Math.Max(0, player.HealthHearts - damage);
-            var died = hit && health <= 0; var updated = died ? ResetPlayer(player with { HealthHearts = 0 }) : player with { HealthHearts = health, Version = player.Version + 1 };
+            var died = hit && health <= 0; var updated = died ? await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, cancellationToken) : player with { HealthHearts = health, Version = player.Version + 1 };
             if (!await SavePlayerAsync(updated, cancellationToken)) continue;
             changedPlayers.Add(updated);
             var message = shieldDeflected ? $"{player.Name}'s shield deflected {actor.Name}'s {DisplayItem(weapon)}."
@@ -1892,15 +1895,19 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var player) || !_loot.TryGetValue(lootId, out var loot) || loot.LocationId != player.LocationId) throw new InvalidOperationException("Treasure is not available.");
         if (player.Position.Distance2D(loot.Position) > 4) throw new InvalidOperationException("Move closer to the treasure.");
-        if (!CanAddToBackpack(playerId, loot.Items.Select(item => InventoryStack(item.ItemType, item.Quantity)), out var capacityMessage)) throw new InvalidOperationException(capacityMessage + " Store something at Home before collecting this treasure.");
-        _loot.TryRemove(lootId, out _); foreach (var item in loot.Items) AddInventory(playerId, item.ItemType, item.Quantity, item.Quality);
+        if (loot.DropKind != "tombstone" && !CanAddToBackpack(playerId, loot.Items.Select(item => InventoryStack(item.ItemType, item.Quantity)), out var capacityMessage)) throw new InvalidOperationException(capacityMessage + " Store something at Home before collecting this treasure.");
+        if (!_loot.TryRemove(lootId, out loot)) throw new InvalidOperationException("Someone else already collected this treasure.");
+        foreach (var item in loot.Items) AddInventory(playerId, item.ItemType, item.Quantity, item.Quality);
         var updated = player with { WalletCents = player.WalletCents + loot.MoneyCents, Version = player.Version + 1 };
         await SaveInventoryAsync(playerId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
+        if (loot.DropKind == "tombstone") await _store.RemovePersistentLootAsync(loot.Id, cancellationToken);
         var collectedContents = new List<string>();
         if (loot.MoneyCents > 0) collectedContents.Add($"{loot.MoneyCents / 100.0:C}");
         collectedContents.AddRange(loot.Items.Where(item => item.Quantity > 0)
             .Select(item => $"{item.Quantity} × {InventoryDefinition(item.ItemType).DisplayName}"));
-        var message = collectedContents.Count == 0 ? "Collected treasure." : $"Collected {string.Join(", ", collectedContents)}.";
+        var message = collectedContents.Count == 0 ? "The tombstone was empty." : loot.DropKind == "tombstone"
+            ? $"Collected everything from {loot.OwnerName ?? "the fallen player's"} tombstone: {string.Join(", ", collectedContents)}."
+            : $"Collected {string.Join(", ", collectedContents)}.";
         return (updated, GetInventoryState(playerId), message);
     }
 

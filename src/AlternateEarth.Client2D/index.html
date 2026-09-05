@@ -49,9 +49,9 @@
   </section>
   <section id="miniMapPanel" class="panel minimap-panel" data-collapsible="Mini map">
     <strong>Mini map</strong>
-    <canvas id="miniMap" width="372" height="220" aria-label="Nearby stores, players, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
+    <canvas id="miniMap" width="372" height="220" aria-label="Nearby stores, players, graves, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
     <div id="miniMapTooltip" class="minimap-tooltip" role="tooltip" hidden></div>
-    <div class="minimap-legend"><span class="you">● You</span><span class="store">◆ Store</span><span class="player">● Player</span><span class="flag">⚑ Your flag</span><span class="home">⌂ Home</span></div>
+    <div class="minimap-legend"><span class="you">● You</span><span class="store">◆ Store</span><span class="player">● Player</span><span class="grave">✝ Grave</span><span class="flag">⚑ Your flag</span><span class="home">⌂ Home</span></div>
     <div class="minimap-hint">Click your Home or flags to teleport</div>
   </section>
   <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
@@ -119,6 +119,11 @@
     <div id="homeStorageItems" class="home-storage-items"></div>
     <section id="homeItemStorageSection" class="home-item-storage" hidden>
       <div class="home-item-storage-header"><strong>Storage chest</strong><span>Unlimited capacity</span></div>
+      <div class="home-money-storage">
+        <strong>Cash</strong><span id="homeMoneyBalance">Stored: $0.00 · Wallet: $0.00</span>
+        <input id="homeMoneyAmount" type="number" min="0.01" step="0.01" value="1.00" aria-label="Money amount">
+        <button id="depositHomeMoney" type="button">Deposit</button><button id="withdrawHomeMoney" type="button">Withdraw</button>
+      </div>
       <div class="home-item-storage-columns">
         <div><strong>Backpack</strong><div id="backpackStorageItems" class="storage-transfer-items"></div></div>
         <div><strong>Chest</strong><div id="chestStorageItems" class="storage-transfer-items"></div></div>
@@ -149,12 +154,19 @@
     <button id="stalkButton" type="button" hidden>Stalk</button>
     <button id="continuousAttackButton" type="button" hidden>Attack</button>
     <button id="sprayPaintVehicleButton" type="button" hidden>Spray-paint car</button>
+    <button id="openPostalBoxButton" type="button" hidden>Send items Home</button>
     <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
     <button id="useFurnitureButton" type="button" hidden>Use item</button>
     <button id="openHomeShopButton" type="button" hidden>Open shop</button>
     <button id="moveFurnitureButton" type="button" hidden>Move item</button>
     <button id="rotateFurnitureButton" type="button" hidden>Rotate 90°</button>
     <button id="storeFurnitureButton" type="button" hidden>Place in Home storage</button>
+  </section>
+  <section id="postalWindow" class="panel postal-window" data-collapsible="Postal drop box" hidden>
+    <h2>Postal drop box</h2>
+    <p>Items placed here appear instantly in your Home storage.</p>
+    <div id="postalItems" class="storage-transfer-items"></div>
+    <div class="trade-actions"><button id="postalClose" type="button">Close</button></div>
   </section>
   <section id="homeShopWindow" class="panel home-shop-window" data-collapsible="Home shop" hidden>
     <h2 id="homeShopTitle">Home shop</h2>
@@ -264,6 +276,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=87"></script>
+  <script src="app.js?v=88"></script>
 </body>
 </html>

@@ -91,7 +91,6 @@ public sealed class RealitySocketHub
                             if (movement.Moved || movement.Drowned || movement.Fell || movement.Died) await BroadcastAsync(new { type = "playerMoved", player = movement.Player }, null, cancellationToken);
                             if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", message = movement.Message ?? "Something is blocking the way." }, cancellationToken);
                             if (movement.Fell) await connection.SendAsync(new { type = "playerFell", message = movement.Message, player = movement.Player }, cancellationToken);
-                            if (movement.Died) await connection.SendAsync(new { type = "playerDied", reason = movement.Message, player = movement.Player }, cancellationToken);
                             if (movement.Message is not null && !movement.Blocked && !movement.Fell && !movement.Died) await connection.SendAsync(new { type = "movementNotice", message = movement.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                             if (movement.Player.LocationId != "outdoor") await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         }
@@ -213,6 +212,16 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "playerUpdated", player = storageState.Player }, null, cancellationToken);
                         await connection.SendAsync(new { type = "homeStorageUpdated", privateState = storageState.PrivateState, message = "Storage chest updated." }, cancellationToken);
                         break;
+                    case "transferHomeMoney":
+                        var moneyState = await _world.TransferHomeMoneyAsync(characterId, root.Deserialize<TransferHomeMoneyRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = moneyState.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "homeStorageUpdated", privateState = moneyState.PrivateState, message = moneyState.Message }, cancellationToken);
+                        break;
+                    case "transferPostOfficeItem":
+                        var postalState = await _world.TransferPostOfficeItemAsync(characterId, root.Deserialize<TransferPostOfficeItemRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = postalState.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "postalTransferCompleted", privateState = postalState.PrivateState, message = postalState.Message }, cancellationToken);
+                        break;
                     case "purchaseBase":
                         var basePurchase = await _world.PurchaseBaseAsync(characterId, root.Deserialize<PurchaseBaseRequest>(SharedJson.Options)!, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = basePurchase.Player }, null, cancellationToken);
@@ -295,12 +304,9 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "combatEvent", combat = attack.Event }, null, cancellationToken);
                         if (attack.Consequences is not null) foreach (var consequence in attack.Consequences) await BroadcastAsync(new { type = "combatEvent", combat = consequence }, null, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = attack.Attacker }, null, cancellationToken);
-                        if (attack.Consequences?.Count > 0) await connection.SendAsync(new { type = "playerDied", reason = "You killed a missing quest pet. Its owner retaliated.", player = attack.Attacker, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         if (attack.TargetPlayer is not null)
                         {
                             await BroadcastAsync(new { type = "playerUpdated", player = attack.TargetPlayer }, null, cancellationToken);
-                            if (attack.Event.TargetDied && _clients.TryGetValue(attack.TargetPlayer.Id, out var defeatedConnection))
-                                await defeatedConnection.SendAsync(new { type = "playerDied", reason = attack.Event.Message, player = attack.TargetPlayer, privateState = _world.GetPrivateState(attack.TargetPlayer.Id) }, cancellationToken);
                         }
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         if (attack.Dungeon is not null) await connection.SendAsync(new { type = "dungeonUpdated", dungeon = attack.Dungeon }, cancellationToken);
@@ -439,6 +445,19 @@ public sealed class RealitySocketHub
     {
         foreach (var chat in messages)
             await BroadcastAsync(new { type = "chatSaid", chat }, null, cancellationToken);
+    }
+
+    public async Task BroadcastLootAsync(IReadOnlyList<LootDropState> drops, CancellationToken cancellationToken = default)
+    {
+        foreach (var loot in drops)
+        {
+            await BroadcastAsync(new { type = "lootCreated", loot }, null, cancellationToken);
+            if (loot.DropKind == "tombstone" && loot.OwnerId is not null && _clients.TryGetValue(loot.OwnerId, out var defeatedConnection))
+            {
+                var player = _world.CreateSnapshot().Players.FirstOrDefault(item => item.Id == loot.OwnerId);
+                if (player is not null) await defeatedConnection.SendAsync(new { type = "playerDied", reason = $"You died. Everything you carried and {loot.MoneyCents / 100m:C} were left in your tombstone.", player, privateState = _world.GetPrivateState(loot.OwnerId) }, cancellationToken);
+            }
+        }
     }
 
     public async Task BroadcastRemovedWorldObjectsAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken = default)

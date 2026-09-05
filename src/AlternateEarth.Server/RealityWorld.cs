@@ -101,6 +101,8 @@ public sealed partial class RealityWorld
             _realityEntities[entity.Id] = entity;
         foreach (var entityId in await _store.LoadRemovedEntityIdsAsync(Configuration.Id, cancellationToken))
             _removedBaseEntityIds[entityId] = 0;
+        foreach (var loot in await _store.LoadPersistentLootAsync(Configuration.Id, cancellationToken))
+            if (loot.ExpiresAtUtc > DateTimeOffset.UtcNow) _loot[loot.Id] = loot;
         await _store.ReleaseExpiredBaseClaimsAsync(Configuration.Id, DateTimeOffset.UtcNow, cancellationToken);
         foreach (var claim in await _store.LoadPublicBaseClaimsAsync(Configuration.Id, cancellationToken))
             _publicBaseClaims[claim.BuildingId] = claim;
@@ -394,7 +396,7 @@ public sealed partial class RealityWorld
             var damaged = player with { HealthHearts = player.GodMode ? Math.Max(1, player.HealthHearts - .25) : Math.Max(0, player.HealthHearts - .25), TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
             if (damaged.HealthHearts <= 0)
             {
-                var reset = ResetPlayer(damaged);
+                var reset = await DieAndResetPlayerAsync(damaged, cancellationToken);
                 await SavePlayerAsync(reset, cancellationToken);
                 return new(reset, true, false, false, true, true, "You fell, lost your final quarter-heart, and returned to the starting point.");
             }
@@ -420,7 +422,7 @@ public sealed partial class RealityWorld
         var nextTerrain = Navigation.TerrainAt(next.X, next.Y);
         if (nextTerrain == TerrainType.DeepWater && player.TravelMode is not (TravelMode.Raft or TravelMode.Ufo) && !player.GodMode)
         {
-            var reset = ResetPlayer(player with { HealthHearts = 0 });
+            var reset = await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, cancellationToken);
             await SavePlayerAsync(reset, cancellationToken);
             return new(reset, true, false, true, false, true, "You drowned, lost all hearts, and returned to the starting point.");
         }
@@ -491,7 +493,7 @@ public sealed partial class RealityWorld
         }
         if (player.TravelMode == TravelMode.Raft && mode != TravelMode.Raft && player.Terrain == TerrainType.DeepWater && !player.GodMode)
         {
-            var drowned = ResetPlayer(player with { HealthHearts = 0 });
+            var drowned = await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, cancellationToken);
             await SavePlayerAsync(drowned, cancellationToken);
             return drowned;
         }
@@ -967,7 +969,8 @@ public sealed partial class RealityWorld
             _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
             Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray(),
             lockSchedule.Doors, lockSchedule.EndsAtUtc,
-            _publicBaseClaims.Values.OrderBy(claim => claim.OwnerName).Select(claim => new PublicBaseState(claim.BuildingId, claim.OwnerName)).ToArray());
+            _publicBaseClaims.Values.OrderBy(claim => claim.OwnerName).Select(claim => new PublicBaseState(claim.BuildingId, claim.OwnerName)).ToArray(),
+            _loot.Values.Where(loot => loot.DropKind == "tombstone" && loot.LocationId == "outdoor").OrderBy(loot => loot.Id).ToArray());
     }
 
     private static bool IsPersonalFlag(CanonicalEntity entity) => entity.Kind == EntityKind.PlayerStructure &&
@@ -1034,6 +1037,22 @@ public sealed partial class RealityWorld
             if (!_removedBaseEntityIds.ContainsKey(mailbox.Id)) _baseEntities.TryAdd(mailbox.Id, mailbox);
         }
         var roads = staticEntities.Where(entity => entity.Kind == EntityKind.Road && entity.Geometry.Count > 1).ToArray();
+        var postalRandom = new Random(StableInt($"postal-box:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
+        WorldPosition postalCandidate;
+        if (roads.Length > 0)
+        {
+            var road = roads[postalRandom.Next(roads.Length)]; var segment = postalRandom.Next(road.Geometry.Count - 1);
+            var a = road.Geometry[segment]; var b = road.Geometry[segment + 1]; var dx = b.X - a.X; var dy = b.Y - a.Y; var length = Math.Max(.01, Math.Sqrt(dx * dx + dy * dy));
+            var amount = .25 + postalRandom.NextDouble() * .5;
+            var width = double.TryParse(road.Properties.GetValueOrDefault("widthMeters"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedWidth) ? parsedWidth : 6;
+            var side = postalRandom.Next(2) == 0 ? -1 : 1;
+            postalCandidate = new WorldPosition(generated.Area.Region, a.X + dx * amount - dy / length * (width / 2 + 2.2) * side, a.Y + dy * amount + dx / length * (width / 2 + 2.2) * side);
+        }
+        else postalCandidate = new WorldPosition(generated.Area.Region, (bounds.MinimumX + bounds.MaximumX) / 2, (bounds.MinimumY + bounds.MaximumY) / 2);
+        var postalPosition = Navigation.FindNearestWalkable(postalCandidate);
+        var postalId = $"postal-box:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}";
+        _baseEntities.TryAdd(postalId, new CanonicalEntity(postalId, EntityKind.ResourceNode, postalPosition, Array.Empty<GeometryPoint>(),
+            new Dictionary<string, string> { ["subtype"] = "postOfficeBox", ["displayName"] = "Postal drop box", ["collisionRadius"] = ".65" }, IsBaseEntity: true));
         var litterTypes = new[] { "pencil", "pen", "marker", "newspaper", "metal" };
         for (var index = 0; index < Math.Min(18, roads.Length * 2); index++)
         {

@@ -118,6 +118,13 @@ public sealed class SqliteRealityStore
                 Id INTEGER PRIMARY KEY AUTOINCREMENT, AccountId TEXT NOT NULL, RealityId TEXT NOT NULL,
                 Message TEXT NOT NULL, CreatedUtc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS HomeCashBalances (
+                AccountId TEXT NOT NULL, RealityId TEXT NOT NULL, BalanceCents INTEGER NOT NULL DEFAULT 0,
+                UpdatedUtc TEXT NOT NULL, PRIMARY KEY (AccountId, RealityId)
+            );
+            CREATE TABLE IF NOT EXISTS PersistentWorldLoot (
+                Id TEXT PRIMARY KEY, RealityId TEXT NOT NULL, LootJson TEXT NOT NULL, CreatedUtc TEXT NOT NULL
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
@@ -358,7 +365,8 @@ public sealed class SqliteRealityStore
                      "DELETE FROM RealityDeltas WHERE RealityId=$reality",
                      "DELETE FROM PlayerRelationships WHERE RealityId=$reality",
                      "DELETE FROM DungeonDiscovery WHERE RealityId=$reality",
-                     "DELETE FROM OpenedChests WHERE RealityId=$reality"
+                     "DELETE FROM OpenedChests WHERE RealityId=$reality",
+                     "DELETE FROM PersistentWorldLoot WHERE RealityId=$reality"
                  })
         {
             var command = connection.CreateCommand();
@@ -447,6 +455,57 @@ public sealed class SqliteRealityStore
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<long> LoadHomeCashAsync(string accountId, string realityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT BalanceCents FROM HomeCashBalances WHERE AccountId=$account AND RealityId=$reality";
+        command.Parameters.AddWithValue("$account", accountId); command.Parameters.AddWithValue("$reality", realityId);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? 0 : Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    public async Task SaveHomeCashAsync(string accountId, string realityId, long balanceCents, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO HomeCashBalances (AccountId,RealityId,BalanceCents,UpdatedUtc) VALUES ($account,$reality,$balance,$now) ON CONFLICT(AccountId,RealityId) DO UPDATE SET BalanceCents=excluded.BalanceCents,UpdatedUtc=excluded.UpdatedUtc";
+        command.Parameters.AddWithValue("$account", accountId); command.Parameters.AddWithValue("$reality", realityId);
+        command.Parameters.AddWithValue("$balance", Math.Max(0, balanceCents)); command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LootDropState>> LoadPersistentLootAsync(string realityId, CancellationToken cancellationToken = default)
+    {
+        var result = new List<LootDropState>();
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT LootJson FROM PersistentWorldLoot WHERE RealityId=$reality ORDER BY CreatedUtc";
+        command.Parameters.AddWithValue("$reality", realityId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var loot = JsonSerializer.Deserialize<LootDropState>(reader.GetString(0), SharedJson.Options);
+            if (loot is not null) result.Add(loot);
+        }
+        return result;
+    }
+
+    public async Task SavePersistentLootAsync(string realityId, LootDropState loot, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO PersistentWorldLoot (Id,RealityId,LootJson,CreatedUtc) VALUES ($id,$reality,$json,$now) ON CONFLICT(Id) DO UPDATE SET LootJson=excluded.LootJson";
+        command.Parameters.AddWithValue("$id", loot.Id); command.Parameters.AddWithValue("$reality", realityId);
+        command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(loot, SharedJson.Options)); command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task RemovePersistentLootAsync(string lootId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM PersistentWorldLoot WHERE Id=$id"; command.Parameters.AddWithValue("$id", lootId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<ItemConfiguration>> LoadItemConfigurationsAsync(string realityId, CancellationToken cancellationToken = default)

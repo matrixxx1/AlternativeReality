@@ -799,6 +799,97 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeathCreatesPersistentSharedTombstoneWithAllCarriedItemsAndMoney()
+    {
+        var configuration = new RealityConfiguration("death-tombstone", "Death Tombstone", 932, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500), GameSpeed: 1_000);
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "death-tombstone.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("grave-account", "Fallen", "hash", "salt", "token", "grave-player"), "Fallen");
+        var start = new WorldPosition(region, -5, 10);
+        await store.SaveCharacterAsync(configuration.Id, new PlayerState("grave-player", "Fallen", start, WalletCents: 12_345));
+        await store.SaveInventoryAsync(new InventoryState("grave-player", new[] { new ItemStack("rock", 3), new ItemStack("pistol", 1, Quality: "Fine") }));
+        var water = new CanonicalEntity("deep-water", EntityKind.Water, new WorldPosition(region, 9.5, 10),
+            new GeometryPoint[] { new(-1, 0), new(20, 0), new(20, 20), new(-1, 20), new(-1, 0) }, new Dictionary<string, string>());
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("grave-home", region, 30, 30), water)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var fallen = await world.JoinAsync("grave-player", "Fallen", "grave-account");
+
+        MovementOutcome? death = null;
+        for (var attempt = 0; attempt < 10 && death?.Died != true; attempt++) death = await world.MoveAsync(fallen.Id, new MoveRequest(1, 0, attempt));
+        Assert.True(death?.Died);
+
+        var grave = Assert.Single(world.TakeDeathDropAnnouncements());
+        Assert.Equal("tombstone", grave.DropKind);
+        Assert.Equal("Fallen", grave.OwnerName);
+        Assert.Equal(12_345, grave.MoneyCents);
+        Assert.Contains(grave.Items, item => item.ItemType == "rock" && item.Quantity == 3);
+        Assert.Contains(grave.Items, item => item.ItemType == "pistol" && item.Quality == "Fine");
+        var reset = world.CreateSnapshot().Players.Single(player => player.Id == fallen.Id);
+        Assert.Equal(0, reset.WalletCents);
+        Assert.Equal("fist", reset.EquippedWeapon);
+        Assert.DoesNotContain(world.GetPrivateState(fallen.Id).Inventory.Items, item => item.ItemType != "fist");
+        Assert.Contains(world.CreateSnapshot().Graves!, item => item.Id == grave.Id);
+        Assert.Contains(await store.LoadPersistentLootAsync(configuration.Id), item => item.Id == grave.Id);
+
+        var collector = await world.JoinAsync("grave-collector", "Collector");
+        collector = await world.SetGodModeAsync(collector.Id, true);
+        await world.TeleportAsync(collector.Id, new TeleportRequest(grave.Position.X, grave.Position.Y, true));
+        var collected = await world.CollectLootAsync(collector.Id, grave.Id);
+        Assert.Equal(12_345 + 50_000, collected.Player.WalletCents);
+        Assert.Contains(collected.Inventory.Items, item => item.ItemType == "rock" && item.Quantity == 3);
+        Assert.DoesNotContain(await store.LoadPersistentLootAsync(configuration.Id), item => item.Id == grave.Id);
+    }
+
+    [Fact]
+    public async Task HomeStorageAcceptsCashDepositsAndWithdrawals()
+    {
+        var configuration = new RealityConfiguration("home-cash", "Home Cash", 933, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "home-cash.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("cash-account", "CashUser", "hash", "salt", "token", "cash-player"), "CashUser");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("cash-home", region, 20, 20))), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var player = await world.JoinAsync("cash-player", "CashUser", "cash-account");
+        player = await world.SetGodModeAsync(player.Id, true);
+        var door = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Door);
+        await world.TeleportAsync(player.Id, new TeleportRequest(door.Position.X, door.Position.Y, true));
+        var entered = await world.EnterDungeonAsync(player.Id, door.Id);
+        var chest = entered.Dungeon.Furnishings!.Single(item => item.Properties.GetValueOrDefault("objectType") == "storageChest");
+
+        var deposited = await world.TransferHomeMoneyAsync(player.Id, new TransferHomeMoneyRequest(chest.Id, 12_500, true));
+        Assert.Equal(37_500, deposited.Player.WalletCents);
+        Assert.Equal(12_500, deposited.PrivateState.HomeStorageMoneyCents);
+        var withdrawn = await world.TransferHomeMoneyAsync(player.Id, new TransferHomeMoneyRequest(chest.Id, 2_500, false));
+        Assert.Equal(40_000, withdrawn.Player.WalletCents);
+        Assert.Equal(10_000, withdrawn.PrivateState.HomeStorageMoneyCents);
+        Assert.Equal(10_000, await store.LoadHomeCashAsync("cash-account", configuration.Id));
+    }
+
+    [Fact]
+    public async Task GeneratedBlockHasOnePostalBoxThatSendsItemsToHomeStorage()
+    {
+        var configuration = new RealityConfiguration("postal-box", "Postal Box", 934, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var store = new SqliteRealityStore(Path.Combine(_directory, "postal-box.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("postal-account", "Postal", "hash", "salt", "token", "postal-player"), "Postal");
+        await store.SaveInventoryAsync(new InventoryState("postal-player", new[] { new ItemStack("rock", 8) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("postal-home", region, 20, 20))), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var box = Assert.Single(world.CreateSnapshot().BaseEntities, entity => entity.Properties.GetValueOrDefault("subtype") == "postOfficeBox");
+        var player = await world.JoinAsync("postal-player", "Postal", "postal-account");
+        player = await world.SetGodModeAsync(player.Id, true);
+        await world.TeleportAsync(player.Id, new TeleportRequest(box.Position.X, box.Position.Y, true));
+
+        var mailed = await world.TransferPostOfficeItemAsync(player.Id, new TransferPostOfficeItemRequest(box.Id, "rock", 5));
+
+        Assert.Equal(3, mailed.PrivateState.Inventory.Items.Single(item => item.ItemType == "rock").Quantity);
+        Assert.Equal(5, (await store.LoadInventoryAsync("home-items:postal-box:postal-account")).Items.Single(item => item.ItemType == "rock").Quantity);
+    }
+
+    [Fact]
     public async Task BackpackRejectsRewardsAboveAbsoluteWeightOrWeaponSlotLimit()
     {
         var configuration = new RealityConfiguration("inventory-limits", "Inventory Limits", 223, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -832,6 +923,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var attacker = await world.JoinAsync("rifleman", "Rifleman");
         var target = await world.JoinAsync("rifle-target", "Target");
         await world.SetGodModeAsync(attacker.Id, true);
+        await world.SetGodModeAsync(target.Id, true);
         await world.SetEquipmentAsync(attacker.Id, "weapon", "rifle");
         CombatResult? combat = null;
         for (var attempt = 0; attempt < 20 && combat?.Event.Hit != true; attempt++) combat = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "fist"));
@@ -844,7 +936,9 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(1, combat.Inventory.Items.Single(item => item.ItemType == "bullet").Quantity);
 
         await world.SetEquipmentAsync(attacker.Id, "weapon", "sword");
-        var sword = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "sword"));
+        CombatResult? sword = null;
+        for (var attempt = 0; attempt < 20 && sword?.Event.Hit != true; attempt++) sword = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "sword"));
+        Assert.NotNull(sword);
         Assert.True(sword.Event.Hit);
         Assert.Equal(5, sword.Event.Damage);
         var configuredKnife = await world.UpdateItemConfigurationAsync(attacker.Id, new UpdateItemConfigurationRequest("knife", 4, 3, 1_500, 4_500, 1.25, 15));
@@ -854,6 +948,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.Equal(15, configuredKnife.VisibilityModifierMeters);
         var persistedConfiguration = await store.LoadItemConfigurationsAsync(configuration.Id);
         Assert.Contains(persistedConfiguration, item => item.ItemType == "knife" && item.Damage == 4 && item.MinimumPriceCents == 1_500 && item.SpeedModifierMph == 1.25 && item.VisibilityModifierMeters == 15);
+        await world.SetGodModeAsync(target.Id, false);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateItemConfigurationAsync(target.Id, new UpdateItemConfigurationRequest("knife", 100, 100, 0, 0)));
         await world.SetEquipmentAsync(attacker.Id, "weapon", "knife");
         CombatResult? knife = null;

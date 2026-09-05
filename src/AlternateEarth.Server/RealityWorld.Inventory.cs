@@ -6,6 +6,59 @@ public sealed partial class RealityWorld
 {
     private string HomeItemStorageOwnerId(string accountId) => $"home-items:{Configuration.Id}:{accountId}";
 
+    private async Task<PlayerState> DieAndResetPlayerAsync(PlayerState defeated, CancellationToken cancellationToken)
+    {
+        var carried = GetInventoryState(defeated.Id).Items
+            .Where(item => item.Quantity > 0 && !item.ItemType.Equals("fist", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var gravePosition = defeated.LocationId == "outdoor" ? defeated.Position : _returnPositions.GetValueOrDefault(defeated.Id, defeated.Position);
+        var graveLocation = gravePosition.Region == Configuration.Area.Region ? "outdoor" : defeated.LocationId;
+        var tombstone = new LootDropState(
+            $"grave:{Guid.NewGuid():N}", gravePosition, graveLocation, Math.Max(0, defeated.WalletCents), carried,
+            DateTimeOffset.MaxValue, "tombstone", defeated.Name, defeated.Id);
+
+        var inventory = _inventories.GetOrAdd(defeated.Id, _ => new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+        lock (inventory)
+        {
+            inventory.Clear();
+            inventory["fist"] = 1;
+        }
+        foreach (var quality in _weaponQualities.Keys.Where(key => key.Player == defeated.Id).ToArray())
+            _weaponQualities.TryRemove(quality, out _);
+        _weaponQualities[(defeated.Id, "fist")] = "Common";
+        _loot[tombstone.Id] = tombstone;
+
+        await SaveInventoryAsync(defeated.Id, cancellationToken);
+        await _store.SavePersistentLootAsync(Configuration.Id, tombstone, cancellationToken);
+        _deathDropAnnouncements.Enqueue(tombstone);
+
+        return ResetPlayer(defeated with
+        {
+            WalletCents = 0,
+            EquippedWeapon = "fist",
+            EquippedHat = "none",
+            EquippedShirt = "none",
+            EquippedPants = "none",
+            FlashlightOn = false,
+            LanternOn = false,
+            LaserOn = false,
+            ShieldOn = false,
+            HatOn = false,
+            MagicHikingShoesOn = false,
+            MagicRunningShoesOn = false,
+            DirtBikeGasGallons = 0,
+            MotorcycleGasGallons = 0,
+            FlamethrowerGasGallons = 0
+        });
+    }
+
+    public IReadOnlyList<LootDropState> TakeDeathDropAnnouncements()
+    {
+        var drops = new List<LootDropState>();
+        while (_deathDropAnnouncements.TryDequeue(out var drop)) drops.Add(drop);
+        return drops;
+    }
+
     private async Task EnsureHomeItemStorageAsync(string accountId, CancellationToken cancellationToken)
     {
         if (_homeItemStorage.ContainsKey(accountId)) return;
@@ -16,6 +69,7 @@ public sealed partial class RealityWorld
             var stored = await _store.LoadInventoryAsync(HomeItemStorageOwnerId(accountId), cancellationToken);
             _homeItemStorage[accountId] = stored.Items.Where(item => item.Quantity > 0)
                 .ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+            _homeCash[accountId] = await _store.LoadHomeCashAsync(accountId, Configuration.Id, cancellationToken);
         }
         finally { _homeItemStorageLock.Release(); }
     }
@@ -84,6 +138,63 @@ public sealed partial class RealityWorld
             await _store.SaveInventoryAsync(GetHomeItemStorage(access.AccountId), cancellationToken);
             await SavePlayerAsync(player, cancellationToken);
             return (player, GetPrivateState(playerId));
+        }
+        finally { _homeItemStorageLock.Release(); }
+    }
+
+    public async Task<(PlayerState Player, PlayerPrivateState PrivateState, string Message)> TransferHomeMoneyAsync(string playerId, TransferHomeMoneyRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.AmountCents is < 1 or > 100_000_000_00) throw new InvalidOperationException("Choose an amount between $0.01 and $100,000,000.00.");
+        var access = ValidateHomeStorageAccess(playerId, request.ChestId);
+        await EnsureHomeItemStorageAsync(access.AccountId, cancellationToken);
+        await _homeItemStorageLock.WaitAsync(cancellationToken);
+        try
+        {
+            var stored = _homeCash.GetValueOrDefault(access.AccountId);
+            PlayerState updated;
+            if (request.ToStorage)
+            {
+                if (access.Player.WalletCents < request.AmountCents) throw new InvalidOperationException("You do not have that much money in your wallet.");
+                stored += request.AmountCents;
+                updated = access.Player with { WalletCents = access.Player.WalletCents - request.AmountCents, Version = access.Player.Version + 1 };
+            }
+            else
+            {
+                if (stored < request.AmountCents) throw new InvalidOperationException("Your Home storage does not contain that much money.");
+                stored -= request.AmountCents;
+                updated = access.Player with { WalletCents = access.Player.WalletCents + request.AmountCents, Version = access.Player.Version + 1 };
+            }
+            _homeCash[access.AccountId] = stored;
+            await _store.SaveHomeCashAsync(access.AccountId, Configuration.Id, stored, cancellationToken);
+            await SavePlayerAsync(updated, cancellationToken);
+            var action = request.ToStorage ? "Deposited" : "Withdrew";
+            return (updated, GetPrivateState(playerId), $"{action} {request.AmountCents / 100m:C} {(request.ToStorage ? "into" : "from")} Home storage.");
+        }
+        finally { _homeItemStorageLock.Release(); }
+    }
+
+    public async Task<(PlayerState Player, PlayerPrivateState PrivateState, string Message)> TransferPostOfficeItemAsync(string playerId, TransferPostOfficeItemRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("Postal drop boxes are available only on the main map.");
+        if (!_baseEntities.TryGetValue(request.BoxId, out var box) || box.Kind != EntityKind.ResourceNode || box.Properties.GetValueOrDefault("subtype") != "postOfficeBox") throw new InvalidOperationException("That postal drop box is not available.");
+        if (player.Position.Distance2D(box.Position) > 4) throw new InvalidOperationException("Move within 4 meters of the postal drop box.");
+        if (!_playerAccounts.TryGetValue(playerId, out var accountId) || !_baseBuildings.ContainsKey(accountId)) throw new InvalidOperationException("You need a Home before mailing items to it.");
+        var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase) || !InventoryDefinition(itemType).CarriedInBackpack)
+            throw new InvalidOperationException("That item cannot be sent through a postal drop box.");
+        await EnsureHomeItemStorageAsync(accountId, cancellationToken);
+        await _homeItemStorageLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!RemoveInventory(playerId, itemType, request.Quantity)) throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
+            var storage = _homeItemStorage[accountId];
+            lock (storage) storage[itemType] = storage.GetValueOrDefault(itemType) + request.Quantity;
+            var updated = NormalizeEquipmentAfterInventoryChange(player);
+            await SaveInventoryAsync(playerId, cancellationToken);
+            await _store.SaveInventoryAsync(GetHomeItemStorage(accountId), cancellationToken);
+            await SavePlayerAsync(updated, cancellationToken);
+            return (updated, GetPrivateState(playerId), $"Sent {request.Quantity} {DisplayItem(itemType)} directly to your Home storage.");
         }
         finally { _homeItemStorageLock.Release(); }
     }
