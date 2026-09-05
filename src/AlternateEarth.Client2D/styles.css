@@ -145,6 +145,8 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .minimap-panel { position:relative; padding:10px 12px; }
 .minimap-panel > strong { display:block; margin-bottom:7px; color:#f0d475; }
 .minimap-panel canvas { display:block; width:100%; height:auto; max-height:220px; background:#07120f; border:2px solid #6e5730; image-rendering:auto; }
+.minimap-home-button { width:100%; margin-top:8px; color:#dfffe4; background:#284b32; border-color:#8fcf8e; }
+.minimap-home-button:hover:not(:disabled),.minimap-home-button:focus-visible { color:#fff9bf; background:#376541; }
 .minimap-legend { display:flex; flex-wrap:wrap; gap:5px 12px; margin-top:7px; color:#bfcabd; font:700 9px monospace; }
 .minimap-legend .you { color:#fff5a6; }.minimap-legend .store { color:#f2ce65; }.minimap-legend .player { color:#65d9ef; }.minimap-legend .grave { color:#d7d0c4; }.minimap-legend .flag { color:#ef6258; }.minimap-legend .home { color:#8ff09f; }
 .home-money-storage { display:grid; grid-template-columns:auto 1fr 92px auto auto; gap:7px; align-items:center; margin:8px 0 12px; padding:8px; border:1px solid rgba(225,202,118,.3); background:rgba(5,14,10,.42); }
