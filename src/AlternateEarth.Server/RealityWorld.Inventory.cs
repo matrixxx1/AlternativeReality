@@ -35,7 +35,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var player) || !_dungeons.TryGetValue(player.LocationId, out var home) || !home.IsHome)
             throw new InvalidOperationException("Your storage chest is only available inside your Home.");
-        if (!_playerAccounts.TryGetValue(playerId, out var accountId)) throw new InvalidOperationException("Home storage is unavailable.");
+        if (!_playerAccounts.TryGetValue(playerId, out var accountId) || _baseBuildings.GetValueOrDefault(accountId) != home.BuildingId) throw new InvalidOperationException("Visitors cannot use this Home's storage.");
         var chest = home.Furnishings?.FirstOrDefault(item => item.Id == chestId && item.Properties.GetValueOrDefault("objectType") == "storageChest")
             ?? throw new InvalidOperationException("Storage chest not found.");
         return (player, accountId, chest);
@@ -157,10 +157,11 @@ public sealed partial class RealityWorld
             throw new InvalidOperationException("That item cannot be dropped.");
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
         if (!_itemConfigurations.ContainsKey(itemType)) throw new InvalidOperationException("Unknown inventory item.");
+        var quality = _weaponQualities.GetValueOrDefault((playerId, itemType));
         if (!RemoveInventory(playerId, itemType, request.Quantity))
             throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
 
-        var droppedStack = InventoryStack(itemType, request.Quantity);
+        var droppedStack = InventoryStack(itemType, request.Quantity, quality: quality);
         var drop = new LootDropState(
             $"loot:{Guid.NewGuid():N}",
             currentPlayer.Position,
@@ -179,7 +180,7 @@ public sealed partial class RealityWorld
     private PlayerState NormalizeEquipmentAfterInventoryChange(PlayerState player)
     {
         var godMode = player.GodMode;
-        var travelMode = !godMode && TravelModeUnavailable(player.Id, player) ? TravelMode.Walk : player.TravelMode;
+        var travelMode = (player.TravelMode == TravelMode.Ufo && InventoryQuantity(player.Id, "ufo") <= 0) || (!godMode && TravelModeUnavailable(player.Id, player)) ? TravelMode.Walk : player.TravelMode;
         var offhand = ActiveOffhand(player);
         if (!godMode && offhand != "none" && offhand != "candle" && InventoryQuantity(player.Id, offhand) <= 0) offhand = "none";
         return player with
@@ -188,6 +189,7 @@ public sealed partial class RealityWorld
             FlashlightOn = offhand == "flashlight",
             LanternOn = offhand == "lantern",
             LaserOn = offhand == "laser",
+            ShieldOn = offhand == "shield",
             CandleUntilUtc = offhand == "candle" ? player.CandleUntilUtc : null,
             MagicHikingShoesOn = godMode ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(player.Id, "magicHikingShoes") > 0,
             MagicRunningShoesOn = godMode ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(player.Id, "magicRunningShoes") > 0,
@@ -195,7 +197,7 @@ public sealed partial class RealityWorld
             EquippedShirt = RetainedEquipment(player.Id, player.EquippedShirt, ShirtItems, godMode),
             EquippedPants = RetainedEquipment(player.Id, player.EquippedPants, PantsItems, godMode),
             HatOn = RetainedEquipment(player.Id, player.EquippedHat, HatItems, godMode).Equals("hat", StringComparison.OrdinalIgnoreCase),
-            EquippedWeapon = godMode ? player.EquippedWeapon : BestUsableWeapon(player.Id, player.EquippedWeapon, false),
+            EquippedWeapon = travelMode == TravelMode.Ufo ? "probulator" : player.EquippedWeapon == "probulator" ? "fist" : godMode ? player.EquippedWeapon : BestUsableWeapon(player.Id, player.EquippedWeapon, false),
             SpeedMetersPerSecond = 0,
             Version = player.Version + 1
         };

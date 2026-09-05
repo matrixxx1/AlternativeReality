@@ -292,7 +292,7 @@ public sealed partial class RealityWorld
     private async Task<DungeonState> UpdateFurnitureAsync(string playerId, string furnitureId, Func<DungeonState, CanonicalEntity, List<CanonicalEntity>, CanonicalEntity> update, CancellationToken cancellationToken)
     {
         if (!_players.TryGetValue(playerId, out var player) || !_dungeons.TryGetValue(player.LocationId, out var home) || !home.IsHome) throw new InvalidOperationException("Furniture can only be changed inside your own Home.");
-        if (!_playerAccounts.TryGetValue(playerId, out var accountId) || !_homeFurniture.TryGetValue(accountId, out var furniture)) throw new InvalidOperationException("Home furniture is unavailable.");
+        if (!_playerAccounts.TryGetValue(playerId, out var accountId) || _baseBuildings.GetValueOrDefault(accountId) != home.BuildingId || !_homeFurniture.TryGetValue(accountId, out var furniture)) throw new InvalidOperationException("Visitors cannot alter this Home.");
         await _homeFurnitureLock.WaitAsync(cancellationToken);
         try
         {

@@ -30,6 +30,8 @@ public sealed partial class RealityWorld
     private GeographicDataset? _geographic;
     private readonly ConcurrentDictionary<string, CanonicalEntity> _baseEntities = new();
     private readonly ConcurrentDictionary<string, byte> _removedBaseEntityIds = new();
+    private readonly ConcurrentDictionary<string, PublicBaseClaim> _publicBaseClaims = new();
+    private readonly ConcurrentDictionary<string, string> _homeNotices = new();
     private readonly ConcurrentDictionary<string, ElevationSample> _elevationSamples = new();
     private readonly ConcurrentDictionary<string, WorldBounds> _loadedAreas = new();
     private WorldBounds? _loadedBounds;
@@ -60,6 +62,7 @@ public sealed partial class RealityWorld
     public RealityConfiguration Configuration { get; private set; }
     public bool IsInitialized { get; private set; }
     public int PlayerCount => _players.Count;
+    public IReadOnlySet<string> ActiveAccountIds => _playerAccounts.Values.ToHashSet(StringComparer.Ordinal);
     public int BaseEntityCount => _baseEntities.Count + _actors.Count;
     public int RealityEntityCount => _realityEntities.Count;
     public int LoadedAreaCount => _loadedAreas.Count;
@@ -98,6 +101,9 @@ public sealed partial class RealityWorld
             _realityEntities[entity.Id] = entity;
         foreach (var entityId in await _store.LoadRemovedEntityIdsAsync(Configuration.Id, cancellationToken))
             _removedBaseEntityIds[entityId] = 0;
+        await _store.ReleaseExpiredBaseClaimsAsync(Configuration.Id, DateTimeOffset.UtcNow, cancellationToken);
+        foreach (var claim in await _store.LoadPublicBaseClaimsAsync(Configuration.Id, cancellationToken))
+            _publicBaseClaims[claim.BuildingId] = claim;
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
         _loadedAreas["0:0"] = Configuration.Area.Bounds;
         await RefreshWeatherAsync(cancellationToken);
@@ -173,7 +179,13 @@ public sealed partial class RealityWorld
         if (_players.Count >= Configuration.MaximumPlayers) throw new InvalidOperationException("This reality is full.");
         var name = SanitizeName(requestedName);
         var existing = await _store.LoadCharacterAsync(Configuration.Id, characterId, cancellationToken);
-        var home = string.IsNullOrWhiteSpace(accountId) ? null : await EnsureHomeAsync(characterId, accountId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(accountId) && await _store.RefreshBaseActivityAsync(accountId, Configuration.Id, DateTimeOffset.UtcNow, cancellationToken))
+        {
+            foreach (var stale in _publicBaseClaims.Where(pair => pair.Value.AccountId == accountId).Select(pair => pair.Key).ToArray()) _publicBaseClaims.TryRemove(stale, out _);
+            _baseBuildings.TryRemove(accountId, out _);
+            _homeNotices[characterId] = "Your previous Home was released after 30 days without a login. Your stored furniture and Home inventory were preserved, and the server assigned you a new Home at no charge.";
+        }
+        var home = string.IsNullOrWhiteSpace(accountId) ? null : await EnsureHomeAsync(characterId, accountId, cancellationToken, name);
         var center = new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center);
         var newAccountSpawn = existing is null && !string.IsNullOrWhiteSpace(accountId) && await _store.IsFirstAccountCharacterAsync(accountId, characterId, cancellationToken);
         var resumesOutdoors = existing is not null && existing.LocationId == "outdoor" && existing.Position.Region == Configuration.Area.Region;
@@ -198,15 +210,19 @@ public sealed partial class RealityWorld
             Math.Clamp(existing?.BodyHeat ?? 50, 0, 100), 100,
             existing is { EquippedHat: not "none" } ? existing.EquippedHat : existing?.HatOn == true ? "hat" : "none",
             existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none", existing?.WantedLevel ?? 0, existing?.EBikeRemainingMeters ?? 1609.344,
-            existing?.EnergyDrinkBoostUntilUtc, existing?.EnergyDrinkCrashUntilUtc, existing?.ProbedUntilUtc);
+            existing?.EnergyDrinkBoostUntilUtc, existing?.EnergyDrinkCrashUntilUtc, existing?.ProbedUntilUtc, existing?.CandleUntilUtc, existing?.ShieldOn ?? false, existing?.Ar15FireMode is "burst" ? "burst" : "single", Math.Clamp(existing?.FlamethrowerGasGallons ?? 0, 0, 5));
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
         var offhand = ActiveOffhand(player);
-        player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser" };
+        player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser", ShieldOn = offhand == "shield" };
         _players[characterId] = player;
         _lastMovement[characterId] = DateTimeOffset.UtcNow;
         _lastIdleHeal[characterId] = DateTimeOffset.UtcNow;
         var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+        foreach (var item in inventory.Items.Where(item => !string.IsNullOrWhiteSpace(item.Quality)))
+            _weaponQualities[(characterId, item.ItemType)] = item.Quality!;
+        foreach (var item in inventory.Items.Where(item => InventoryDefinition(item.ItemType).Category == InventoryCategory.Weapon && !_weaponQualities.ContainsKey((characterId, item.ItemType))))
+            _weaponQualities[(characterId, item.ItemType)] = "Common";
         await EnsurePersonalFlagAllowanceAsync(characterId, cancellationToken);
         foreach (var relationship in await _store.LoadRelationshipsAsync(Configuration.Id, characterId, cancellationToken))
             _relationships[(characterId, relationship.ActorId)] = relationship.FriendRating;
@@ -214,11 +230,20 @@ public sealed partial class RealityWorld
             _quests[(characterId, quest.Id)] = quest;
         foreach (var areaKey in await _store.LoadWorldMapDiscoveryAsync(Configuration.Id, characterId, cancellationToken))
             _revealedWorldAreas[(characterId, areaKey)] = 0;
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            var notices = await _store.TakeAccountNoticesAsync(accountId, Configuration.Id, cancellationToken);
+            if (notices.Count > 0)
+            {
+                var existingNotice = _homeNotices.GetValueOrDefault(characterId);
+                _homeNotices[characterId] = string.Join("\n", string.IsNullOrWhiteSpace(existingNotice) ? notices : new[] { existingNotice! }.Concat(notices));
+            }
+        }
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
         return player;
     }
 
-    private async Task<DungeonState?> EnsureHomeAsync(string playerId, string accountId, CancellationToken cancellationToken)
+    private async Task<DungeonState?> EnsureHomeAsync(string playerId, string accountId, CancellationToken cancellationToken, string? ownerName = null)
     {
         _playerAccounts[playerId] = accountId;
         await _basePurchaseLock.WaitAsync(cancellationToken);
@@ -243,6 +268,7 @@ public sealed partial class RealityWorld
                 await _store.SaveBaseBuildingAsync(accountId, Configuration.Id, baseBuilding, building.Position, cancellationToken);
             }
             _baseBuildings[accountId] = baseBuilding;
+            _publicBaseClaims[baseBuilding] = new PublicBaseClaim(accountId, baseBuilding, ownerName ?? _publicBaseClaims.GetValueOrDefault(baseBuilding)?.OwnerName ?? _players.GetValueOrDefault(playerId)?.Name ?? "Explorer");
             var baseEntity = _baseEntities[baseBuilding];
             await EnsureHomeFurnitureAsync(accountId, baseEntity, cancellationToken);
             await EnsureHomeItemStorageAsync(accountId, cancellationToken);
@@ -301,7 +327,18 @@ public sealed partial class RealityWorld
         _lastChat.TryRemove(characterId, out _);
         _lastIdleHeal.TryRemove(characterId, out _);
         _playerAccounts.TryRemove(characterId, out _);
+        _activeProbulatorBeams.TryRemove(characterId, out _);
     }
+
+    public async Task LeaveAsync(string characterId, CancellationToken cancellationToken = default)
+    {
+        _players.TryGetValue(characterId, out var player);
+        Leave(characterId);
+        if (player is not null && player.LocationId != "outdoor" && !PlayersOccupyingSession(player.LocationId, characterId))
+            await ResetDungeonSessionAsync(characterId, player.LocationId, cancellationToken);
+    }
+
+    public string? TakeHomeNotice(string characterId) => _homeNotices.TryRemove(characterId, out var notice) ? notice : null;
 
     public ChatMessage Say(string characterId, SayRequest request)
     {
@@ -369,7 +406,7 @@ public sealed partial class RealityWorld
         var raftTerrain = player.TravelMode == TravelMode.Raft
             ? RaftTerrainOnly
             : null;
-        var blocked = raftTerrain is null
+        var blocked = player.TravelMode == TravelMode.Ufo ? false : raftTerrain is null
             ? !Navigation.CanTraverse(player.Position, requested)
             : !Navigation.CanTraverse(player.Position, requested, raftTerrain);
         if (blocked)
@@ -381,7 +418,7 @@ public sealed partial class RealityWorld
             else next = player.Position;
         }
         var nextTerrain = Navigation.TerrainAt(next.X, next.Y);
-        if (nextTerrain == TerrainType.DeepWater && player.TravelMode != TravelMode.Raft && !player.GodMode)
+        if (nextTerrain == TerrainType.DeepWater && player.TravelMode is not (TravelMode.Raft or TravelMode.Ufo) && !player.GodMode)
         {
             var reset = ResetPlayer(player with { HealthHearts = 0 });
             await SavePlayerAsync(reset, cancellationToken);
@@ -437,13 +474,14 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (ProbedActive(player) && mode != TravelMode.Walk) throw new InvalidOperationException("While Probed, you can only walk. Sleep or wait for the effect to end.");
-        if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle)
-            throw new InvalidOperationException("Bikes, e-bikes, dirt bikes, and motorcycles cannot be used inside a dungeon or Home.");
+        if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle or TravelMode.Ufo)
+            throw new InvalidOperationException("Bikes, e-bikes, dirt bikes, motorcycles, and UFOs cannot be used inside a dungeon or Home.");
         if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
         if (!player.GodMode && mode == TravelMode.Bike && InventoryQuantity(characterId, "bike") <= 0) throw new InvalidOperationException("You need a bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.EBike && InventoryQuantity(characterId, "eBike") <= 0) throw new InvalidOperationException("You need an e-bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.DirtBike && InventoryQuantity(characterId, "dirtBike") <= 0) throw new InvalidOperationException("You need a dirt bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.Motorcycle && InventoryQuantity(characterId, "motorcycle") <= 0) throw new InvalidOperationException("You need a motorcycle in your inventory.");
+        if (mode == TravelMode.Ufo && InventoryQuantity(characterId, "ufo") <= 0) throw new InvalidOperationException("You need a UFO in your inventory.");
         if (!player.GodMode && mode == TravelMode.DirtBike && player.DirtBikeGasGallons <= 0) throw new InvalidOperationException("Your dirt bike is out of gas. Use a gallon of gas while the dirt bike is selected.");
         if (!player.GodMode && mode == TravelMode.Motorcycle && player.MotorcycleGasGallons <= 0) throw new InvalidOperationException("Your motorcycle is out of gas. Use a gallon of gas while the motorcycle is selected.");
         if (mode == TravelMode.Raft)
@@ -457,7 +495,23 @@ public sealed partial class RealityWorld
             await SavePlayerAsync(drowned, cancellationToken);
             return drowned;
         }
-        var updated = player with { TravelMode = mode, SpeedMetersPerSecond = 0, EBikeRemainingMeters = mode == TravelMode.EBike && player.EBikeRemainingMeters <= 0 ? 1609.344 : player.EBikeRemainingMeters, Version = player.Version + 1 };
+        var landing = player.Position;
+        if (player.TravelMode == TravelMode.Ufo && mode != TravelMode.Ufo)
+        {
+            landing = Navigation.FindNearestWalkable(player.Position);
+            landing = landing with { Z = Navigation.ElevationAt(landing.X, landing.Y) };
+            _activeProbulatorBeams.TryRemove(characterId, out _);
+        }
+        var updated = player with
+        {
+            Position = landing,
+            Terrain = Navigation.TerrainAt(landing.X, landing.Y),
+            TravelMode = mode,
+            EquippedWeapon = mode == TravelMode.Ufo ? "probulator" : player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
+            SpeedMetersPerSecond = 0,
+            EBikeRemainingMeters = mode == TravelMode.EBike && player.EBikeRemainingMeters <= 0 ? 1609.344 : player.EBikeRemainingMeters,
+            Version = player.Version + 1
+        };
         await SavePlayerAsync(updated, cancellationToken);
         return updated;
     }
@@ -541,6 +595,11 @@ public sealed partial class RealityWorld
             return (new(true, new[] { target }), false);
         }
         var expanded = await EnsureAreaLoadedAsync(request.X, request.Y, cancellationToken);
+        if (player.TravelMode == TravelMode.Ufo)
+        {
+            var target = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with { X = request.X, Y = request.Y });
+            return (new(true, new[] { target with { Z = Navigation.ElevationAt(target.X, target.Y) } }), expanded);
+        }
         if (player.TravelMode == TravelMode.Raft)
         {
             if (!RaftTerrainOnly(Navigation.TerrainAt(request.X, request.Y)))
@@ -907,7 +966,8 @@ public sealed partial class RealityWorld
             _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), visibleRealityEntities,
             _players.Values.OrderBy(player => player.Id).ToArray(), _elevationSamples.Values.ToArray(),
             Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray(),
-            lockSchedule.Doors, lockSchedule.EndsAtUtc);
+            lockSchedule.Doors, lockSchedule.EndsAtUtc,
+            _publicBaseClaims.Values.OrderBy(claim => claim.OwnerName).Select(claim => new PublicBaseState(claim.BuildingId, claim.OwnerName)).ToArray());
     }
 
     private static bool IsPersonalFlag(CanonicalEntity entity) => entity.Kind == EntityKind.PlayerStructure &&
@@ -918,7 +978,12 @@ public sealed partial class RealityWorld
         var actorEntities = generated.Features.Where(entity => entity.Kind is EntityKind.Animal or EntityKind.Npc).ToArray();
         var staticEntities = generated.Features.Where(entity => entity.Kind is not (EntityKind.Animal or EntityKind.Npc)).ToArray();
         _geographic ??= generated with { Features = staticEntities };
-        foreach (var entity in staticEntities) if (!_removedBaseEntityIds.ContainsKey(entity.Id)) _baseEntities[entity.Id] = entity;
+        foreach (var entity in staticEntities)
+        {
+            if (_removedBaseEntityIds.ContainsKey(entity.Id)) continue;
+            if (_realityEntities.TryRemove(entity.Id, out var persistedOverride)) _baseEntities[entity.Id] = persistedOverride;
+            else _baseEntities[entity.Id] = entity;
+        }
         foreach (var sample in generated.Elevation) _elevationSamples[$"{sample.X:F1}:{sample.Y:F1}"] = sample;
         var bounds = generated.Area.Bounds;
         _loadedBounds = _loadedBounds is null ? bounds : new WorldBounds(Math.Min(_loadedBounds.MinimumX, bounds.MinimumX), Math.Min(_loadedBounds.MinimumY, bounds.MinimumY), Math.Max(_loadedBounds.MaximumX, bounds.MaximumX), Math.Max(_loadedBounds.MaximumY, bounds.MaximumY));
@@ -984,16 +1049,18 @@ public sealed partial class RealityWorld
             var safe = Navigation.FindNearestWalkable(entity.Position);
             var identity = StableInt(entity.Id) & int.MaxValue;
             var merchantCategory = entity.Properties.GetValueOrDefault("merchantCategory");
-            var merchant = entity.Kind == EntityKind.Npc && (merchantCategory is not null || identity % 4 == 0);
-            var questGiver = entity.Kind == EntityKind.Npc && !merchant && identity % 3 == 0;
+            var subtype = entity.Properties.GetValueOrDefault("subtype") ?? "unknown";
+            var zombie = subtype == "zombie";
+            var merchant = entity.Kind == EntityKind.Npc && !zombie && (merchantCategory is not null || identity % 4 == 0);
+            var questGiver = entity.Kind == EntityKind.Npc && !zombie && !merchant && identity % 3 == 0;
             var maximumHealth = entity.Kind == EntityKind.Animal && entity.Properties.GetValueOrDefault("subtype") is "bear" or "cougar" ? 8 : 5;
             var travel = entity.Kind == EntityKind.Npc ? (TravelMode)(identity % 10 == 0 ? 3 : identity % 8 == 0 ? 2 : 0) : TravelMode.Walk;
             var preferredName = entity.Properties.GetValueOrDefault("name") ?? "Wanderer";
-            var actorName = entity.Kind == EntityKind.Npc ? UniqueNpcName(preferredName, entity.Id) : preferredName;
-            _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, entity.Properties.GetValueOrDefault("subtype") ?? "unknown",
+            var actorName = entity.Kind == EntityKind.Npc ? UniqueNpcName(preferredName, entity.Id) : UniqueAnimalName(subtype, preferredName, entity.Id);
+            _actors[entity.Id] = new ActorState(entity.Id, entity.Kind, subtype,
                 actorName, safe, HealthHearts: maximumHealth, MaximumHealthHearts: maximumHealth,
                 IsMerchant: merchant, TravelMode: travel, MerchantCategory: merchantCategory,
-                EquippedWeapon: merchant ? "pistol" : "none", IsQuestGiver: questGiver);
+                EquippedWeapon: merchant ? "pistol" : zombie ? "fist" : "none", IsQuestGiver: questGiver);
         }
     }
 
@@ -1157,7 +1224,7 @@ public sealed partial class RealityWorld
     {
         "rabbit" => 2.2, "dog" => 1.8, "cat" => 1.4, "bird" => 2.6,
         "deer" => 2.0, "cougar" => 1.7, "bear" => 1.2, "eventBear" => 4, "tRex" => 6,
-        "brontosaurus" => 3, "stegosaurus" => 3.5, "raptor" => 8, "giant" => 4.5, "storeEmployee" => 1.1, _ => 1.25
+        "brontosaurus" => 3, "stegosaurus" => 3.5, "raptor" => 8, "giant" => 4.5, "zombie" => .55, "swatOfficer" => 2.5, "storeEmployee" => 1.1, _ => 1.25
     };
 
     private string ActorSpeech(ActorState actor)
@@ -1168,6 +1235,7 @@ public sealed partial class RealityWorld
         if (actor.Subtype == "stegosaurus") return "HRRROOOH!";
         if (actor.Subtype == "raptor") return "SKREEEE!";
         if (actor.Subtype == "giant") return "FEE-FI-FO-FUM!";
+        if (actor.Subtype == "zombie") return _actorRandom.Next(2) == 0 ? "braaains..." : "uurrrgh...";
         if (actor.Kind == EntityKind.Npc)
         {
             if (actor.Subtype == "policeOfficer") return "Stop! You're under arrest!";
@@ -1223,11 +1291,13 @@ public sealed partial class RealityWorld
             SetBaseReturnPosition(player.Id, home.BuildingId);
             return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
                 HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = home.Id,
+                EquippedWeapon = player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
                 FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
         }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
             HealthHearts = 10, Stamina = 10, Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = "outdoor",
+            EquippedWeapon = player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
             FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
     }
 

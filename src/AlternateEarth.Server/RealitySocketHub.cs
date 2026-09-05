@@ -29,13 +29,17 @@ public sealed class RealitySocketHub
         var name = identity.Username;
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var connection = new ClientConnection(socket);
+        PlayerState? connectedPlayer = null;
         try
         {
             if (_clients.TryRemove(characterId, out var previous)) await previous.CloseAsync("Reconnected from another client.");
+            await _accounts.MarkSeenAsync(identity.AccountId, context.RequestAborted);
             var player = await _world.JoinAsync(characterId, name, identity.AccountId, context.RequestAborted);
+            connectedPlayer = player;
             _clients[characterId] = connection;
-            await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateSnapshot(), privateState = _world.GetPrivateState(characterId) }, context.RequestAborted);
+            await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateSnapshot(), privateState = _world.GetPrivateState(characterId), homeNotice = _world.TakeHomeNotice(characterId) }, context.RequestAborted);
             await BroadcastAsync(new { type = "playerJoined", player }, characterId, context.RequestAborted);
+            await BroadcastAsync(new { type = "chatSaid", chat = new ChatMessage($"presence:{Guid.NewGuid():N}", characterId, "Server", $"{player.Name} entered the reality.", DateTimeOffset.UtcNow) }, null, context.RequestAborted);
             foreach (var flag in _world.PersonalFlagsForOwner(characterId))
                 await BroadcastAsync(new { type = "objectCreated", entity = flag }, characterId, context.RequestAborted);
             await ReceiveLoopAsync(characterId, connection, context.RequestAborted);
@@ -47,8 +51,10 @@ public sealed class RealitySocketHub
             if (_clients.TryGetValue(characterId, out var active) && ReferenceEquals(active, connection) && _clients.TryRemove(characterId, out _))
             {
                 var hiddenFlags = _world.PersonalFlagsForOwner(characterId);
-                _world.Leave(characterId);
+                await _world.LeaveAsync(characterId, CancellationToken.None);
                 await BroadcastAsync(new { type = "playerLeft", playerId = characterId }, characterId, CancellationToken.None);
+                if (connectedPlayer is not null)
+                    await BroadcastAsync(new { type = "chatSaid", chat = new ChatMessage($"presence:{Guid.NewGuid():N}", characterId, "Server", $"{connectedPlayer.Name} left the reality.", DateTimeOffset.UtcNow) }, characterId, CancellationToken.None);
                 foreach (var flag in hiddenFlags)
                     await BroadcastAsync(new { type = "objectRemoved", entityId = flag.Id }, characterId, CancellationToken.None);
             }
@@ -123,6 +129,10 @@ public sealed class RealitySocketHub
                         var equipmentPlayer = await _world.SetEquipmentAsync(characterId, equipmentRequest.Slot, equipmentRequest.ItemType, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = equipmentPlayer }, null, cancellationToken);
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "setWeaponMode":
+                        var modePlayer = await _world.SetWeaponModeAsync(characterId, root.Deserialize<SetWeaponModeRequest>(SharedJson.Options)!.Mode, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = modePlayer }, null, cancellationToken);
                         break;
                     case "updateItemConfiguration":
                         var itemConfiguration = await _world.UpdateItemConfigurationAsync(characterId, root.Deserialize<UpdateItemConfigurationRequest>(SharedJson.Options)!, cancellationToken);
@@ -206,11 +216,25 @@ public sealed class RealitySocketHub
                     case "purchaseBase":
                         var basePurchase = await _world.PurchaseBaseAsync(characterId, root.Deserialize<PurchaseBaseRequest>(SharedJson.Options)!, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = basePurchase.Player }, null, cancellationToken);
+                        await BroadcastAsync(new { type = "publicBasesChanged", publicBases = _world.CreateSnapshot().PublicBases }, null, cancellationToken);
                         await connection.SendAsync(new { type = "basePurchased", player = basePurchase.Player, priceCents = basePurchase.PriceCents, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "requestTrade":
                         var tradeRequest = root.Deserialize<RequestTradeRequest>(SharedJson.Options)!;
                         await connection.SendAsync(new { type = "tradeQuote", quote = _world.RequestTrade(characterId, tradeRequest.MerchantId) }, cancellationToken);
+                        break;
+                    case "requestHomeShop":
+                        var homeShop = await _world.RequestHomeShopAsync(characterId, root.Deserialize<RequestHomeShopRequest>(SharedJson.Options)!.FurnitureId, cancellationToken);
+                        await connection.SendAsync(new { type = "homeShopOpened", shop = homeShop }, cancellationToken);
+                        break;
+                    case "setHomeShopListing":
+                        var listed = await _world.SetHomeShopListingAsync(characterId, root.Deserialize<SetHomeShopListingRequest>(SharedJson.Options)!, cancellationToken);
+                        await connection.SendAsync(new { type = "homeShopUpdated", shop = listed.Shop, player = listed.Player, privateState = listed.PrivateState, message = listed.Message }, cancellationToken);
+                        break;
+                    case "purchaseHomeShop":
+                        var homePurchase = await _world.PurchaseHomeShopAsync(characterId, root.Deserialize<PurchaseHomeShopRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = homePurchase.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "homeShopUpdated", shop = homePurchase.Shop, player = homePurchase.Player, privateState = homePurchase.PrivateState, message = homePurchase.Message }, cancellationToken);
                         break;
                     case "confirmTrade":
                         var confirmation = root.Deserialize<ConfirmTradeRequest>(SharedJson.Options)!;
@@ -248,11 +272,21 @@ public sealed class RealitySocketHub
                         break;
                     case "attackWorldObject":
                         var worldCrime = await _world.AttackWorldObjectAsync(characterId, root.Deserialize<AttackWorldObjectRequest>(SharedJson.Options)!.EntityId, cancellationToken);
+                        await BroadcastAsync(new { type = "worldObjectUpdated", entity = worldCrime.Entity }, null, cancellationToken);
+                        if (worldCrime.WitnessMessage is not null) await BroadcastAsync(new { type = "chatSaid", chat = worldCrime.WitnessMessage }, null, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = worldCrime.Player }, null, cancellationToken);
                         await connection.SendAsync(new { type = "crimeReported", privateState = worldCrime.PrivateState, message = worldCrime.Message }, cancellationToken);
                         break;
+                    case "sprayPaintVehicle":
+                        var paintedCar = await _world.SprayPaintVehicleAsync(characterId, root.Deserialize<SprayPaintVehicleRequest>(SharedJson.Options)!.EntityId, cancellationToken);
+                        await BroadcastAsync(new { type = "worldObjectUpdated", entity = paintedCar.Entity }, null, cancellationToken);
+                        if (paintedCar.WitnessMessage is not null) await BroadcastAsync(new { type = "chatSaid", chat = paintedCar.WitnessMessage }, null, cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = paintedCar.Player }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "crimeReported", privateState = paintedCar.PrivateState, message = paintedCar.Message }, cancellationToken);
+                        break;
                     case "pickLock":
                         var lockResult = await _world.PickLockAsync(characterId, root.Deserialize<PickLockRequest>(SharedJson.Options)!.DoorId, cancellationToken);
+                        if (lockResult.WitnessMessage is not null) await BroadcastAsync(new { type = "chatSaid", chat = lockResult.WitnessMessage }, null, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = lockResult.Player }, null, cancellationToken);
                         await connection.SendAsync(new { type = "lockPickResult", doorId = root.Deserialize<PickLockRequest>(SharedJson.Options)!.DoorId, success = lockResult.Success, policeCalled = lockResult.PoliceCalled, privateState = lockResult.PrivateState, message = lockResult.Message }, cancellationToken);
                         break;
@@ -405,6 +439,11 @@ public sealed class RealitySocketHub
     {
         foreach (var chat in messages)
             await BroadcastAsync(new { type = "chatSaid", chat }, null, cancellationToken);
+    }
+
+    public async Task BroadcastRemovedWorldObjectsAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken = default)
+    {
+        foreach (var entityId in entityIds) await BroadcastAsync(new { type = "objectRemoved", entityId }, null, cancellationToken);
     }
 
     private static string NormalizeCharacterId(string? value) =>

@@ -104,6 +104,7 @@ public sealed class WorldNavigation
                 TerrainType.ShallowWater => MilesPerHour(3),
                 _ => 0
             },
+            TravelMode.Ufo => MilesPerHour(60),
             _ => SpeedFor(effectiveTerrain)
         };
         return running ? speed * 3 : hiking ? speed * 2 : speed;
@@ -124,6 +125,7 @@ public sealed class WorldNavigation
         TravelMode.Bike => terrain != TerrainType.DeepWater,
         TravelMode.Raft => terrain is TerrainType.ShallowWater or TerrainType.DeepWater,
         TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle => terrain != TerrainType.DeepWater,
+        TravelMode.Ufo => true,
         _ => true
     };
 

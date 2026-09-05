@@ -27,6 +27,7 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.BroadcastActorsAsync(hostile.Actors, stoppingToken);
             await _hub.BroadcastPlayersAsync(hostile.Players, stoppingToken);
             await _hub.BroadcastCombatAsync(hostile.Combat, stoppingToken);
+            await _hub.BroadcastRemovedWorldObjectsAsync(hostile.RemovedWorldObjectIds ?? Array.Empty<string>(), stoppingToken);
             var speech = _world.AdvanceActorSpeech(DateTimeOffset.UtcNow);
             await _hub.BroadcastChatAsync(speech, stoppingToken);
             var currentLockCycle = _world.CurrentDoorLockCycle;

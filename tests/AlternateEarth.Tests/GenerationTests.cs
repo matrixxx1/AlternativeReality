@@ -58,7 +58,7 @@ public sealed class GenerationTests
         var first = DeterministicWorldGenerator.GenerateActors(Reality, Array.Empty<CanonicalEntity>());
         var second = DeterministicWorldGenerator.GenerateActors(Reality, Array.Empty<CanonicalEntity>());
 
-        Assert.Equal(50, first.Count);
+        Assert.Equal(56, first.Count);
         Assert.Equal(8, first.Count(actor => actor.Properties["subtype"] == "rabbit"));
         Assert.Equal(3, first.Count(actor => actor.Properties["subtype"] == "dog"));
         Assert.Equal(4, first.Count(actor => actor.Properties["subtype"] == "cat"));
@@ -66,7 +66,8 @@ public sealed class GenerationTests
         Assert.Equal(5, first.Count(actor => actor.Properties["subtype"] == "deer"));
         Assert.Equal(1, first.Count(actor => actor.Properties["subtype"] == "cougar"));
         Assert.Equal(1, first.Count(actor => actor.Properties["subtype"] == "bear"));
-        Assert.Equal(18, first.Count(actor => actor.Kind == EntityKind.Npc));
+        Assert.Equal(24, first.Count(actor => actor.Kind == EntityKind.Npc));
+        Assert.Equal(6, first.Count(actor => actor.Properties["subtype"] == "zombie"));
         Assert.Equal(first.Select(actor => actor.Position), second.Select(actor => actor.Position));
         Assert.Contains(first, actor => actor.Kind == EntityKind.Npc && actor.Properties["name"] == "Joe");
         Assert.All(first.Where(actor => actor.Properties["subtype"] == "dog"), actor => Assert.NotEqual("dog", actor.Properties["name"]));

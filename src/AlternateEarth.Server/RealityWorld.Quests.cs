@@ -35,12 +35,13 @@ public sealed partial class RealityWorld
     {
         if (!_players.ContainsKey(playerId)) throw new InvalidOperationException("Unknown player.");
         if (!_questOffers.TryRemove((playerId, questId), out var offered)) throw new InvalidOperationException("That quest offer expired. Talk to the quest giver again.");
-        if (offered.Kind == "courier")
+        if (offered.Kind is "courier" or "drugDelivery")
         {
-            var package = QuestPackageItem(offered);
+            var package = offered.Kind == "drugDelivery" ? QuestDrugItem(offered) : QuestPackageItem(offered);
             if (!CanAddToBackpack(playerId, new[] { InventoryStack(package, 1) }, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
             AddInventory(playerId, package, 1);
             await SaveInventoryAsync(playerId, cancellationToken);
+            if (offered.Kind == "drugDelivery") { EnsureDrugQuestPolice(playerId); await AlertPoliceToDrugHandoffAsync(playerId, _players[playerId].Position, cancellationToken); }
         }
         var accepted = offered with { Status = "active" };
         _quests[(playerId, accepted.Id)] = accepted;
@@ -54,11 +55,12 @@ public sealed partial class RealityWorld
         var actor = FindActor(playerId, request.ActorId) ?? throw new InvalidOperationException("That character is not here.");
         if (player.LocationId != actor.LocationId || player.Position.Distance2D(actor.Position) > 5) throw new InvalidOperationException("Move within 5 meters to complete the quest.");
         if (!QuestCanComplete(playerId, quest, actor.Id)) throw new InvalidOperationException("That quest objective is not ready to turn in.");
+        if (quest.Kind == "drugDelivery") player = await AlertPoliceToDrugHandoffAsync(playerId, player.Position, cancellationToken);
 
         if (quest.Kind == "item" && !RemoveInventory(playerId, quest.RequiredItemType!, quest.RequiredQuantity)) throw new InvalidOperationException("The requested item is no longer in your backpack.");
-        if (quest.Kind is "courier" or "missingPet")
+        if (quest.Kind is "courier" or "missingPet" or "drugDelivery")
         {
-            var carried = quest.Kind == "courier" ? QuestPackageItem(quest) : QuestPetItem(quest);
+            var carried = quest.Kind == "courier" ? QuestPackageItem(quest) : quest.Kind == "drugDelivery" ? QuestDrugItem(quest) : QuestPetItem(quest);
             if (!RemoveInventory(playerId, carried, 1)) throw new InvalidOperationException("The quest item is no longer in your backpack.");
         }
 
@@ -78,6 +80,7 @@ public sealed partial class RealityWorld
     {
         if (!_quests.TryGetValue((playerId, questId), out var quest) || quest.Status is "completed" or "failed" or "abandoned") throw new InvalidOperationException("Active quest not found.");
         if (quest.Kind == "courier") RemoveInventory(playerId, QuestPackageItem(quest), 1);
+        if (quest.Kind == "drugDelivery") RemoveInventory(playerId, QuestDrugItem(quest), 1);
         if (quest.Kind == "missingPet") RemoveInventory(playerId, QuestPetItem(quest), 1);
         var abandoned = quest with { Status = "abandoned" };
         _quests[(playerId, quest.Id)] = abandoned;
@@ -135,7 +138,7 @@ public sealed partial class RealityWorld
             if (isMailbox)
             {
                 await RecordMailboxVandalismAsync(playerId, cancellationToken);
-                var witness = _actors.Values.Where(actor => actor.Kind == EntityKind.Npc && actor.LocationId == "outdoor" && actor.Position.Distance2D(vegetation.Position) <= 30).OrderBy(actor => actor.Position.Distance2D(vegetation.Position)).FirstOrDefault();
+                var witness = FindCrimeWitness(vegetation.Position);
                 if (witness is not null)
                 {
                     witnessMessage = new ChatMessage($"chat:{Guid.NewGuid():N}", witness.Id, witness.Name, "I'm calling the cops!", DateTimeOffset.UtcNow);
@@ -158,9 +161,14 @@ public sealed partial class RealityWorld
     public async Task<WorldCrimeResult> AttackWorldObjectAsync(string playerId, string entityId, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("You can only attack outdoor world objects.");
-        if (!_baseEntities.TryGetValue(entityId, out var entity) || entity.Kind != EntityKind.Vehicle) throw new InvalidOperationException("That vehicle is no longer there.");
-        if (player.EquippedWeapon == "none") throw new InvalidOperationException("Equip a weapon before attacking a vehicle.");
-        if (player.Position.Distance2D(entity.Position) > InventoryDefinition(player.EquippedWeapon).RangeMeters) throw new InvalidOperationException("That vehicle is out of weapon range.");
+        if (!_baseEntities.TryGetValue(entityId, out var entity) || entity.Kind is not (EntityKind.Vehicle or EntityKind.Building)) throw new InvalidOperationException("That world object is no longer there.");
+        if (entity.Kind == EntityKind.Building && _publicBaseClaims.ContainsKey(entity.Id)) throw new InvalidOperationException("A claimed Home is protected and cannot be damaged.");
+        if (entity.Properties.GetValueOrDefault("state") == "rubble") throw new InvalidOperationException("That building is already rubble.");
+        if (player.EquippedWeapon == "none") throw new InvalidOperationException("Equip a weapon before attacking this object.");
+        var objectDistance = entity.Kind == EntityKind.Building && entity.Geometry.Count >= 3 && player.Position.Region == entity.Position.Region
+            ? DistanceToFootprint(new GeometryPoint(player.Position.X, player.Position.Y), entity.Geometry)
+            : player.Position.Distance2D(entity.Position);
+        if (objectDistance > InventoryDefinition(player.EquippedWeapon).RangeMeters) throw new InvalidOperationException("That object is out of weapon range.");
         var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
             .FirstOrDefault(item => item.Kind == "vandalizeCar" && item.Status == "active" && item.TargetActorId == entityId);
         if (quest is not null)
@@ -169,8 +177,51 @@ public sealed partial class RealityWorld
             _quests[(playerId, quest.Id)] = ready;
             await _store.SaveQuestAsync(Configuration.Id, ready, cancellationToken);
         }
-        var updated = await ReportCrimeAsync(playerId, entity.Position, cancellationToken);
-        return new WorldCrimeResult(updated, GetPrivateState(playerId), "The vehicle alarm is sounding. Police are on the way.");
+        var configuredDamage = InventoryDefinition(player.EquippedWeapon).Damage;
+        var appliedDamage = WeaponDamageFor(playerId, player.EquippedWeapon, Math.Max(.25, configuredDamage));
+        var properties = new Dictionary<string, string>(entity.Properties);
+        if (entity.Kind == EntityKind.Building)
+        {
+            var priorHealth = double.TryParse(entity.Properties.GetValueOrDefault("healthHearts"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var health) ? health : 5000;
+            var remaining = Math.Max(0, priorHealth - appliedDamage);
+            properties["maximumHealthHearts"] = "5000"; properties["healthHearts"] = remaining.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            if (remaining <= 0) { properties["state"] = "rubble"; properties["destroyedUntilUtc"] = DateTimeOffset.UtcNow.AddMinutes(10).ToString("O"); }
+        }
+        else properties["damage"] = (double.TryParse(entity.Properties.GetValueOrDefault("damage"), out var prior) ? prior + appliedDamage : appliedDamage).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        var damaged = entity with { Properties = properties, Version = entity.Version + 1 }; _baseEntities[entity.Id] = damaged;
+        if (entity.Kind == EntityKind.Building) await _store.SaveEntityAsync(Configuration.Id, damaged, cancellationToken);
+        var witness = FindCrimeWitness(entity.Position); ChatMessage? witnessMessage = null; var updated = player;
+        if (witness is not null)
+        {
+            witnessMessage = new ChatMessage($"chat:{Guid.NewGuid():N}", witness.Id, witness.Name, "I'm calling the cops!", DateTimeOffset.UtcNow);
+            updated = await ReportCrimeAsync(playerId, witness.Position, cancellationToken);
+        }
+        var destroyed = entity.Kind == EntityKind.Building && properties.GetValueOrDefault("state") == "rubble";
+        var message = entity.Kind == EntityKind.Building
+            ? destroyed ? "The building collapsed into burning rubble. It will disappear in 10 minutes." : $"The building has {properties["healthHearts"]} / 5000 hearts remaining."
+            : witness is null ? "The parked car was damaged, but nobody saw the crime." : $"The vehicle alarm is sounding. {witness.Name} called the cops.";
+        if (entity.Kind == EntityKind.Building && witness is not null) message += $" {witness.Name} witnessed the property damage and called the cops.";
+        _navigation = new WorldNavigation(_loadedBounds ?? Configuration.Area.Bounds, _baseEntities.Values.Concat(_realityEntities.Values).ToArray(), _elevationSamples.Values.ToArray());
+        return new WorldCrimeResult(updated, GetPrivateState(playerId), message, damaged, witnessMessage);
+    }
+
+    public async Task<WorldCrimeResult> SprayPaintVehicleAsync(string playerId, string entityId, CancellationToken cancellationToken = default)
+    {
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("You can only spray-paint outdoor vehicles.");
+        if (!_baseEntities.TryGetValue(entityId, out var entity) || entity.Kind != EntityKind.Vehicle) throw new InvalidOperationException("That vehicle is no longer there.");
+        if (player.Position.Distance2D(entity.Position) > 4) throw new InvalidOperationException("Move within 4 meters to spray-paint the car.");
+        if (!player.GodMode && !RemoveInventory(playerId, "sprayPaint", 1)) throw new InvalidOperationException("You need a can of spray paint.");
+        string[] colors = ["#ef476f", "#ffd166", "#06d6a0", "#118ab2", "#9b5de5", "#f15bb5"];
+        var properties = new Dictionary<string, string>(entity.Properties) { ["sprayPaintColor"] = colors[RandomNumberGenerator.GetInt32(colors.Length)], ["vandalizedBy"] = player.Name };
+        var painted = entity with { Properties = properties, Version = entity.Version + 1 }; _baseEntities[entity.Id] = painted;
+        if (!player.GodMode) await SaveInventoryAsync(playerId, cancellationToken);
+        var witness = FindCrimeWitness(entity.Position); ChatMessage? witnessMessage = null; var updated = player;
+        if (witness is not null)
+        {
+            witnessMessage = new ChatMessage($"chat:{Guid.NewGuid():N}", witness.Id, witness.Name, "I'm calling the cops!", DateTimeOffset.UtcNow);
+            updated = await ReportCrimeAsync(playerId, witness.Position, cancellationToken);
+        }
+        return new WorldCrimeResult(updated, GetPrivateState(playerId), witness is null ? "Spray-painted the parked car. Nobody saw the crime." : $"Spray-painted the parked car. {witness.Name} called the cops.", painted, witnessMessage);
     }
 
     public async Task<LockPickResult> PickLockAsync(string playerId, string doorId, CancellationToken cancellationToken = default)
@@ -195,12 +246,18 @@ public sealed partial class RealityWorld
                 await _store.SaveQuestAsync(Configuration.Id, ready, cancellationToken);
             }
         }
-        var witnessed = _actors.Values.Any(actor => actor.Kind == EntityKind.Npc && actor.LocationId == "outdoor" && actor.Position.Distance2D(door.Position) <= 30);
-        var policeCalled = witnessed && success && RandomNumberGenerator.GetInt32(100) < 10;
-        if (witnessed) player = await ReportCrimeAsync(playerId, door.Position, cancellationToken, policeCalled);
-        var message = success ? policeCalled ? "Lock opened, but a witness called the police." : witnessed ? "Lock opened. A witness saw the crime." : "Lock opened successfully." : witnessed ? "The lock resisted the attempt. A witness saw the crime." : "The lock resisted the attempt.";
-        return new LockPickResult(player, GetPrivateState(playerId), success, policeCalled, message);
+        var witness = FindCrimeWitness(door.Position); var witnessed = witness is not null;
+        if (witnessed) player = await ReportCrimeAsync(playerId, witness!.Position, cancellationToken);
+        var witnessMessage = witnessed ? new ChatMessage($"chat:{Guid.NewGuid():N}", witness!.Id, witness.Name, "I'm calling the cops!", DateTimeOffset.UtcNow) : null;
+        var message = success ? witnessed ? "Lock opened, but a witness called the police." : "Lock opened successfully." : witnessed ? "The lock resisted the attempt, but a witness called the police." : "The lock resisted the attempt.";
+        return new LockPickResult(player, GetPrivateState(playerId), success, witnessed, message, witnessMessage);
     }
+
+    private ActorState? FindCrimeWitness(WorldPosition scene) => _actors.Values
+        .Where(actor => IsHumanNpc(actor) && actor.LocationId == "outdoor" && actor.Position.Distance2D(scene) <= NpcSightRange(actor, scene))
+        .OrderBy(actor => actor.Position.Distance2D(scene)).FirstOrDefault();
+
+    private static bool IsHumanNpc(ActorState actor) => actor.Kind == EntityKind.Npc && actor.Subtype is "resident" or "merchant" or "storeMerchant" or "storeEmployee" or "policeOfficer" or "swatOfficer";
 
     private async Task<PlayerState> ReportCrimeAsync(string playerId, WorldPosition scene, CancellationToken cancellationToken, bool dispatchPolice = true)
     {
@@ -229,7 +286,7 @@ public sealed partial class RealityWorld
     {
         var id = $"quest:{giver.Id}:{sequence}";
         var random = new Random(StableInt($"{Configuration.Seed}:{playerId}:{id}"));
-        var kind = (StableInt($"{giver.Id}:{sequence}") & int.MaxValue) % 8;
+        var kind = (StableInt($"{giver.Id}:{sequence}") & int.MaxValue) % 9;
         if (kind == 1)
         {
             var animals = _actors.Values.Where(actor => actor.Kind == EntityKind.Animal && actor.Subtype is not ("dog" or "cat")).OrderBy(actor => actor.Id).ToArray();
@@ -292,6 +349,15 @@ public sealed partial class RealityWorld
                 return new QuestState(id, playerId, giver.Id, giver.Name, "vandalizeCar", "offered", "Vandalize a parked car", $"Attack the specified parked car. {clue} Police consequences still apply.", random.Next(80_000, 225_001), TargetActorId: target.Id, TargetName: "parked car", DestinationClue: clue);
             }
         }
+        if (kind == 8)
+        {
+            var destinations = _actors.Values.Where(actor => IsHumanNpc(actor) && actor.Id != giver.Id && actor.Subtype is not ("policeOfficer" or "swatOfficer")).OrderBy(actor => actor.Id).ToArray();
+            if (destinations.Length > 0)
+            {
+                var target = destinations[random.Next(destinations.Length)]; var clue = DirectionClue(giver.Position, target.Position, target.Name); var distance = giver.Position.Distance2D(target.Position);
+                return new QuestState(id, playerId, giver.Id, giver.Name, "drugDelivery", "offered", $"A discreet delivery for {target.Name}", $"Pick up the contraband and deliver it to {target.Name}. Police will track you while you carry it. {clue}", Math.Max(50_000, (long)(distance * 300)), DestinationActorId: target.Id, DestinationName: target.Name, DestinationClue: clue);
+            }
+        }
         var itemType = QuestItemTypes[(StableInt(id) & int.MaxValue) % QuestItemTypes.Length]; var definition = InventoryDefinition(itemType);
         var reward = Math.Max(10_000, checked(definition.MaximumPriceCents * 4 + 10_000));
         return new QuestState(id, playerId, giver.Id, giver.Name, "item", "offered", $"Find {definition.DisplayName}", $"Find 1 {definition.DisplayName} and bring it back to {giver.Name}. Look for loose items, treasure, defeated enemies, or merchants.", reward, itemType, 1);
@@ -305,6 +371,7 @@ public sealed partial class RealityWorld
             "item" => actorId == quest.GiverId && InventoryQuantity(playerId, quest.RequiredItemType!) >= quest.RequiredQuantity,
             "hunt" => actorId == quest.GiverId && quest.Status == "ready",
             "courier" => actorId == quest.DestinationActorId && InventoryQuantity(playerId, QuestPackageItem(quest)) > 0,
+            "drugDelivery" => actorId == quest.DestinationActorId && InventoryQuantity(playerId, QuestDrugItem(quest)) > 0,
             "missingPet" => actorId == quest.GiverId && quest.Status == "ready" && InventoryQuantity(playerId, QuestPetItem(quest)) > 0,
             "chop" => actorId == quest.GiverId && quest.Status == "ready",
             "lockpick" => actorId == quest.GiverId && quest.Status == "ready",
@@ -332,7 +399,27 @@ public sealed partial class RealityWorld
     }
 
     private static string QuestPackageItem(QuestState quest) => $"quest:package:{quest.Id}";
+    private static string QuestDrugItem(QuestState quest) => $"quest:drugs:{quest.Id}";
     private static string QuestPetItem(QuestState quest) => $"quest:pet:{quest.Id}";
+
+    private void EnsureDrugQuestPolice(string playerId)
+    {
+        if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") return;
+        if (_actors.Values.Any(actor => actor.Subtype is "policeOfficer" or "swatOfficer" && actor.FactionId == $"drug-watch:{playerId}")) return;
+        var spawn = Navigation.FindNearestWalkable(player.Position with { X = player.Position.X + 35, Y = player.Position.Y + 20 }); var id = $"drug-cop:{Guid.NewGuid():N}";
+        _actors[id] = new ActorState(id, EntityKind.Npc, "policeOfficer", UniqueNpcName($"Officer {FriendlyHumanName(id, 0)}", id), spawn, EquippedWeapon: "pistol", FactionId: $"drug-watch:{playerId}");
+    }
+
+    private async Task<PlayerState> AlertPoliceToDrugHandoffAsync(string playerId, WorldPosition position, CancellationToken cancellationToken)
+    {
+        var witnesses = _actors.Values.Where(actor => actor.Subtype is "policeOfficer" or "swatOfficer" && actor.LocationId == "outdoor" && actor.Position.Distance2D(position) <= NpcSightRange(actor, position)).ToArray();
+        foreach (var officer in witnesses)
+        {
+            _relationships[(playerId, officer.Id)] = -10;
+            await _store.SaveRelationshipAsync(Configuration.Id, new RelationshipState(playerId, officer.Id, -10), cancellationToken);
+        }
+        return witnesses.Length > 0 ? await ReportCrimeAsync(playerId, position, cancellationToken) : _players[playerId];
+    }
     private static string DirectionClue(WorldPosition from, WorldPosition to, string name)
     {
         var dx = to.X - from.X; var dy = to.Y - from.Y; var distance = Math.Sqrt(dx * dx + dy * dy);
@@ -345,5 +432,5 @@ public sealed partial class RealityWorld
 public sealed record QuestActionResult(PlayerPrivateState PrivateState, PlayerState Player, QuestState Quest, string Message);
 public sealed record VegetationChopResult(string EntityId, PlayerState Player, PlayerPrivateState PrivateState, string Message, ChatMessage? WitnessMessage = null);
 public sealed record PendingPoliceResponse(string PlayerId, WorldPosition WitnessPosition, DateTimeOffset DueAtUtc);
-public sealed record WorldCrimeResult(PlayerState Player, PlayerPrivateState PrivateState, string Message);
-public sealed record LockPickResult(PlayerState Player, PlayerPrivateState PrivateState, bool Success, bool PoliceCalled, string Message);
+public sealed record WorldCrimeResult(PlayerState Player, PlayerPrivateState PrivateState, string Message, CanonicalEntity Entity, ChatMessage? WitnessMessage = null);
+public sealed record LockPickResult(PlayerState Player, PlayerPrivateState PrivateState, bool Success, bool PoliceCalled, string Message, ChatMessage? WitnessMessage = null);

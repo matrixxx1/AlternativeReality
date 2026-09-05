@@ -453,7 +453,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.InRange(entered.Dungeon.LevelCount, 5, 10);
         Assert.True(entered.Dungeon.Actors.Count >= 10);
         Assert.All(entered.Dungeon.Actors, actor => Assert.True(actor.MaximumHealthHearts >= 17));
-        Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.EquippedWeapon, new[] { "sword", "crossbow", "pistol", "rifle" }));
+        Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.EquippedWeapon, new[] { "sword", "crossbow", "pistol", "rifle", "gorillaSmash" }));
     }
 
     [Fact]
@@ -478,7 +478,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var second = await world.EnterDungeonAsync(player.Id, door.Id);
 
         Assert.NotSame(first.Dungeon, second.Dungeon);
-        Assert.NotEqual(first.Dungeon.SessionId, second.Dungeon.SessionId);
+        Assert.Equal(first.Dungeon.SessionId, second.Dungeon.SessionId);
         Assert.Equal(1, first.Dungeon.Difficulty);
         Assert.Equal(1, second.Dungeon.Difficulty);
         Assert.Equal(1, first.Dungeon.LevelCount);

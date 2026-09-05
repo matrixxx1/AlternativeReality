@@ -46,6 +46,7 @@ internal static class FurnitureCatalog
         new("grandfatherClock", "Grandfather clock", .7, .45, 40_000, 300_000, "clock", ["oak", "walnut", "black"], ["solid", "woodgrain"]),
         new("piano", "Upright piano", 1.5, .7, 80_000, 900_000, "piano", ["black", "white", "walnut"], ["solid", "woodgrain"]),
         new("recordCabinet", "Record cabinet", 1.0, .5, 15_000, 120_000, "cabinet", ["oak", "walnut", "white", "black"], ["solid", "woodgrain"])
+        ,new("homeShopCounter", "Home shop counter", 1.8, .75, 75_000, 300_000, "shop", ["oak", "walnut", "white", "black", "red"], ["solid", "woodgrain", "striped"])
     ];
 
     private static readonly Dictionary<string, FurnitureDefinition> ByType = All.ToDictionary(item => item.Type, StringComparer.OrdinalIgnoreCase);

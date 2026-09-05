@@ -38,7 +38,8 @@ public enum TravelMode
     Raft,
     DirtBike,
     Motorcycle,
-    EBike
+    EBike,
+    Ufo
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -104,7 +105,10 @@ public sealed record PlayerState(
     DateTimeOffset? EnergyDrinkBoostUntilUtc = null,
     DateTimeOffset? EnergyDrinkCrashUntilUtc = null,
     DateTimeOffset? ProbedUntilUtc = null,
-    DateTimeOffset? CandleUntilUtc = null);
+    DateTimeOffset? CandleUntilUtc = null,
+    bool ShieldOn = false,
+    string Ar15FireMode = "single",
+    double FlamethrowerGasGallons = 0);
 
 public sealed record ActorState(
     string Id,
@@ -127,7 +131,8 @@ public sealed record ActorState(
     bool IsQuestGiver = false,
     DateTimeOffset? EventStartedAtUtc = null,
     DateTimeOffset? EventEndsAtUtc = null,
-    string? EventName = null);
+    string? EventName = null,
+    string WeaponQuality = "Common");
 
 public enum InventoryCategory { Weapon, Quest, Other }
 public sealed record ItemStack(
@@ -135,7 +140,8 @@ public sealed record ItemStack(
     int Quantity,
     InventoryCategory Category = InventoryCategory.Other,
     double UnitWeightPounds = 1,
-    bool CarriedInBackpack = true);
+    bool CarriedInBackpack = true,
+    string? Quality = null);
 public sealed record InventoryState(
     string PlayerId,
     IReadOnlyList<ItemStack> Items,
@@ -148,7 +154,7 @@ public sealed record InventoryState(
     int OtherSlotsUsed = 0,
     int MaximumOtherSlots = 6,
     bool Unlimited = false);
-public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true);
+public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true, double Accuracy = 1, double AttackIntervalSeconds = .5);
 public sealed record MovementConfiguration(
     double BaseSpeedMph,
     double BaseVisibilityMeters,
@@ -186,7 +192,8 @@ public sealed record ServerEventConfiguration(
     string LandOfGiantsEventName = "Land of the Giants",
     string BearEventName = "The Great Bear",
     string ServerTimeMode = "auto",
-    int ServerUtcOffsetMinutes = 0);
+    int ServerUtcOffsetMinutes = 0,
+    int WantedSwatThreshold = 5);
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,
@@ -197,6 +204,8 @@ public sealed record MerchantOffer(
     IReadOnlyDictionary<string, string>? Properties = null);
 public sealed record TradeQuote(string MerchantId, string MerchantName, double FriendRating, IReadOnlyList<MerchantOffer> Offers, IReadOnlyList<MerchantOffer>? BuyOffers = null);
 public sealed record PurchaseLine(string ItemType, int Quantity);
+public sealed record HomeShopListing(string ItemType, int Quantity, long UnitPriceCents, string DisplayName, double UnitWeightPounds, string? Quality = null);
+public sealed record HomeShopState(string FurnitureId, string OwnerName, bool IsOwner, IReadOnlyList<HomeShopListing> Listings, InventoryState? OwnerInventory = null);
 public sealed record QuestState(
     string Id, string PlayerId, string GiverId, string GiverName, string Kind, string Status,
     string Title, string Description, long RewardCents,
@@ -229,6 +238,7 @@ public sealed record BaseState(
     string OwnerName,
     double SquareFeet = 0,
     long PurchasePriceCents = 35_000_000);
+public sealed record PublicBaseState(string BuildingId, string OwnerName);
 public sealed record PlayerPrivateState(
     InventoryState Inventory,
     DungeonState? Dungeon,
@@ -241,9 +251,10 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<string>? RevealedWorldAreas = null,
     IReadOnlyList<CanonicalEntity>? HomeStorage = null,
     InventoryState? HomeItemStorage = null,
-    IReadOnlyList<QuestState>? Quests = null);
+    IReadOnlyList<QuestState>? Quests = null,
+    bool CanEditHome = false);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
-    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null);
+    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null);
 
 public sealed record ChatMessage(
     string Id,
@@ -333,4 +344,5 @@ public sealed record WorldSnapshot(
     IReadOnlyList<ActorState>? Actors = null,
     IReadOnlyList<WorldBounds>? LoadedAreas = null,
     IReadOnlyList<DoorLockState>? DoorLocks = null,
-    DateTimeOffset? DoorLockCycleEndsAtUtc = null);
+    DateTimeOffset? DoorLockCycleEndsAtUtc = null,
+    IReadOnlyList<PublicBaseState>? PublicBases = null);

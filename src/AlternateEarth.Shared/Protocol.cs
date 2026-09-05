@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 39;
+    public const int Version = 41;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -31,6 +31,7 @@ public sealed record AbandonQuestRequest(string QuestId);
 public sealed record CaptureQuestPetRequest(string ActorId);
 public sealed record ChopVegetationRequest(string EntityId);
 public sealed record AttackWorldObjectRequest(string EntityId);
+public sealed record SprayPaintVehicleRequest(string EntityId);
 public sealed record PickLockRequest(string DoorId);
 public sealed record ConsumeItemRequest(string ItemType);
 public sealed record DropItemRequest(string ItemType, int Quantity = 1);
@@ -44,12 +45,16 @@ public sealed record StoreFurnitureRequest(string FurnitureId);
 public sealed record PlaceFurnitureRequest(string FurnitureId, double X, double Y, double RotationDegrees = 0);
 public sealed record OpenHomeStorageRequest(string ChestId);
 public sealed record TransferHomeStorageRequest(string ChestId, string ItemType, int Quantity, bool ToStorage);
+public sealed record RequestHomeShopRequest(string FurnitureId);
+public sealed record SetHomeShopListingRequest(string FurnitureId, string ItemType, int Quantity, long UnitPriceCents);
+public sealed record PurchaseHomeShopRequest(string FurnitureId, string ItemType, int Quantity);
 public sealed record PurchaseBaseRequest(string DoorId);
 public sealed record SetLightsRequest(bool FlashlightOn, bool LanternOn, bool LaserOn);
 public sealed record SetMagicHikingShoesRequest(bool Enabled);
 public sealed record SetMagicRunningShoesRequest(bool Enabled);
 public sealed record SetEquipmentRequest(string Slot, string? ItemType);
-public sealed record UpdateItemConfigurationRequest(string ItemType, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, double SpeedModifierMph = 0, double VisibilityModifierMeters = 0);
+public sealed record SetWeaponModeRequest(string Mode);
+public sealed record UpdateItemConfigurationRequest(string ItemType, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, double SpeedModifierMph = 0, double VisibilityModifierMeters = 0, double Accuracy = 1, double AttackIntervalSeconds = .5);
 public sealed record ConfigureInventoryItemRequest(string ItemType, string Action);
 public sealed record UpdateMovementConfigurationRequest(double BaseSpeedMph, double BaseVisibilityMeters, IReadOnlyDictionary<TerrainType, double> TerrainSpeedModifiersMph, IReadOnlyDictionary<TravelMode, double> TravelModeSpeedModifiersMph);
 public sealed record UpdateServerEventsRequest(
@@ -66,7 +71,7 @@ public sealed record UpdateServerEventsRequest(
     string UfoEventName = "UFO Flyover", string TrexEventName = "T-Rex Portal",
     string BrontosaurusEventName = "Brontosaurus Portal", string StegosaurusEventName = "Stegosaurus Portal",
     string RaptorEventName = "Raptor Pack", string LandOfGiantsEventName = "Land of the Giants",
-    string BearEventName = "The Great Bear", string ServerTimeMode = "auto");
+    string BearEventName = "The Great Bear", string ServerTimeMode = "auto", int WantedSwatThreshold = 5);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record PlaceFlagRequest(double X, double Y, string Label);
 public sealed record RemoveObjectRequest(string EntityId);

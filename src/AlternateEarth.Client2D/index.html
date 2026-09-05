@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=48">
+  <link rel="stylesheet" href="styles.css?v=49">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -76,6 +76,7 @@
       <button type="button" data-mode="dirtBike">Dirt bike</button>
       <button type="button" data-mode="motorcycle">Motorcycle</button>
       <button type="button" data-mode="raft">Raft</button>
+      <button type="button" data-mode="ufo">UFO</button>
     </div>
   </section>
   <section id="inventoryPanel" class="panel inventory-panel">
@@ -147,11 +148,20 @@
     <button id="capturePetButton" type="button" hidden>Capture pet</button>
     <button id="stalkButton" type="button" hidden>Stalk</button>
     <button id="continuousAttackButton" type="button" hidden>Attack</button>
+    <button id="sprayPaintVehicleButton" type="button" hidden>Spray-paint car</button>
     <button id="purchaseBaseButton" type="button" hidden>Purchase as base</button>
     <button id="useFurnitureButton" type="button" hidden>Use item</button>
+    <button id="openHomeShopButton" type="button" hidden>Open shop</button>
     <button id="moveFurnitureButton" type="button" hidden>Move item</button>
     <button id="rotateFurnitureButton" type="button" hidden>Rotate 90°</button>
     <button id="storeFurnitureButton" type="button" hidden>Place in Home storage</button>
+  </section>
+  <section id="homeShopWindow" class="panel home-shop-window" data-collapsible="Home shop" hidden>
+    <h2 id="homeShopTitle">Home shop</h2>
+    <p id="homeShopHint"></p>
+    <div id="homeShopListings"></div>
+    <div id="homeShopInventory"></div>
+    <div class="trade-actions"><button id="homeShopClose" type="button">Close</button></div>
   </section>
   <section id="tradeWindow" class="panel trade-window" data-collapsible="Merchant inventory" hidden>
     <h2 id="tradeTitle">Merchant</h2>
@@ -183,7 +193,7 @@
       <button type="button" role="tab" data-server-config-tab="events">Server Events</button>
     </nav>
     <section class="server-config-page" data-server-config-page="inventory">
-      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
+      <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Damage</strong><strong>Range (m)</strong><strong>Accuracy</strong><strong>Attack sec</strong><strong>Speed +/-</strong><strong>Vision +/-</strong><strong>Min price</strong><strong>Max price</strong><span></span><strong>Inventory</strong></div><div id="serverConfigItems"></div></div>
     </section>
     <section class="server-config-page" data-server-config-page="quests" hidden>
       <p>Items currently used by generated quests. Take 1 adds the item to Home inventory; Give 1 removes it from Home inventory first, then the backpack.</p>
@@ -219,6 +229,7 @@
         <div class="server-event-row world-event-row"><label>Event name<input id="raptorEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
         <div class="server-event-row world-event-row"><label>Event name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
         <div class="server-event-row world-event-row"><label>Event name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
+        <div class="server-event-row"><label>Wanted level for SWAT deployment<input id="wantedSwatThresholdConfig" type="number" min="1" max="100" step="1"></label></div>
       </div>
       <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save server events</button><button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button></div>
     </section>
@@ -229,7 +240,8 @@
     <form id="accountForm" class="panel account-card">
       <div class="eyebrow">ALTERNATIVEREALITY // PLAYER SETUP</div>
       <h2>Create or resume your player</h2>
-      <p>Your username is unique on this reality. Returning players can enter the same username and password.</p>
+      <p>Select an existing user or create a new login. Online state, characters, and last-seen time are shown below.</p>
+      <div id="accountRoster" class="account-roster"><small>Loading players…</small></div>
       <label>Username <input id="accountUsername" required minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" autocomplete="username" placeholder="3-10 characters"></label>
       <label>Password <input id="accountPassword" required minlength="6" maxlength="72" type="password" autocomplete="current-password" placeholder="6 or more characters"></label>
       <div id="accountError" class="account-error"></div>
@@ -252,6 +264,6 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=85"></script>
+  <script src="app.js?v=87"></script>
 </body>
 </html>

@@ -148,6 +148,12 @@ app.MapGet("/api/account/me", async (HttpContext context, AccountService account
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
     return login is null ? Results.Unauthorized() : Results.Ok(new { login.AccountId, login.CharacterId, login.Username });
 });
+app.MapGet("/api/account/roster", async (AccountService accounts,RealityWorld state,CancellationToken cancellationToken) =>
+{
+    var online=state.ActiveAccountIds;
+    var roster=await accounts.GetRosterAsync(cancellationToken);
+    return Results.Ok(roster.Select(account=>new{account.Username,online=online.Contains(account.AccountId),account.LastSeenUtc,characters=account.Characters.Select(character=>new{character.Name,label=$"[{account.Username}] {character.Name}"})}));
+});
 app.MapPost("/api/account/setup", async (HttpContext context, AccountService accounts, RealitySetupState setup, AccountRequest request) =>
 {
     try

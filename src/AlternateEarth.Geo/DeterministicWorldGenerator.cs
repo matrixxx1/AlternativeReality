@@ -356,7 +356,7 @@ public sealed class DeterministicWorldGenerator
         {
             (EntityKind.Animal, "rabbit", 8), (EntityKind.Animal, "dog", 3), (EntityKind.Animal, "cat", 4),
             (EntityKind.Animal, "bird", 10), (EntityKind.Animal, "deer", 5), (EntityKind.Animal, "cougar", 1),
-            (EntityKind.Animal, "bear", 1), (EntityKind.Npc, "resident", 18)
+            (EntityKind.Animal, "bear", 1), (EntityKind.Npc, "resident", 18), (EntityKind.Npc, "zombie", 6)
         };
         var bounds = reality.Area.Bounds;
         var random = new Random(StableSeed(reality.Seed + 104729, reality));
@@ -375,7 +375,8 @@ public sealed class DeterministicWorldGenerator
                     y = bounds.MinimumY + (random.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
                     attempts++;
                 } while (attempts < 80 && obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, .5)));
-                var name = definition.Kind == EntityKind.Npc ? HumanNames[index % HumanNames.Length]
+                var name = definition.Subtype == "zombie" ? $"Zombie {HumanNames[index % HumanNames.Length]}"
+                    : definition.Kind == EntityKind.Npc ? HumanNames[index % HumanNames.Length]
                     : definition.Subtype == "dog" ? DogNames[index % DogNames.Length]
                     : definition.Subtype == "cat" ? CatNames[index % CatNames.Length]
                     : definition.Subtype;
