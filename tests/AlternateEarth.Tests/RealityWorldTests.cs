@@ -924,21 +924,19 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var target = await world.JoinAsync("rifle-target", "Target");
         await world.SetGodModeAsync(attacker.Id, true);
         await world.SetGodModeAsync(target.Id, true);
+        await world.UpdateItemConfigurationAsync(attacker.Id, new UpdateItemConfigurationRequest("rifle", 7, 200, 300_000, 600_000, Accuracy: 1));
         await world.SetEquipmentAsync(attacker.Id, "weapon", "rifle");
-        CombatResult? combat = null;
-        for (var attempt = 0; attempt < 20 && combat?.Event.Hit != true; attempt++) combat = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "fist"));
+        var combat = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "rifle"));
 
-        Assert.NotNull(combat);
         Assert.True(combat.Event.Hit);
         Assert.Equal(7, combat.Event.Damage);
         Assert.Contains("Rifleman", combat.Event.Message);
         Assert.Contains("7 hearts damage", combat.Event.Message);
         Assert.Equal(1, combat.Inventory.Items.Single(item => item.ItemType == "bullet").Quantity);
 
+        await world.UpdateItemConfigurationAsync(attacker.Id, new UpdateItemConfigurationRequest("sword", 5, 2.3, 30_000, 50_000, Accuracy: 1));
         await world.SetEquipmentAsync(attacker.Id, "weapon", "sword");
-        CombatResult? sword = null;
-        for (var attempt = 0; attempt < 20 && sword?.Event.Hit != true; attempt++) sword = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "sword"));
-        Assert.NotNull(sword);
+        var sword = await world.AttackAsync(attacker.Id, new CombatRequest(target.Id, "sword"));
         Assert.True(sword.Event.Hit);
         Assert.Equal(5, sword.Event.Damage);
         var configuredKnife = await world.UpdateItemConfigurationAsync(attacker.Id, new UpdateItemConfigurationRequest("knife", 4, 3, 1_500, 4_500, 1.25, 15));
