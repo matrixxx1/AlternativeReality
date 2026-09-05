@@ -34,6 +34,7 @@ public sealed class NavigationTests
         Assert.True(navigation.SpeedFor(TerrainType.Grass, TravelMode.Bike) > navigation.SpeedFor(TerrainType.Grass));
         Assert.Equal(40.0, navigation.SpeedFor(TerrainType.Road, TravelMode.DirtBike) * 2.236936, 3);
         Assert.Equal(90.0, navigation.SpeedFor(TerrainType.Road, TravelMode.Motorcycle) * 2.236936, 3);
+        Assert.Equal(300.0, navigation.SpeedFor(TerrainType.Road, TravelMode.Ufo) * 2.236936, 3);
         Assert.True(navigation.SpeedFor(TerrainType.Grass, TravelMode.DirtBike) > navigation.SpeedFor(TerrainType.Grass, TravelMode.Motorcycle));
         Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.DeepWater, TravelMode.DirtBike));
         Assert.False(WorldNavigation.SupportsTravelMode(TerrainType.DeepWater, TravelMode.Motorcycle));

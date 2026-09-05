@@ -1277,6 +1277,27 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UfoTravelsAtThreeHundredMphAndProbulatorToggles()
+    {
+        var configuration = new RealityConfiguration("player-ufo", "Player UFO", 336, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var store = new SqliteRealityStore(Path.Combine(_directory, "player-ufo.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("pilot", new[] { new ItemStack("ufo", 1, CarriedInBackpack: false) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+        var pilot = await world.JoinAsync("pilot", "Pilot");
+        pilot = await world.SetTravelModeAsync(pilot.Id, TravelMode.Ufo);
+
+        Assert.InRange(world.ConfiguredSpeedMetersPerSecond(pilot, TerrainType.Pavement) * 2.236936, 299, 301);
+        var switchedOn = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
+        Assert.Equal("Probulator active", switchedOn.Event.StatusEffect);
+        Assert.True(switchedOn.Event.StatusEffectUntilUtc > DateTimeOffset.UtcNow.AddYears(100));
+        var switchedOff = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
+        Assert.Equal("Probulator inactive", switchedOff.Event.StatusEffect);
+        Assert.True(switchedOff.Event.StatusEffectUntilUtc <= DateTimeOffset.UtcNow);
+    }
+
+    [Fact]
     public async Task IdleRaftDriftsDownwindAndRemainsOnWater()
     {
         var configuration = new RealityConfiguration("raft-drift", "Raft Drift", 334, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

@@ -50,7 +50,7 @@ public sealed partial class RealityWorld
         new("eBike","E-bike","Electric travel between a bike and dirt bike; battery lasts one mile",0,0,400_000,500_000,true,true,null,21.5,WeightPounds:0,CarriedInBackpack:false),
         new("dirtBike","Dirt bike","Parked motorized travel up to 40 mph",0,0,300_000,500_000,true,true,null,36.5,WeightPounds:250,CarriedInBackpack:false),
         new("motorcycle","Motorcycle","Parked motorized travel up to 90 mph",0,0,500_000,1_000_000,true,true,null,86.5,WeightPounds:0,CarriedInBackpack:false),
-        new("ufo","UFO","Flying vehicle with a built-in Probulator beam",0,0,10_000_000,25_000_000,true,true,null,56.5,WeightPounds:0,CarriedInBackpack:false),
+        new("ufo","UFO","High-altitude flying vehicle with a built-in toggleable Probulator beam",0,0,10_000_000,25_000_000,true,true,null,296.5,WeightPounds:0,CarriedInBackpack:false),
         new("gallonOfGas","Gallon of gas","Refuels the selected motor vehicle",0,0,500,1_000,WeightPounds:6.3),
         new("inflatableRaft","Inflatable raft","Safe travel through deep water",0,0,45_000,65_000,true,true,null,2.75,WeightPounds:0),
         new("flashlight","Flashlight","Directional light",0,0,1_000,5_000,true,true,null,0,50,WeightPounds:.5),
@@ -1205,8 +1205,6 @@ public sealed partial class RealityWorld
     private CombatResult ActivateProbulator(PlayerState player, WorldPosition targetPosition, string targetName)
     {
         if (player.LocationId != "outdoor") throw new InvalidOperationException("The UFO and its Probulator can only be used outdoors.");
-        if (_activeProbulatorBeams.TryGetValue(player.Id, out var existing) && existing.EndsAtUtc > DateTimeOffset.UtcNow)
-            throw new InvalidOperationException("The Probulator is already active.");
         var configuration = _itemConfigurations["probulator"];
         var distance = player.Position.Distance2D(targetPosition);
         if (distance > configuration.RangeMeters) throw new InvalidOperationException($"{targetName} is beyond the {configuration.RangeMeters:0.#}-meter Probulator range.");
@@ -1218,10 +1216,32 @@ public sealed partial class RealityWorld
             var missRadians = (8 + RandomNumberGenerator.GetInt32(18)) * Math.PI / 180 * (RandomNumberGenerator.GetInt32(2) == 0 ? -1 : 1);
             (dx, dy) = (dx * Math.Cos(missRadians) - dy * Math.Sin(missRadians), dx * Math.Sin(missRadians) + dy * Math.Cos(missRadians));
         }
-        var now = DateTimeOffset.UtcNow; var ends = now.AddSeconds(10); var beamId = $"probulator:{player.Id}:{Guid.NewGuid():N}";
+        return StartProbulator(player, dx, dy, $"{player.Name} aimed and switched on the Probulator.");
+    }
+
+    public CombatResult ToggleProbulator(string playerId, ToggleProbulatorRequest request)
+    {
+        if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (player.LocationId != "outdoor" || player.TravelMode != TravelMode.Ufo) throw new InvalidOperationException("You must be piloting your UFO to toggle the Probulator.");
+        var now = DateTimeOffset.UtcNow;
+        if (_activeProbulatorBeams.TryGetValue(playerId, out var active) && active.EndsAtUtc > now)
+        {
+            _activeProbulatorBeams.TryRemove(playerId, out _);
+            return new CombatResult(new CombatEvent(playerId, string.Empty, "probulator", player.Position, player.Position, false, 0, false,
+                $"{player.Name} switched off the Probulator.", StatusEffect: "Probulator inactive", StatusEffectUntilUtc: now), player, null, GetInventoryState(playerId), null, null);
+        }
+        var length = Math.Sqrt(request.DirectionX * request.DirectionX + request.DirectionY * request.DirectionY);
+        var dx = length > .001 && double.IsFinite(length) ? request.DirectionX / length : 0;
+        var dy = length > .001 && double.IsFinite(length) ? request.DirectionY / length : -1;
+        return StartProbulator(player, dx, dy, $"{player.Name} switched on the Probulator.");
+    }
+
+    private CombatResult StartProbulator(PlayerState player, double dx, double dy, string message)
+    {
+        var configuration = _itemConfigurations["probulator"];
+        var now = DateTimeOffset.UtcNow; var ends = DateTimeOffset.MaxValue; var beamId = $"probulator:{player.Id}:{Guid.NewGuid():N}";
         _activeProbulatorBeams[player.Id] = new ActiveProbulatorBeam(beamId, player.Id, dx, dy, configuration.RangeMeters, now, ends);
         var end = player.Position with { X = player.Position.X + dx * configuration.RangeMeters, Y = player.Position.Y + dy * configuration.RangeMeters };
-        var message = $"{player.Name} activated the Probulator for 10 seconds.";
         return new CombatResult(new CombatEvent(player.Id, string.Empty, "probulator", player.Position, end, false, 0, false, message, StatusEffect: "Probulator active", StatusEffectUntilUtc: ends),
             player, null, GetInventoryState(player.Id), null, null);
     }
@@ -1304,7 +1324,7 @@ public sealed partial class RealityWorld
         if (!_itemConfigurations.TryGetValue(request.ItemType, out var current)) throw new InvalidOperationException("Unknown inventory item.");
         if (!double.IsFinite(request.Damage) || request.Damage is < 0 or > 100) throw new InvalidOperationException("Damage must be between 0 and 100 hearts.");
         if (!double.IsFinite(request.RangeMeters) || request.RangeMeters is < 0 or > 2000) throw new InvalidOperationException("Range must be between 0 and 2,000 meters.");
-        if (!double.IsFinite(request.SpeedModifierMph) || request.SpeedModifierMph is < -200 or > 200) throw new InvalidOperationException("Speed modifier must be between -200 and +200 mph.");
+        if (!double.IsFinite(request.SpeedModifierMph) || request.SpeedModifierMph is < -500 or > 1000) throw new InvalidOperationException("Speed modifier must be between -500 and +1,000 mph.");
         if (!double.IsFinite(request.VisibilityModifierMeters) || request.VisibilityModifierMeters is < -5000 or > 5000) throw new InvalidOperationException("Visibility modifier must be between -5,000 and +5,000 meters.");
         if (!double.IsFinite(request.Accuracy) || request.Accuracy is < 0 or > 1) throw new InvalidOperationException("Accuracy must be between 0 and 1.");
         if (!double.IsFinite(request.AttackIntervalSeconds) || request.AttackIntervalSeconds is < .05 or > 10) throw new InvalidOperationException("Attack interval must be between 0.05 and 10 seconds.");

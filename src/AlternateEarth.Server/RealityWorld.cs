@@ -83,7 +83,10 @@ public sealed partial class RealityWorld
             if (_itemConfigurations.TryGetValue(item.ItemType, out var defaults))
                 _itemConfigurations[item.ItemType] = item with
                 {
-                    SpeedModifierMph = item.SpeedModifierMph ?? defaults.SpeedModifierMph,
+                    SpeedModifierMph = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) && Math.Abs((item.SpeedModifierMph ?? 56.5) - 56.5) < .001
+                        ? defaults.SpeedModifierMph
+                        : item.SpeedModifierMph ?? defaults.SpeedModifierMph,
+                    Effect = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) ? defaults.Effect : item.Effect,
                     VisibilityModifierMeters = item.VisibilityModifierMeters ?? defaults.VisibilityModifierMeters,
                     WeightPounds = defaults.WeightPounds,
                     Category = defaults.Category,

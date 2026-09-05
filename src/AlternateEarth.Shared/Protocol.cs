@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 42;
+    public const int Version = 43;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
@@ -22,6 +22,7 @@ public sealed record EnterDungeonRequest(string DoorId);
 public sealed record ExitDungeonRequest();
 public sealed record ChangeDungeonLevelRequest(int Direction);
 public sealed record CombatRequest(string TargetId, string Weapon);
+public sealed record ToggleProbulatorRequest(double DirectionX, double DirectionY);
 public sealed record RequestTradeRequest(string MerchantId);
 public sealed record ConfirmTradeRequest(string MerchantId, IReadOnlyList<PurchaseLine> Purchases, IReadOnlyList<PurchaseLine>? Sales = null);
 public sealed record RequestQuestRequest(string ActorId);

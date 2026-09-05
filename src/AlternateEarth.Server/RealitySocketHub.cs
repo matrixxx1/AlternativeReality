@@ -311,6 +311,10 @@ public sealed class RealitySocketHub
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         if (attack.Dungeon is not null) await connection.SendAsync(new { type = "dungeonUpdated", dungeon = attack.Dungeon }, cancellationToken);
                         break;
+                    case "toggleProbulator":
+                        var probulator = _world.ToggleProbulator(characterId, root.Deserialize<ToggleProbulatorRequest>(SharedJson.Options)!);
+                        await BroadcastAsync(new { type = "combatEvent", combat = probulator.Event }, null, cancellationToken);
+                        break;
                     case "openChest":
                         var chestRequest = root.Deserialize<OpenChestRequest>(SharedJson.Options)!;
                         var reward = await _world.OpenChestAsync(characterId, chestRequest.ChestId, cancellationToken);
