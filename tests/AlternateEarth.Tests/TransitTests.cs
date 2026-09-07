@@ -97,11 +97,38 @@ public sealed partial class RealityWorldTests
         var store = new SqliteRealityStore(Path.Combine(_directory,"transit.db")); await store.InitializeAsync(config);
         var world = new RealityWorld(config,new DeterministicWorldGenerator(new FixedGeographicProvider(new[]{road}.Concat(extra).ToArray())),new FixedWeatherProvider(),store);
         await world.InitializeAsync();
+        Assert.Empty(world.GetTransitSnapshot().Buses);
         var player = await world.JoinAsync("rider","Rider");
         await world.SetGodModeAsync(player.Id,true);
         player = await world.TeleportAsync(player.Id,new(-180,-5.5,true));
+        await world.AdvanceTransitAsync(TimeSpan.Zero);
         Assert.NotEmpty(world.GetTransitSnapshot().Buses);
         return(world,player);
+    }
+
+    [Fact]
+    public async Task NearbyServiceIsLimitedAndPausesWhenTheLastObserverLeaves()
+    {
+        var roads = Enumerable.Range(1, 20).Select(i => TransitNetworkTests.Road("extra-" + i,
+            [new(-200,i*10),new(200,i*10)], $"{i*2+10},{i*2+11}", name: "Street " + i)).ToArray();
+        var (world, player) = await TransitWorld(roads);
+        Assert.InRange(world.GetTransitSnapshot().Buses.Count, 1, 2);
+        var view = world.CreateTransitView(player.Id);
+        Assert.NotEmpty(view.Routes);
+        Assert.All(view.Routes, route => Assert.Empty(route.Path));
+        Assert.All(world.GetTransitSnapshot().Routes, route => Assert.NotEmpty(route.Path));
+        await world.TeleportAsync(player.Id, new(0,-400,true));
+        await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1.1));
+        var paused = world.GetTransitSnapshot().Buses.ToArray();
+        Assert.All(paused, bus => Assert.Equal("paused", bus.Status));
+        await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal(paused, world.GetTransitSnapshot().Buses);
+        await world.TeleportAsync(player.Id, new(-180,-5.5,true));
+        await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1.1));
+        Assert.Contains(world.GetTransitSnapshot().Buses, bus => bus.Status == "driving");
+        await world.LeaveAsync(player.Id);
+        await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1));
+        Assert.All(world.GetTransitSnapshot().Buses, bus => Assert.Equal("paused", bus.Status));
     }
 
     [Fact]

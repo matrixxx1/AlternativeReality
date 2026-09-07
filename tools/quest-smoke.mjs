@@ -9,7 +9,7 @@ ws.addEventListener('message',e=>messages.push(JSON.parse(e.data)));
 async function wait(type,after=0){const until=Date.now()+20000;while(Date.now()<until){const found=messages.slice(after).find(m=>m.type===type);if(found)return found;const error=messages.slice(after).find(m=>m.type==='error');if(error)throw Error(error.message);await new Promise(r=>setTimeout(r,20));}throw Error('Timed out: '+type);}
 async function command(payload,type){const after=messages.length;ws.send(JSON.stringify(payload));return wait(type,after);}
 try{
- const welcome=await wait('welcome');assert.equal(welcome.protocolVersion,58);
+ const welcome=await wait('welcome');assert.equal(welcome.protocolVersion,59);
  assert.ok(!welcome.privateState?.quests?.some(q=>q.status==='offered'));
  await command({type:'setGodMode',enabled:true},'playerUpdated');
  const world=await (await fetch(base+'/api/world')).json();
@@ -23,5 +23,5 @@ try{
  const accepted=await command({type:'acceptQuest',questId:offer.quest.id},'questUpdated');
  assert.equal(accepted.quest.status,'active');assert.ok(Date.parse(accepted.quest.deadlineUtc)>Date.now()+19*60000);
  const quest=accepted.privateState.quests.find(q=>q.id===offer.quest.id);assert.ok(quest.nextStagePosition);assert.ok(quest.nextStageName);
- console.log(JSON.stringify({protocol:58,questOffer:true,acceptance:true,itemRewards:3,deadlineMinutes:quest.deliveryMinutes,questNavigation:true,windFlags:1,waterLife:true}));
+ console.log(JSON.stringify({protocol:59,questOffer:true,acceptance:true,itemRewards:3,deadlineMinutes:quest.deliveryMinutes,questNavigation:true,windFlags:1,waterLife:true}));
 }finally{ws.close();}

@@ -7,7 +7,7 @@ public sealed partial class RealityWorld
     public WorldSnapshot CreateClientSnapshot(string playerId, WorldBounds? view = null)
     {
         var map = CreateMapWindow(playerId, view);
-        return CreateSnapshot(map);
+        return CreateSnapshot(map) with { Transit = CreateTransitView(playerId, view) };
     }
 
     public WorldMapWindow CreateMapWindow(string playerId, WorldBounds? view = null)

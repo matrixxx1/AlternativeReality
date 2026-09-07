@@ -1,6 +1,21 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const transit=require('../src/AlternateEarth.Client2D/transit.js');
+const markers=require('../src/AlternateEarth.Client2D/map-markers.js');
+test('crowded minimap markers keep the nearest, space neighbors and cap ordinary places',()=>{
+  const places=Array.from({length:1000},(_,i)=>({id:String(i),position:{x:i%40*20,y:Math.floor(i/40)*20}}));
+  const selected=markers.nearby(places,{x:0,y:0},4,100);
+  assert.equal(selected.length,4);assert.equal(selected[0].id,'0');
+  for(const a of selected){assert.ok(Math.hypot(a.position.x,a.position.y)<=500);for(const b of selected)if(a!==b)assert.ok(Math.hypot(a.position.x-b.position.x,a.position.y-b.position.y)>=100);}
+  assert.deepEqual(markers.nearby([...places].reverse(),{x:0,y:0},4,100),selected);
+});
+test('bus drawing projects finite geometry at every heading and zoom',()=>{
+  let fills=0;
+  const context=new Proxy({}, {get:(_,name)=>(...args)=>{if(name==='fill')fills++;for(const n of args)if(typeof n==='number')assert.ok(Number.isFinite(n),name);},set:()=>true});
+  for(const scale of [1,6,26,40])for(let heading=0;heading<Math.PI*2;heading+=Math.PI/4)
+    transit.drawBus(context,{position:{x:20,y:30},headingRadians:heading,healthHearts:100},p=>({x:(p.x+p.y*.25)*scale,y:-p.y*scale*.6}),scale);
+  assert.ok(fills>1000);
+});
 test('waiting requires an outdoor player close to a stop who is not already riding',()=>{
   const stop={position:{x:10,y:-5}},player={position:{x:10,y:-5},locationId:'outdoor'};
   assert.equal(transit.canWait(player,stop),true);

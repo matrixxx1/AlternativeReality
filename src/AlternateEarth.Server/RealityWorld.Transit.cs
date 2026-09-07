@@ -48,6 +48,10 @@ public sealed partial class RealityWorld
         public RoadEdge Edge => Route[EdgeIndex];
     }
 
+    private double _fleetRefreshSeconds;
+    private int _fleetPopulation;
+    private HashSet<string> _runningBusRoutes = [];
+
     private bool RefreshTransitNetwork()
     {
         var revision = Volatile.Read(ref _transitRevision);
@@ -72,18 +76,6 @@ public sealed partial class RealityWorld
             if (!_transitNetwork.EdgeStops.TryGetValue(stop.EdgeId,out var list)) _transitNetwork.EdgeStops[stop.EdgeId]=list=[];
             list.Add(stop);
         }
-        foreach (var (id, route) in _transitNetwork.Routes)
-        {
-            if (_buses.ContainsKey(id)) continue;
-            var seed = route.Select((e, i) => (Edge: e, Index: i)).FirstOrDefault(e =>
-                _loadedAreas.Values.Any(a => a.Contains(e.Edge.At(Math.Min(10, e.Edge.Length / 2)).X, e.Edge.At(Math.Min(10, e.Edge.Length / 2)).Y)));
-            if (seed.Edge is null) continue;
-            var ordered = route.Skip(seed.Index).Concat(route.Take(seed.Index)).ToArray();
-            var bus = new SimulatedBus("bus:" + id, id, ordered);
-            if (_transitObstacles.Hit(TransitGeometry.Footprint(bus.State.Position, bus.State.HeadingRadians)) is null &&
-                !_buses.Values.Any(b => TransitGeometry.Overlaps(TransitGeometry.Footprint(bus.State.Position, bus.State.HeadingRadians), TransitGeometry.Footprint(b.State.Position, b.State.HeadingRadians))))
-                _buses[id] = bus;
-        }
         // Existing buses retain their promised itinerary when neighboring blocks arrive.
         _transitBuiltRevision = revision;
         PublishTransit(true);
@@ -98,9 +90,10 @@ public sealed partial class RealityWorld
             return;
         }
         var stops = networkChanged ? _transitNetwork?.Stops.ToArray() ?? [] : _transitSnapshot.Stops.ToArray();
+        var stopsByEdge = stops.GroupBy(s => s.EdgeId).ToDictionary(g => g.Key, g => g.OrderBy(s => s.DistanceMeters).ToArray());
         var routes = networkChanged ? _buses.Values.Select(bus => new BusRouteState(bus.RouteId, bus.Route[0].Name,
             bus.Route.SelectMany(e => new[] { e.At(0), e.At(e.Length) }).ToArray(),
-            bus.Route.SelectMany(e => stops.Where(s => s.EdgeId == e.Id).OrderBy(s => s.DistanceMeters).Select(s => s.Id)).Distinct().ToArray())).ToArray() : _transitSnapshot.Routes;
+            bus.Route.SelectMany(e => stopsByEdge.GetValueOrDefault(e.Id, []).Select(s => s.Id)).Distinct().ToArray())).ToArray() : _transitSnapshot.Routes;
         var served = routes.SelectMany(r => r.StopIds).ToHashSet();
         _transitSnapshot = new(stops.Where(s => served.Contains(s.Id)).ToArray(), _buses.Values.Select(b => b.State).ToArray(), routes);
     }
@@ -184,9 +177,22 @@ public sealed partial class RealityWorld
             var removed = new HashSet<string>(); var combat = new List<CombatEvent>(); var objects = new Dictionary<string, CanonicalEntity>();
             var dt = Math.Clamp(elapsed.TotalSeconds * Configuration.GameSpeed, 0, 1);
             var people = _players.Values.Where(p => p.LocationId == "outdoor").ToArray();
+            if (changedNetwork || people.Length != _fleetPopulation || (_fleetRefreshSeconds -= Math.Max(0, elapsed.TotalSeconds)) <= 0)
+            {
+                _fleetPopulation = people.Length;
+                _fleetRefreshSeconds = 1;
+                changedNetwork |= RefreshNearbyFleet(people);
+            }
+            var loadedAreas = _loadedAreas.Values.ToArray();
+            var outdoorActors = _actors.Values.Where(a => a.LocationId == "outdoor").ToArray();
+            var anyoneWaiting = people.Any(p => p.WaitingAtBusStopId is not null);
             foreach (var bus in _buses.Values.OrderBy(b => b.State.Id, StringComparer.Ordinal))
             {
-                if (!people.Any(p => p.RidingBusId == bus.State.Id || WaitingForRoute(p,bus.RouteId) || p.Position.Region == bus.State.Position.Region && p.Position.Distance2D(bus.State.Position) <= 2500)) continue;
+                if (!_runningBusRoutes.Contains(bus.RouteId))
+                {
+                    if (bus.State.Status != "paused") bus.State = bus.State with { Status = "paused", SpeedMetersPerSecond = 0, Version = bus.State.Version + 1 };
+                    continue;
+                }
                 bus.HitPeople.RemoveWhere(id =>
                 {
                     WorldPosition? p = _players.TryGetValue(id, out var player) ? player.Position : _actors.TryGetValue(id, out var actor) ? actor.Position : null;
@@ -205,10 +211,10 @@ public sealed partial class RealityWorld
                         if (!wasTurning && bus.Turn.Count > 0) { speed = bus.TurningAround ? 1.2 : 3; budget = Math.Min(budget, speed * dt); }
                         var footprint = TransitGeometry.Footprint(candidate.Position, candidate.Heading);
                         // Do not enter unactivated geography: buildings/cars there have not loaded yet.
-                        if (!footprint.All(p => _loadedAreas.Values.Any(a => a.Contains(p.X, p.Y))))
+                        if (!footprint.All(p => loadedAreas.Any(a => a.Contains(p.X, p.Y))))
                         { bus.State = bus.State with { Status = "waiting for map", SpeedMetersPerSecond = 0 }; break; }
                         var obstacle = _transitObstacles!.Hit(footprint);
-                        var other = _buses.Values.FirstOrDefault(b => b != bus && TransitGeometry.Overlaps(footprint, TransitGeometry.Footprint(b.State.Position, b.State.HeadingRadians)));
+                        var other = _buses.Values.FirstOrDefault(b => b != bus && b.State.Position.Distance2D(candidate.Position) < 12 && TransitGeometry.Overlaps(footprint, TransitGeometry.Footprint(b.State.Position, b.State.HeadingRadians)));
                         if (obstacle is not null || other is not null)
                         {
                             var id = obstacle?.Id ?? other!.State.Id;
@@ -230,11 +236,11 @@ public sealed partial class RealityWorld
                             Status = bus.Turn.Count > 0 ? bus.TurningAround ? "turning around" : "turning" : "driving", Version = bus.State.Version + 1 };
                         CommitBusStep(bus, travelled, wasTurning);
                         budget -= Math.Max(.01, travelled);
-                        await HitBusPeopleAsync(bus, footprint, players, actors, removed, combat, cancellationToken);
-                        if (await BoardWaitingPassengersAsync(bus, players, cancellationToken)) break;
+                        await HitBusPeopleAsync(bus, footprint, people, outdoorActors, players, actors, removed, combat, cancellationToken);
+                        if (anyoneWaiting && await BoardWaitingPassengersAsync(bus, players, cancellationToken)) break;
                     }
                 }
-                foreach (var passenger in _players.Values.Where(p => p.RidingBusId == bus.State.Id).ToArray())
+                foreach (var passenger in people.Where(p => p.RidingBusId == bus.State.Id))
                 {
                     if (passenger.LocationId != "outdoor" || passenger.Abduction is not null)
                     {
@@ -250,7 +256,7 @@ public sealed partial class RealityWorld
                     if (_players.TryGetValue(updated.Id, out var currentPassenger)) players[updated.Id] = currentPassenger;
                 }
             }
-            PublishTransit();
+            PublishTransit(changedNetwork);
             return new(_transitSnapshot, players.Values.ToArray(), actors.Values.ToArray(), removed.ToArray(), combat, objects.Values.ToArray(), changedNetwork);
         }
         finally { _transitLock.Release(); }
@@ -336,7 +342,7 @@ public sealed partial class RealityWorld
         return false;
     }
 
-    private async Task HitBusPeopleAsync(SimulatedBus bus, GeometryPoint[] footprint, Dictionary<string, PlayerState> players,
+    private async Task HitBusPeopleAsync(SimulatedBus bus, GeometryPoint[] footprint, PlayerState[] people, ActorState[] outdoorActors, Dictionary<string, PlayerState> players,
         Dictionary<string, ActorState> actors, HashSet<string> removed, List<CombatEvent> combat, CancellationToken token)
     {
         WorldPosition Fling(WorldPosition p)
@@ -350,8 +356,9 @@ public sealed partial class RealityWorld
             }
             return p;
         }
-        foreach (var p in _players.Values.Where(p => p.LocationId == "outdoor" && p.RidingBusId is null && p.Abduction is null && p.TravelMode != TravelMode.Ufo && p.Position.Distance2D(bus.State.Position) < 7).ToArray())
+        foreach (var original in people.Where(p => p.LocationId == "outdoor" && p.RidingBusId is null && p.Abduction is null && p.TravelMode != TravelMode.Ufo && p.Position.Distance2D(bus.State.Position) < 7).ToArray())
         {
+            var p = _players.GetValueOrDefault(original.Id) ?? original;
             if (!TransitGeometry.Contains(footprint, p.Position) || !bus.HitPeople.Add(p.Id)) continue;
             var health = p.GodMode ? Math.Max(1, p.HealthHearts - 5) : Math.Max(0, p.HealthHearts - 5);
             var updated = p with { HealthHearts = health, Position = Fling(p.Position), WaitingAtBusStopId = null, Version = p.Version + 1 };
@@ -359,8 +366,9 @@ public sealed partial class RealityWorld
             await SavePlayerAsync(updated, token); players[p.Id] = _players[p.Id];
             combat.Add(new(bus.State.Id, p.Id, "busCollision", bus.State.Position, p.Position, true, 5, health <= 0, "Hit by a bus for 5 hearts.", health, updated.Position));
         }
-        foreach (var a in _actors.Values.Where(a => a.LocationId == "outdoor" && a.Abduction is null && a.Subtype != "ufo" && a.Position.Distance2D(bus.State.Position) < 7).ToArray())
+        foreach (var original in outdoorActors.Where(a => _actors.ContainsKey(a.Id) && a.LocationId == "outdoor" && a.Abduction is null && a.Subtype != "ufo" && a.Position.Distance2D(bus.State.Position) < 7).ToArray())
         {
+            if (!_actors.TryGetValue(original.Id, out var a)) continue;
             if (!TransitGeometry.Contains(footprint, a.Position) || !bus.HitPeople.Add(a.Id)) continue;
             var health = Math.Max(0, a.HealthHearts - 5); var destination = Fling(a.Position);
             if (health <= 0) { _actors.TryRemove(a.Id, out _); removed.Add(a.Id); }
@@ -392,7 +400,7 @@ public sealed partial class RealityWorld
     public async Task PrepareBusAreasAsync(CancellationToken token)
     {
         var snapshot = GetTransitSnapshot();
-        foreach (var bus in snapshot.Buses.Where(b => b.HealthHearts > 0))
+        foreach (var bus in snapshot.Buses.Where(b => b.HealthHearts > 0 && b.Status != "paused"))
         {
             if (!_players.Values.Any(p => p.LocationId == "outdoor" && (p.RidingBusId == bus.Id || WaitingForRoute(p,bus.RouteId) || p.Position.Distance2D(bus.Position) < 700))) continue;
             var x = bus.Position.X + Math.Cos(bus.HeadingRadians) * 40;

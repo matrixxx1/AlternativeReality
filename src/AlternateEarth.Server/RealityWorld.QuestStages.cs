@@ -80,8 +80,8 @@ public sealed partial class RealityWorld
         foreach (var actor in _actors.Values.Where(a => a.EventEndsAtUtc > now && a.Position.Distance2D(player.Position) <= 500 && player.LocationId == "outdoor"))
         {
             var id = InversionQuestId(actor);
-            var members = _actors.Values.Where(a => a.EventEndsAtUtc > now && InversionQuestId(a) == id).Select(a => a.Id).ToArray();
             if (_quests.ContainsKey((playerId, id))) continue;
+            var members = _actors.Values.Where(a => a.EventEndsAtUtc > now && InversionQuestId(a) == id).Select(a => a.Id).ToArray();
             var quest = PrepareQuestOffer(new QuestState(id, playerId, actor.Id, "Reality inversion", "inversion", "active",
                 actor.EventName ?? "Reality inversion", "Survive until this inversion ends, or defeat its creature. Stay alive; you may retreat to safety.", 10000,
                 TargetActorId: actor.Id, TargetName: actor.Name, DeadlineUtc: actor.EventEndsAtUtc, NextStagePosition: actor.Position, ObjectiveActorIds: members));

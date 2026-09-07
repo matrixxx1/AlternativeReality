@@ -126,6 +126,13 @@ public sealed class RealitySocketHub
                         await BroadcastPlayersAsync(new[] { await _world.GetOffBusAsync(characterId, cancellationToken) }, cancellationToken);
                         await BroadcastAsync(new { type = "busesMoved", buses = _world.GetTransitSnapshot().Buses }, null, cancellationToken);
                         break;
+                    case "requestBusRoute":
+                        var routeId = root.GetProperty("routeId").GetString();
+                        var routeSnapshot = _world.GetTransitSnapshot();
+                        var requestedRoute = routeSnapshot.Routes.FirstOrDefault(r => r.Id == routeId) ?? throw new InvalidOperationException("This bus route is no longer available.");
+                        var requestedStops = requestedRoute.StopIds.ToHashSet();
+                        await connection.SendAsync(new { type = "busRoute", route = requestedRoute, stops = routeSnapshot.Stops.Where(s => requestedStops.Contains(s.Id)).ToArray() }, cancellationToken);
+                        break;
                     case "setTravelMode":
                         var travelRequest = root.Deserialize<SetTravelModeRequest>(SharedJson.Options)!;
                         var travelPlayer = await _world.SetTravelModeAsync(characterId, travelRequest.Mode, cancellationToken);
@@ -559,8 +566,26 @@ public sealed class RealitySocketHub
 
     public async Task BroadcastTransitAsync(TransitTick tick, CancellationToken token)
     {
-        if (tick.NetworkChanged) await BroadcastAsync(new { type = "transitChanged", transit = tick.Transit }, null, token);
-        else if (tick.Transit.Buses.Count > 0) await BroadcastAsync(new { type = "busesMoved", buses = tick.Transit.Buses }, null, token);
+        foreach (var (playerId, connection) in _clients)
+        {
+            try
+            {
+                if (tick.NetworkChanged || DateTimeOffset.UtcNow - connection.LastTransitView > TimeSpan.FromSeconds(3))
+                {
+                    connection.LastTransitView = DateTimeOffset.UtcNow;
+                    await connection.SendAsync(new { type = "transitChanged", transit = _world.CreateTransitView(playerId, connection.MapView) }, token);
+                }
+                else
+                {
+                    var buses = _world.NearbyBuses(playerId, connection.MapView);
+                    var signature = string.Join(';', buses.Select(b => $"{b.Id}:{b.Version}:{b.Status}"));
+                    if (signature == connection.LastBusSignature) continue;
+                    connection.LastBusSignature = signature;
+                    await connection.SendAsync(new { type = "busesMoved", buses }, token);
+                }
+            }
+            catch (Exception exception) when (exception is WebSocketException or OperationCanceledException) { }
+        }
         await BroadcastPlayersAsync(tick.Players, token);
         await BroadcastActorsAsync(tick.Actors, token);
         await BroadcastRemovedActorsAsync(tick.RemovedActors, token);
@@ -619,6 +644,8 @@ public sealed class RealitySocketHub
     private sealed class ClientConnection
     {
         private readonly SemaphoreSlim _sendLock = new(1, 1);
+        public DateTimeOffset LastTransitView { get; set; }
+        public string? LastBusSignature { get; set; }
         public ClientConnection(WebSocket socket) => Socket = socket;
         public WebSocket Socket { get; }
         public WorldBounds? MapView { get; set; }
