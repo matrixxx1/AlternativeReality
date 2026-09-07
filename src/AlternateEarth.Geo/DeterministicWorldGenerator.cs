@@ -8,7 +8,7 @@ namespace AlternateEarth.Geo;
 
 public sealed class DeterministicWorldGenerator
 {
-    private const int GeneratedWorldCacheVersion = 1;
+    private const int GeneratedWorldCacheVersion = 2;
     private static readonly string[] HumanNames =
     [
         "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
@@ -150,7 +150,7 @@ public sealed class DeterministicWorldGenerator
 
     public static IReadOnlyList<CanonicalEntity> GeneratePoiMerchants(RealityConfiguration reality, IReadOnlyList<CanonicalEntity> features) => features
         .Where(entity => entity.Kind is EntityKind.Building or EntityKind.PointOfInterest)
-        .Where(entity => entity.Properties.ContainsKey("merchantCategory"))
+        .Where(entity => entity.Properties.ContainsKey("merchantCategory") || FoodBusinesses.OffersDelivery(entity.Properties))
         .GroupBy(entity => $"{entity.Properties.GetValueOrDefault("merchantCategory")}:{entity.Properties.GetValueOrDefault("name") ?? entity.Properties.GetValueOrDefault("brand") ?? entity.Id}", StringComparer.OrdinalIgnoreCase)
         .Select(group => group.First())
         .OrderBy(entity => entity.Id).Take(30)
@@ -159,7 +159,8 @@ public sealed class DeterministicWorldGenerator
             {
                 ["subtype"] = "merchant",
                 ["name"] = $"{HumanNames[index % HumanNames.Length]} at {entity.Properties.GetValueOrDefault("name") ?? entity.Properties.GetValueOrDefault("brand") ?? "the shop"}",
-                ["merchantCategory"] = entity.Properties.GetValueOrDefault("merchantCategory") ?? "general",
+                ["merchantCategory"] = FoodBusinesses.OffersDelivery(entity.Properties) ? "food" : entity.Properties.GetValueOrDefault("merchantCategory") ?? "general",
+                ["offersFoodDelivery"] = FoodBusinesses.OffersDelivery(entity.Properties) ? "true" : "false",
                 ["sourceFeatureId"] = entity.Id
             })).ToArray();
 
@@ -303,9 +304,11 @@ public sealed class DeterministicWorldGenerator
                 x = start.X + ((end.X - start.X) * amount); y = start.Y + ((end.Y - start.Y) * amount);
                 rotation = Math.Atan2(end.Y - start.Y, end.X - start.X);
                 var roadWidth = ParseDouble(road.Properties.GetValueOrDefault("widthMeters"), 5);
-                var offset = Math.Max(1.2, (roadWidth / 2) - 1);
+                // Park beyond the carriageway so generated cars do not permanently block bus lanes.
+                var offset = roadWidth / 2 + 1.2;
                 x += -Math.Sin(rotation) * offset; y += Math.Cos(rotation) * offset;
             }
+            if (!reality.Area.Bounds.Contains(x, y) || features.Any(e => e.Kind == EntityKind.Building && PointInPolygon(x, y, e.Geometry))) continue;
             vehicles.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:{AreaKey(reality)}:vehicle:{index}",
                 EntityKind.Vehicle,
@@ -414,6 +417,7 @@ public sealed class DeterministicWorldGenerator
                     var amount = light / (double)(count + 1); var side = (light + segment) % 2 == 0 ? 1 : -1;
                     var x = start.X + dx * amount - dy / length * (width / 2 + 1.7) * side;
                     var y = start.Y + dy * amount + dx / length * (width / 2 + 1.7) * side;
+                    if (!reality.Area.Bounds.Contains(x, y)) continue;
                     result.Add(new CanonicalEntity($"generated:{reality.Id}:{AreaKey(reality)}:streetlight:{index++}", EntityKind.StreetLight,
                         new WorldPosition(reality.Area.Region, x, y), Array.Empty<GeometryPoint>(), new Dictionary<string, string> { ["schedule"] = "19:00-07:00" }));
                 }

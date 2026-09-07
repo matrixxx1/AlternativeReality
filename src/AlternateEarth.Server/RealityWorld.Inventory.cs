@@ -8,6 +8,17 @@ public sealed partial class RealityWorld
 
     private async Task<PlayerState> DieAndResetPlayerAsync(PlayerState defeated, CancellationToken cancellationToken)
     {
+        _sleepUntil.TryRemove(defeated.Id, out _);
+        defeated = defeated with { AsleepUntilUtc = null };
+        // Simulated players exercise player death/respawn without leaving account data or graves.
+        if (defeated.IsTestCharacter) return ResetPlayer(defeated);
+        foreach (var quest in _quests.Values.Where(q => q.PlayerId == defeated.Id && q.Kind == "inversion" && q.Status == "active").ToArray())
+        {
+            var failed = quest with { Status = "failed", FailedAtUtc = _probulatorClock.GetUtcNow() };
+            _quests[(defeated.Id, quest.Id)] = failed;
+            await _store.SaveQuestAsync(Configuration.Id, failed, cancellationToken);
+            _questNotices.Enqueue((defeated.Id, "Inversion quest failed: you did not survive " + quest.Title));
+        }
         var carried = GetInventoryState(defeated.Id).Items
             .Where(item => item.Quantity > 0 && !item.ItemType.Equals("fist", StringComparison.OrdinalIgnoreCase))
             .ToArray();
@@ -48,6 +59,7 @@ public sealed partial class RealityWorld
             MagicRunningShoesOn = false,
             DirtBikeGasGallons = 0,
             MotorcycleGasGallons = 0,
+            UfoRemainingMeters = 0,
             FlamethrowerGasGallons = 0
         });
     }
@@ -105,9 +117,17 @@ public sealed partial class RealityWorld
     {
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("That item cannot be transferred.");
         var access = ValidateHomeStorageAccess(playerId, request.ChestId);
         await EnsureHomeItemStorageAsync(access.AccountId, cancellationToken);
+        if (VehicleItems.Contains(itemType))
+        {
+            if (InventoryQuantity(playerId, itemType) < request.Quantity) throw new InvalidOperationException("You do not own that many vehicles.");
+            // Vehicles stay parked at Home and are selected through Travel.
+            await ParkCarriedVehiclesAsync(playerId, access.AccountId, cancellationToken);
+            return (access.Player, GetPrivateState(playerId));
+        }
         await _homeItemStorageLock.WaitAsync(cancellationToken);
         try
         {
@@ -180,6 +200,7 @@ public sealed partial class RealityWorld
         if (player.Position.Distance2D(box.Position) > 4) throw new InvalidOperationException("Move within 4 meters of the postal drop box.");
         if (!_playerAccounts.TryGetValue(playerId, out var accountId) || !_baseBuildings.ContainsKey(accountId)) throw new InvalidOperationException("You need a Home before mailing items to it.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase) || !InventoryDefinition(itemType).CarriedInBackpack)
             throw new InvalidOperationException("That item cannot be sent through a postal drop box.");
         await EnsureHomeItemStorageAsync(accountId, cancellationToken);
@@ -203,6 +224,7 @@ public sealed partial class RealityWorld
         if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to adjust inventory from server configuration.");
         if (!_players.ContainsKey(playerId)) throw new InvalidOperationException("Unknown player.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (!_itemConfigurations.TryGetValue(itemType, out var definition)) throw new InvalidOperationException("Unknown inventory item.");
         if (!_playerAccounts.TryGetValue(playerId, out var accountId)) throw new InvalidOperationException("An account is required to use Home inventory.");
         var action = (request.Action ?? string.Empty).Trim().ToLowerInvariant();
@@ -236,6 +258,11 @@ public sealed partial class RealityWorld
                 if (removedFromHome)
                 {
                     await _store.SaveInventoryAsync(GetHomeItemStorage(accountId), cancellationToken);
+                    if (VehicleItems.Contains(itemType))
+                    {
+                        var candidate = NormalizeEquipmentAfterInventoryChange(_players[playerId]);
+                        if (await SavePlayerAsync(candidate, cancellationToken)) updatedPlayer = candidate;
+                    }
                     message = $"Gave 1 {definition.DisplayName} from Home inventory.";
                 }
                 else
@@ -263,6 +290,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var currentPlayer)) throw new InvalidOperationException("Unknown player.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("That item cannot be dropped.");
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");

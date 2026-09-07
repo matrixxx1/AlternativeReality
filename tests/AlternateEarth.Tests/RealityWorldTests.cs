@@ -4,7 +4,7 @@ using AlternateEarth.Shared;
 
 namespace AlternateEarth.Tests;
 
-public sealed class RealityWorldTests : IAsyncLifetime
+public sealed partial class RealityWorldTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"alternate-earth-world-tests-{Guid.NewGuid():N}");
 
@@ -119,7 +119,9 @@ public sealed class RealityWorldTests : IAsyncLifetime
         await world.InitializeAsync();
         var player = await world.JoinAsync("rider", "Rider");
 
-        var empty = await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.DirtBike));
+        await world.SetTravelModeAsync(player.Id, TravelMode.DirtBike);
+        var empty = await world.MoveAsync(player.Id, new MoveRequest(1, 0, 0));
+        Assert.False(empty!.Moved);
         Assert.Contains("out of gas", empty.Message);
 
         await world.SetGodModeAsync(player.Id, true);
@@ -214,12 +216,14 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var configuration = new RealityConfiguration("ufo-probed-test", "UFO Probed Test", 219, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var store = new SqliteRealityStore(Path.Combine(_directory, "ufo-probed.db"));
         await store.InitializeAsync(configuration);
-        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store);
+        var clock = new ProbulatorTestClock();
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store, clock);
         await world.InitializeAsync();
         var player = await world.JoinAsync("ufo-target", "UfoTarget");
         await world.SetGodModeAsync(player.Id, true);
         var original = world.CreateSnapshot().Players.Single(item => item.Id == player.Id);
         world.TriggerWorldEvent(player.Id, "ufo");
+        clock.Advance(ActorState.PortalSeconds);
         world.AdvanceActors(TimeSpan.FromSeconds(.875));
 
         var tick = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
@@ -488,6 +492,26 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public void EveryStoreOpeningHourProducesOneConsecutiveTwelveHourWindowDaily()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 5, 0, 0, 0, TimeSpan.Zero);
+        for (var opening = 0; opening < 24; opening++)
+        {
+            var hours = new StoreOpeningHours(opening);
+            Assert.Equal((opening + 12) % 24, hours.CloseHour);
+            for (var day = 0; day < 3; day++)
+            {
+                var start = midnight.AddDays(day).AddHours(opening);
+                Assert.False(hours.IsOpen(start.AddTicks(-1)));
+                Assert.True(hours.IsOpen(start));
+                Assert.True(hours.IsOpen(start.AddHours(12).AddTicks(-1)));
+                Assert.False(hours.IsOpen(start.AddHours(12)));
+                Assert.Equal(12, Enumerable.Range(0, 24).Count(hour => hours.IsOpen(midnight.AddDays(day).AddHours(hour).AddMinutes(30))));
+            }
+        }
+    }
+
+    [Fact]
     public async Task StoreBuildingsAreSafeCommercialInteriorsAndCannotBecomeHomes()
     {
         var configuration = new RealityConfiguration("store-building", "Store Building", 71, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -503,7 +527,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var store = new SqliteRealityStore(Path.Combine(_directory, "store-building.db"));
         await store.InitializeAsync(configuration);
         await store.CreateAccountAsync(new AccountRecord("shopper-account", "Shopper", "hash", "salt", "token", "shopper-player"), "Shopper");
-        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(storeBuilding, residentialBuilding)), new FixedWeatherProvider(), store);
+        var clock = new ProbulatorTestClock();
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(storeBuilding, residentialBuilding)), new FixedWeatherProvider(), store, clock);
         await world.InitializeAsync();
         var player = await world.JoinAsync("shopper-player", "Shopper", "shopper-account");
 
@@ -514,6 +539,16 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var purchaseError = await Assert.ThrowsAsync<InvalidOperationException>(() => world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(storeDoor.Id)));
         Assert.Contains("cannot be purchased", purchaseError.Message, StringComparison.OrdinalIgnoreCase);
 
+        var hours = world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).StoreHours!;
+        Assert.NotNull(hours);
+        var nextOpening = world.CurrentServerTime.Date.AddDays(1).AddHours(hours.OpenHour);
+        clock.Advance(nextOpening - world.CurrentServerTime.DateTime - TimeSpan.FromSeconds(1));
+        Assert.True(world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).Locked);
+        var closed = await Assert.ThrowsAsync<InvalidOperationException>(() => world.EnterDungeonAsync(player.Id, storeDoor.Id));
+        Assert.Contains("store is closed", closed.Message);
+        Assert.Contains("server time", closed.Message);
+        clock.Advance(1);
+        Assert.False(world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).Locked);
         var entered = await world.EnterDungeonAsync(player.Id, storeDoor.Id);
         Assert.True(entered.Dungeon.IsStore);
         Assert.Single(entered.Dungeon.Actors, actor => actor.IsMerchant);
@@ -521,7 +556,24 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.All(entered.Dungeon.Actors, actor => Assert.True(actor.IsMerchant || actor.Subtype == "storeEmployee"));
         Assert.All(entered.Dungeon.Actors, actor => Assert.Contains(actor.Name.Split(' ')[0], new[] { "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo", "Grace", "Jordan", "Leah", "Omar", "Nina", "Henry", "Maya", "Luis" }));
         Assert.Equal(entered.Dungeon.Actors.Count, entered.Dungeon.Actors.Select(actor => actor.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        clock.Advance(12 * 3600 - 1);
+        Assert.False(world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).Locked);
+        var beforeClosingHour = world.CurrentStoreHour;
+        clock.Advance(1);
+        Assert.NotEqual(beforeClosingHour, world.CurrentStoreHour);
+        Assert.True(world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).Locked);
+        var merchant = entered.Dungeon.Actors.Single(actor => actor.IsMerchant);
+        Assert.Contains("store is closed", Assert.Throws<InvalidOperationException>(() => world.RequestTrade(player.Id, merchant.Id)).Message);
+        var checkout = await Assert.ThrowsAsync<InvalidOperationException>(() => world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, Array.Empty<PurchaseLine>())));
+        Assert.Contains("store is closed", checkout.Message);
         Assert.Equal("outdoor", (await world.ExitDungeonAsync(player.Id)).LocationId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.EnterDungeonAsync(player.Id, storeDoor.Id));
+        clock.Advance(12 * 3600);
+        Assert.False(world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).Locked);
+        Assert.Equal(hours, world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).StoreHours);
+        var reloaded = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(storeBuilding, residentialBuilding)), new FixedWeatherProvider(), store, clock);
+        await reloaded.InitializeAsync();
+        Assert.Equal(hours, reloaded.GetDoorLockSchedule().Doors.Single(door => door.DoorId == storeDoor.Id).StoreHours);
     }
 
     [Fact]
@@ -581,7 +633,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var store = new SqliteRealityStore(Path.Combine(_directory, "door-locks.db"));
         await store.InitializeAsync(configuration);
         await store.CreateAccountAsync(new AccountRecord("lock-account", "LockTester", "hash", "salt", "token", "lock-player"), "LockTester");
-        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(buildings.ToArray())), new FixedWeatherProvider(), store);
+        var clock = new ProbulatorTestClock();
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(buildings.ToArray())), new FixedWeatherProvider(), store, clock);
         await world.InitializeAsync();
         var player = await world.JoinAsync("lock-player", "LockTester", "lock-account");
         player = await world.SetGodModeAsync(player.Id, true);
@@ -604,6 +657,17 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.False(snapshot.DoorLocks!.Single(state => state.DoorId == questDoor.Id).Locked);
         await world.TeleportAsync(player.Id, new TeleportRequest(questDoor.Position.X, questDoor.Position.Y, true));
         Assert.False((await world.EnterDungeonAsync(player.Id, questDoor.Id)).Dungeon.IsHome);
+        var visitor = await world.JoinAsync("home-visitor", "Visitor");
+        await world.SetGodModeAsync(visitor.Id, true);
+        for (var hour = 0; hour < 48; hour++)
+        {
+            clock.Advance(3600);
+            var homeLock = world.GetDoorLockSchedule().Doors.Single(door => door.DoorId == baseDoor.Id);
+            Assert.False(homeLock.Locked);
+            Assert.Null(homeLock.StoreHours);
+        }
+        await world.TeleportAsync(visitor.Id, new TeleportRequest(baseDoor.Position.X, baseDoor.Position.Y, true));
+        Assert.True((await world.EnterDungeonAsync(visitor.Id, baseDoor.Id)).Dungeon.IsHome);
     }
 
     [Fact]
@@ -792,8 +856,9 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var persisted = await store.LoadInventoryAsync("home-items:home-item-storage:storage-account");
         Assert.Equal(35, persisted.Items.Single(item => item.ItemType == "rock").Quantity);
         var vehicleTaken = await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "eBike", 1, false));
-        Assert.Contains(vehicleTaken.PrivateState.Inventory.Items, item => item.ItemType == "eBike" && item.Quantity == 1);
-        Assert.DoesNotContain(vehicleTaken.PrivateState.HomeItemStorage!.Items, item => item.ItemType == "eBike");
+        Assert.DoesNotContain(vehicleTaken.PrivateState.Inventory.Items, item => item.ItemType == "eBike");
+        Assert.Contains(vehicleTaken.PrivateState.HomeItemStorage!.Items, item => item.ItemType == "eBike" && item.Quantity == 1);
+        Assert.Contains("eBike", vehicleTaken.PrivateState.OwnedVehicles!);
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:first", 1, false));
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:second", 1, false));
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:third", 1, false));
@@ -1005,7 +1070,8 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var synthetic = player with { GodMode = false, Water = 10, TravelMode = TravelMode.Run, MagicHikingShoesOn = true, Stamina = 5, MaximumStamina = 10 };
         Assert.Equal(7.996, world.ConfiguredSpeedMetersPerSecond(synthetic, TerrainType.Grass) * 2.236936, 3);
         var stacked = synthetic with { TravelMode = TravelMode.Bike };
-        Assert.Equal(17.491, world.ConfiguredSpeedMetersPerSecond(stacked, TerrainType.Grass) * 2.236936, 3);
+        // Half stamina halves the bicycle bonus; the shoe bonus stays additive.
+        Assert.Equal(12.244, world.ConfiguredSpeedMetersPerSecond(stacked, TerrainType.Grass) * 2.236936, 3);
         Assert.Equal(120, movement.BaseVisibilityMeters);
         var persisted = await store.LoadMovementConfigurationAsync(configuration.Id);
         Assert.NotNull(persisted);
@@ -1277,7 +1343,7 @@ public sealed class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UfoTravelsAtThreeHundredMphAndProbulatorToggles()
+    public async Task UfoTravelsAtOneHundredFiftyMphAndProbulatorToggles()
     {
         var configuration = new RealityConfiguration("player-ufo", "Player UFO", 336, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var store = new SqliteRealityStore(Path.Combine(_directory, "player-ufo.db"));
@@ -1288,10 +1354,10 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var pilot = await world.JoinAsync("pilot", "Pilot");
         pilot = await world.SetTravelModeAsync(pilot.Id, TravelMode.Ufo);
 
-        Assert.InRange(world.ConfiguredSpeedMetersPerSecond(pilot, TerrainType.Pavement) * 2.236936, 299, 301);
+        Assert.InRange(world.ConfiguredSpeedMetersPerSecond(pilot, TerrainType.Pavement) * 2.236936, 149, 151);
         var switchedOn = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
         Assert.Equal("Probulator active", switchedOn.Event.StatusEffect);
-        Assert.Equal(8, switchedOn.Event.Start.Distance2D(switchedOn.Event.End), 3);
+        Assert.Equal(1.7, switchedOn.Event.Start.Distance2D(switchedOn.Event.End), 3);
         Assert.Contains("downward", switchedOn.Event.Message, StringComparison.OrdinalIgnoreCase);
         Assert.True(switchedOn.Event.StatusEffectUntilUtc > DateTimeOffset.UtcNow.AddYears(100));
         var switchedOff = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
@@ -1299,15 +1365,293 @@ public sealed class RealityWorldTests : IAsyncLifetime
         Assert.True(switchedOff.Event.StatusEffectUntilUtc <= DateTimeOffset.UtcNow);
     }
 
+    private async Task<(RealityWorld World, PlayerState Pilot, SqliteRealityStore Store)> CreateProbulatorTestWorld(bool pvp = true, TimeProvider? clock = null)
+    {
+        var configuration = new RealityConfiguration("probulator-tests", "Probulator Tests", 336,
+            new GeographicArea(new GeoCoordinate(45.5, -122.5), 500), PvpEnabled: pvp);
+        var store = new SqliteRealityStore(Path.Combine(_directory, "probulator-tests.db"));
+        await store.InitializeAsync(configuration);
+        await store.SaveInventoryAsync(new InventoryState("pilot", new[] { new ItemStack("ufo", 1, CarriedInBackpack: false) }));
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider()), new FixedWeatherProvider(), store, clock);
+        await world.InitializeAsync();
+        var pilot = await world.JoinAsync("pilot", "Pilot");
+        await world.SetGodModeAsync(pilot.Id, true);
+        await world.SetTravelModeAsync(pilot.Id, TravelMode.Ufo);
+        pilot = await world.TeleportAsync(pilot.Id, new TeleportRequest(0, 0, true));
+        return (world, pilot, store);
+    }
+
     [Fact]
-    public async Task IdleRaftDriftsDownwindAndRemainsOnWater()
+    public async Task ProbulatorSweepsEveryFlightSegmentAndMissesOutsideFootprint()
+    {
+        var (world, pilot, _) = await CreateProbulatorTestWorld();
+        var npc = world.PlaceTestCharacter(pilot.Id, new("npc", 3, 0)).Actor!;
+        var animal = world.PlaceTestCharacter(pilot.Id, new("animal", 6, 3)).Actor!;
+        var fake = world.PlaceTestCharacter(pilot.Id, new("player", 6, 2)).Player!;
+        var outside = world.PlaceTestCharacter(pilot.Id, new("npc", 3, 3)).Actor!;
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        await world.MoveAsync(pilot.Id, new(1, 0, 1, MaximumDistanceMeters: 3));
+        var east = await world.MoveAsync(pilot.Id, new(1, 0, 2, MaximumDistanceMeters: 3));
+        await world.MoveAsync(pilot.Id, new(0, 1, 3, MaximumDistanceMeters: 3));
+        var north = await world.MoveAsync(pilot.Id, new(0, 1, 4, MaximumDistanceMeters: 3));
+        Assert.Equal(6, east!.Player.Position.X, 3);
+        Assert.Equal(6, north!.Player.Position.Y, 3);
+        var tick = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        foreach (var id in new[] { npc.Id, animal.Id, fake.Id })
+        {
+            var hit = Assert.Single(tick.Combat, hit => hit.TargetId == id && hit.Weapon == "probulator");
+            Assert.True(hit.Hit);
+            Assert.Equal(0, hit.Damage);
+            Assert.Null(hit.RelocatedTo);
+            Assert.Equal("Abducted", hit.StatusEffect);
+        }
+        Assert.DoesNotContain(tick.Combat, hit => hit.TargetId == outside.Id);
+        Assert.DoesNotContain((await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500))).Combat,
+            hit => hit.Weapon == "probulator" && hit.Hit);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProbulatorRespectsPvpAndTestPlayersAreNotPersisted(bool pvp)
+    {
+        var (world, pilot, store) = await CreateProbulatorTestWorld(pvp);
+        var fake = world.PlaceTestCharacter(pilot.Id, new("player", 0, 0)).Player!;
+        var npc = world.PlaceTestCharacter(pilot.Id, new("npc", 0, 0)).Actor!;
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        var tick = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        Assert.Equal(pvp, tick.Combat.Any(hit => hit.TargetId == fake.Id && hit.Hit));
+        Assert.Contains(tick.Combat, hit => hit.TargetId == npc.Id && hit.Hit);
+        await world.AdvanceStaminaAsync(TimeSpan.FromSeconds(1));
+        Assert.Null(await store.LoadCharacterAsync(world.Configuration.Id, fake.Id));
+        var removed = world.ClearTestCharacters(pilot.Id);
+        Assert.Contains(fake.Id, removed);
+        Assert.Contains(npc.Id, removed);
+        Assert.DoesNotContain(world.CreateSnapshot().Players, player => player.Id == fake.Id);
+        Assert.DoesNotContain(world.CreateSnapshot().Actors!, actor => actor.Id == npc.Id);
+    }
+
+    [Theory]
+    [InlineData("ufo")]
+    [InlineData("trex")]
+    [InlineData("brontosaurus")]
+    [InlineData("stegosaurus")]
+    [InlineData("raptors")]
+    [InlineData("landOfGiants")]
+    [InlineData("bear")]
+    public async Task RealityInversionsPauseForPortalsAndLeaveBeforeRemoval(string type)
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, pilot, _) = await CreateProbulatorTestWorld(clock: clock);
+        await world.SetTravelModeAsync(pilot.Id, TravelMode.Walk);
+        var arrivals = world.TriggerWorldEvent(pilot.Id, type);
+        var actor = arrivals[0];
+        clock.Advance(3);
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        foreach (var arrival in arrivals)
+        {
+            var current = world.CreateSnapshot().Actors!.Single(item => item.Id == arrival.Id);
+            Assert.Equal(arrival.Position, current.Position);
+            Assert.True(current.IsPassingThroughPortal(clock.GetUtcNow()));
+            Assert.False(current.IsMoving);
+        }
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.AttackAsync(pilot.Id, new CombatRequest(actor.Id, "fist")));
+        Assert.Contains("portal", error.Message);
+        var entryCombat = await world.AdvanceHostilityAsync(TimeSpan.FromSeconds(.5));
+        Assert.DoesNotContain(entryCombat.Combat, item => arrivals.Any(arrival => arrival.Id == item.AttackerId || arrival.Id == item.TargetId));
+        clock.Advance(3);
+        Assert.False(actor.IsPassingThroughPortal(clock.GetUtcNow()));
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        if (type == "ufo") Assert.NotEqual(actor.Position, world.CreateSnapshot().Actors!.Single(item => item.Id == actor.Id).Position);
+        clock.Advance((actor.EventEndsAtUtc!.Value - clock.GetUtcNow()).TotalSeconds - ActorState.PortalSeconds);
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        var departing = world.CreateSnapshot().Actors!.Single(item => item.Id == actor.Id);
+        Assert.True(departing.IsPassingThroughPortal(clock.GetUtcNow()));
+        Assert.False(departing.IsMoving);
+        clock.Advance(5.9);
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        Assert.Equal(departing.Position, world.CreateSnapshot().Actors!.Single(item => item.Id == actor.Id).Position);
+        clock.Advance(.1);
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        Assert.DoesNotContain(world.CreateSnapshot().Actors!, item => arrivals.Any(arrival => arrival.Id == item.Id));
+    }
+
+    [Fact]
+    public async Task ScheduledInversionsUsePortalsAndRepeatedManualTriggersPreserveExistingEntities()
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, pilot, _) = await CreateProbulatorTestWorld(clock: clock);
+        clock.Advance(TimeSpan.FromDays(1).TotalSeconds);
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        var scheduled = world.CreateSnapshot().Actors!.Where(actor => actor.EventStartedAtUtc is not null).ToArray();
+        Assert.Equal(9, scheduled.Length);
+        Assert.All(scheduled, actor => Assert.True(actor.IsPassingThroughPortal(clock.GetUtcNow())));
+        var first = Assert.Single(world.TriggerWorldEvent(pilot.Id, "ufo"));
+        var second = Assert.Single(world.TriggerWorldEvent(pilot.Id, "ufo"));
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Contains(world.CreateSnapshot().Actors!, actor => actor.Id == first.Id);
+        Assert.Contains(world.CreateSnapshot().Actors!, actor => actor.Id == second.Id);
+    }
+
+    private sealed class ProbulatorTestClock : TimeProvider
+    {
+        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(double seconds) => _now = _now.AddSeconds(seconds);
+        public void Advance(TimeSpan elapsed) => _now = _now.Add(elapsed);
+    }
+
+    [Fact]
+    public async Task ProbulatorRunsConcurrentTwentySevenSecondSequencesWithUniqueReactions()
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, pilot, _) = await CreateProbulatorTestWorld(clock: clock);
+        var first = world.PlaceTestCharacter(pilot.Id, new("player", 0, 0)).Player!;
+        var second = world.PlaceTestCharacter(pilot.Id, new("player", 0, 0)).Player!;
+        var npc = world.PlaceTestCharacter(pilot.Id, new("npc", 0, 0)).Actor!;
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        var capture = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        Assert.Equal(3, capture.Combat.Count(hit => hit.StatusEffect == "Abducted"));
+        Assert.All(capture.Combat.Where(hit => hit.StatusEffect == "Abducted"), hit => Assert.Equal(0, hit.Damage));
+        var held = world.CreateSnapshot().Players.Single(player => player.Id == first.Id);
+        Assert.NotNull(held.Abduction);
+        Assert.Equal(27, (held.Abduction!.EndsAtUtc - held.Abduction.StartedAtUtc).TotalSeconds);
+        Assert.False((await world.MoveAsync(first.Id, new(1, 0, 1)))!.Moved);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(first.Id, TravelMode.Run));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.AttackAsync(first.Id, new(pilot.Id, "fist")));
+        // Turning off the beam stops new captures, but does not truncate an ongoing sequence.
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        var events = new List<CombatEvent>();
+        WorldPosition? drop = null;
+        for (var secondIndex = 1; secondIndex <= 27; secondIndex++)
+        {
+            clock.Advance(1);
+            if (secondIndex == 10) await world.TeleportAsync(pilot.Id, new(20, 0, true));
+            if (secondIndex == 26) await world.TeleportAsync(pilot.Id, new(40, 0, true));
+            var tick = await world.AdvanceHostilityAsync(TimeSpan.FromSeconds(1));
+            events.AddRange(tick.Combat);
+            var player = world.CreateSnapshot().Players.Single(player => player.Id == first.Id);
+            Assert.Equal(10 - (4d / 9) * (secondIndex / 3), player.HealthHearts, 6);
+            if (secondIndex < 27) Assert.NotNull(player.Abduction);
+            if (secondIndex == 10) Assert.Equal(20, player.Position.X, 3);
+            if (secondIndex == 25) drop = player.Abduction!.DropPosition;
+            if (secondIndex == 26)
+            {
+                Assert.Equal(20, player.Abduction!.ShipPosition.X, 3);
+                Assert.Equal((20 + drop!.Value.X) / 2, player.Position.X, 6);
+                Assert.Equal((player.Abduction.ShipPosition.Y + drop!.Value.Y) / 2, player.Position.Y, 6);
+            }
+            if (secondIndex < 10 || secondIndex >= 25) Assert.DoesNotContain(tick.Combat, hit => hit.Dialogue is not null);
+        }
+        foreach (var id in new[] { first.Id, second.Id, npc.Id })
+        {
+            var pulses = events.Where(hit => hit.TargetId == id && hit.Damage > 0).ToArray();
+            Assert.Equal(9, pulses.Length);
+            Assert.All(pulses, pulse => Assert.Equal(4d / 9, pulse.Damage, 6));
+            Assert.Equal(4, pulses.Sum(pulse => pulse.Damage), 6);
+            var reactions = events.Where(hit => hit.TargetId == id && hit.Dialogue is not null).Select(hit => hit.Dialogue).ToArray();
+            Assert.Equal(5, reactions.Length);
+            Assert.Equal(reactions.Length, reactions.Distinct().Count());
+            Assert.False(world.IsProbulatorAbducted(id));
+        }
+        var released = world.CreateSnapshot().Players.Single(player => player.Id == first.Id);
+        Assert.Null(released.Abduction);
+        Assert.Equal(drop, released.Position);
+        Assert.True((await world.MoveAsync(first.Id, new(1, 0, 2)))!.Moved);
+    }
+
+    [Fact]
+    public async Task ProbulatorCanAbductAgainAfterSequenceAndCooldownWithoutToggling()
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, pilot, _) = await CreateProbulatorTestWorld(clock: clock);
+        var fake = world.PlaceTestCharacter(pilot.Id, new("player", 0, 0)).Player!;
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        clock.Advance(27);
+        var completion = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        Assert.Equal(4, Assert.Single(completion.Combat, hit => hit.TargetId == fake.Id).Damage);
+        var released = world.CreateSnapshot().Players.Single(player => player.Id == fake.Id);
+        await world.TeleportAsync(pilot.Id, new(released.Position.X, released.Position.Y, true));
+        Assert.DoesNotContain((await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500))).Combat, hit => hit.TargetId == fake.Id);
+        clock.Advance(3);
+        Assert.Contains((await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500))).Combat, hit => hit.TargetId == fake.Id && hit.StatusEffect == "Abducted");
+    }
+
+    [Fact]
+    public async Task LethalAbductionStillCompletesFullSequenceBeforeRespawn()
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, pilot, store) = await CreateProbulatorTestWorld(clock: clock);
+        await world.UpdateItemConfigurationAsync(pilot.Id, new("probulator", 20, 1.7, 0, 0));
+        var fake = world.PlaceTestCharacter(pilot.Id, new("player", 0, 0)).Player!;
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        clock.Advance(15);
+        var aboard = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        Assert.True(world.IsProbulatorAbducted(fake.Id));
+        Assert.Equal(0, world.CreateSnapshot().Players.Single(player => player.Id == fake.Id).HealthHearts);
+        Assert.DoesNotContain(aboard.Combat, hit => hit.TargetId == fake.Id && hit.TargetDied);
+        clock.Advance(12);
+        var finished = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        Assert.Contains(finished.Combat, hit => hit.TargetId == fake.Id && hit.TargetDied);
+        Assert.False(world.IsProbulatorAbducted(fake.Id));
+        var reset = world.CreateSnapshot().Players.Single(player => player.Id == fake.Id);
+        Assert.Null(reset.Abduction);
+        Assert.Equal(10, reset.HealthHearts);
+        Assert.Null(await store.LoadCharacterAsync(world.Configuration.Id, fake.Id));
+    }
+
+    [Fact]
+    public async Task ProbulatorDoesNotSweepTeleportsOrHitBeyondShadow()
+    {
+        var (world, pilot, _) = await CreateProbulatorTestWorld();
+        var crossed = world.PlaceTestCharacter(pilot.Id, new("npc", 20, 0)).Actor!;
+        var outside = world.PlaceTestCharacter(pilot.Id, new("npc", 40, 1)).Actor!;
+        world.ToggleProbulator(pilot.Id, new(0, 0));
+        await world.TeleportAsync(pilot.Id, new(40, 0, true));
+        var tick = await world.AdvanceHostilityAsync(TimeSpan.FromMilliseconds(500));
+        Assert.DoesNotContain(tick.Combat, hit => hit.TargetId == crossed.Id || hit.TargetId == outside.Id);
+        var center = pilot.Position;
+        Assert.True(ProbulatorGeometry.Touches(center, center, center with { X = 1.69 }, 1.7));
+        Assert.False(ProbulatorGeometry.Touches(center, center, center with { X = 1.71 }, 1.7));
+        Assert.True(ProbulatorGeometry.Touches(center, center, center with { Y = .68 }, 1.7));
+        Assert.False(ProbulatorGeometry.Touches(center, center, center with { Y = .71 }, 1.7));
+    }
+
+    [Fact]
+    public async Task TestPlacementRequiresGodModeValidGroundAndOnlyClearsOwnCharacters()
+    {
+        var (world, pilot, _) = await CreateProbulatorTestWorld();
+        var other = await world.JoinAsync("other", "Other");
+        Assert.Throws<InvalidOperationException>(() => world.PlaceTestCharacter(other.Id, new("npc", 0, 0)));
+        Assert.Throws<InvalidOperationException>(() => world.ClearTestCharacters(other.Id));
+        Assert.Throws<InvalidOperationException>(() => world.PlaceTestCharacter(pilot.Id, new("bogus", 0, 0)));
+        Assert.Throws<InvalidOperationException>(() => world.PlaceTestCharacter(pilot.Id, new("npc", double.NaN, 0)));
+        Assert.Throws<InvalidOperationException>(() => world.PlaceTestCharacter(pilot.Id, new("npc", 1000000, 0)));
+        var npc = world.PlaceTestCharacter(pilot.Id, new("npc", 0, 0)).Actor!;
+        world.AdvanceActors(TimeSpan.FromSeconds(1));
+        Assert.Equal(npc.Position, Assert.Single(world.CreateSnapshot().Actors!, actor => actor.Id == npc.Id).Position);
+        await world.SetGodModeAsync(other.Id, true);
+        Assert.Empty(world.ClearTestCharacters(other.Id));
+        Assert.Contains(world.CreateSnapshot().Actors!, actor => actor.Id == npc.Id);
+        for (var i = 1; i < 30; i++) world.PlaceTestCharacter(pilot.Id, new("npc", 0, 0));
+        Assert.Throws<InvalidOperationException>(() => world.PlaceTestCharacter(pilot.Id, new("npc", 0, 0)));
+        Assert.Equal(30, world.ClearTestCharacters(pilot.Id).Count);
+    }
+
+    [Theory]
+    [InlineData(18, true)]
+    [InlineData(0, true)]
+    [InlineData(0, false)]
+    public async Task IdleRaftDriftsDownwindAndRemainsOnWater(double windSpeed, bool available)
     {
         var configuration = new RealityConfiguration("raft-drift", "Raft Drift", 334, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var region = configuration.Area.Region;
         var water = new CanonicalEntity("test-lake", EntityKind.Water, new WorldPosition(region, 0, 0),
             new GeometryPoint[] { new(-25, -25), new(25, -25), new(25, 25), new(-25, 25), new(-25, -25) },
             new Dictionary<string, string> { ["natural"] = "water" });
-        var weather = new WeatherState("Breezy", 1, 18, 0, 18, true, DateTimeOffset.UtcNow, "test", WindDirectionDegrees: 90);
+        var weather = new WeatherState("Breezy", 1, 18, 0, windSpeed, true, DateTimeOffset.UtcNow, "test", IsAvailable: available, WindDirectionDegrees: 90);
         var store = new SqliteRealityStore(Path.Combine(_directory, "raft-drift.db"));
         await store.InitializeAsync(configuration);
         await store.SaveCharacterAsync(configuration.Id, new PlayerState("rafter", "Rafter", new WorldPosition(region, 0, 0), TravelMode: TravelMode.Raft, GodMode: true));
@@ -1316,6 +1660,14 @@ public sealed class RealityWorldTests : IAsyncLifetime
         var player = await world.JoinAsync("rafter", "Rafter");
         Assert.Equal(TerrainType.DeepWater, player.Terrain);
         Assert.Equal(90, world.Weather.WindDirectionDegrees);
+        Assert.True(world.Weather.WindSpeedKilometersPerHour >= 8);
+        var swimmers = world.CreateSnapshot().Actors!.Where(a => a.Subtype is "fish" or "waterMonster").ToArray();
+        Assert.Contains(swimmers, a => a.Subtype == "waterMonster");
+        Assert.True(swimmers.Count(a => a.Subtype == "fish") >= 3);
+        for (var tick = 0; tick < 30; tick++) world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        foreach (var swimmer in world.CreateSnapshot().Actors!.Where(a => a.Subtype is "fish" or "waterMonster"))
+            Assert.Contains(new WorldNavigation(configuration.Area.Bounds, new[] { water }, Array.Empty<ElevationSample>()).TerrainAt(swimmer.Position.X, swimmer.Position.Y), new[] { TerrainType.ShallowWater, TerrainType.DeepWater });
+
 
         await Task.Delay(1050);
         var changed = await world.AdvanceVitalsAsync(TimeSpan.FromSeconds(1), CancellationToken.None);

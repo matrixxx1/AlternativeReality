@@ -132,14 +132,36 @@ public sealed class WorldNavigation
     public double ElevationAt(double x, double y)
     {
         if (_elevation.Count == 0) return 0;
-        var nearest = _elevation
-            .Select(sample => (Sample: sample, DistanceSquared: Math.Pow(sample.X - x, 2) + Math.Pow(sample.Y - y, 2)))
-            .OrderBy(item => item.DistanceSquared)
-            .Take(4)
-            .ToArray();
-        if (nearest[0].DistanceSquared < .0001) return nearest[0].Sample.ElevationMeters;
-        var weights = nearest.Select(item => 1 / Math.Max(1, item.DistanceSquared)).ToArray();
-        return nearest.Select((item, index) => item.Sample.ElevationMeters * weights[index]).Sum() / weights.Sum();
+        // Keep only the four closest samples, in the same stable order as OrderBy.
+        // This hot path is used by actor movement and pathfinding; avoid sorting and allocations.
+        Span<double> distances = stackalloc double[4];
+        Span<double> heights = stackalloc double[4];
+        var count = 0;
+        for (var sampleIndex = 0; sampleIndex < _elevation.Count; sampleIndex++)
+        {
+            var sample = _elevation[sampleIndex];
+            var distance = Math.Pow(sample.X - x, 2) + Math.Pow(sample.Y - y, 2);
+            var index = 0;
+            while (index < count && distances[index] <= distance) index++;
+            if (index == 4) continue;
+            for (var move = Math.Min(count, 3); move > index; move--)
+            {
+                distances[move] = distances[move - 1];
+                heights[move] = heights[move - 1];
+            }
+            distances[index] = distance;
+            heights[index] = sample.ElevationMeters;
+            count = Math.Min(4, count + 1);
+        }
+        if (distances[0] < .0001) return heights[0];
+        double weightedHeight = 0, totalWeight = 0;
+        for (var index = 0; index < count; index++)
+        {
+            var weight = 1 / Math.Max(1, distances[index]);
+            weightedHeight += heights[index] * weight;
+            totalWeight += weight;
+        }
+        return weightedHeight / totalWeight;
     }
 
     public bool IsBlocked(double x, double y, double radius = PlayerRadiusMeters)
@@ -187,8 +209,9 @@ public sealed class WorldNavigation
     }
 
     public NavigationResult FindPath(WorldPosition start, double targetX, double targetY, Func<TerrainType, double>? speedForTerrain = null,
-        Func<TerrainType, bool>? terrainAllowed = null)
+        Func<TerrainType, bool>? terrainAllowed = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         terrainAllowed ??= terrain => terrain != TerrainType.DeepWater;
         if (!_bounds.Contains(targetX, targetY)) return new(false, Array.Empty<WorldPosition>(), "That destination is outside this reality.");
         if (IsBlocked(targetX, targetY) || !terrainAllowed(TerrainAt(targetX, targetY))) return new(false, Array.Empty<WorldPosition>(), "That destination is blocked or has impassable terrain.");
@@ -224,6 +247,7 @@ public sealed class WorldNavigation
         var found = false;
         while (frontier.TryDequeue(out var current, out _))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (current == targetKey) { found = true; break; }
             foreach (var direction in directions)
             {
@@ -255,7 +279,7 @@ public sealed class WorldNavigation
         }
         reverse.Add(start);
         reverse.Reverse();
-        return new(true, Smooth(reverse, terrainAllowed));
+        return new(true, Smooth(reverse, terrainAllowed, cancellationToken));
     }
 
     public WorldPosition FindNearestWalkable(WorldPosition preferred)
@@ -275,7 +299,7 @@ public sealed class WorldNavigation
         return preferred with { Z = ElevationAt(preferred.X, preferred.Y) };
     }
 
-    private IReadOnlyList<WorldPosition> Smooth(IReadOnlyList<WorldPosition> path, Func<TerrainType, bool> terrainAllowed)
+    private IReadOnlyList<WorldPosition> Smooth(IReadOnlyList<WorldPosition> path, Func<TerrainType, bool> terrainAllowed, CancellationToken cancellationToken)
     {
         var result = new List<WorldPosition>();
         var anchor = 0;
@@ -284,6 +308,7 @@ public sealed class WorldNavigation
             var furthest = anchor + 1;
             for (var candidate = path.Count - 1; candidate > anchor + 1; candidate--)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!CanTraverse(path[anchor], path[candidate], terrainAllowed)) continue;
                 furthest = candidate;
                 break;

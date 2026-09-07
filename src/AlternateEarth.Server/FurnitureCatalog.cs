@@ -17,6 +17,7 @@ internal static class FurnitureCatalog
 {
     public static readonly FurnitureDefinition[] All =
     [
+        new("craftingTable", "Crafting table", 1.6, .8, 15_000, 45_000, "craftingTable", ["oak", "walnut", "black"], ["woodgrain", "solid"]),
         new("bed", "Bed", 2.1, 1.5, 30_000, 250_000, "bed", ["walnut", "white", "black", "navy", "sage"], ["solid", "striped", "plaid", "floral"]),
         new("bunkBed", "Bunk bed", 2.1, 1.2, 55_000, 220_000, "bed", ["oak", "white", "black", "blue"], ["solid", "striped"]),
         new("dresser", "Dresser", 1.5, .55, 25_000, 180_000, "dresser", ["oak", "walnut", "white", "black", "teal"], ["solid", "woodgrain"]),

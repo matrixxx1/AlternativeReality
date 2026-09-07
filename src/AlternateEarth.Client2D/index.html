@@ -4,10 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=54">
+  <link rel="stylesheet" href="styles.css?v=79">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
+  <div id="connectionTask" class="connection-task" role="status" aria-live="polite" hidden>
+    <div class="connection-task-card"><span class="connection-spinner" aria-hidden="true"></span><strong id="connectionTaskMessage">Connecting to the world…</strong><small id="connectionTaskElapsed">Controls will resume automatically</small></div>
+  </div>
   <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
   <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
   <aside id="rightRail" class="right-rail" aria-label="Game panels">
@@ -18,42 +21,62 @@
     <div id="realityName" class="reality-name">Connecting reality…</div>
     <div class="status-row"><span id="connectionDot" class="dot"></span><span id="status">Opening reality link</span></div>
   </header>
-  <section id="telemetryPanel" class="panel telemetry-panel" data-collapsible="Player status">
-    <div class="gps-row"><span>Your GPS</span><strong id="playerGpsValue">—</strong></div>
-    <div id="destinationGpsRow" class="gps-row" hidden><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
-    <div><span>Terrain</span><strong id="terrainValue">—</strong></div>
-    <div><span>Elevation</span><strong id="elevationValue">—</strong></div>
-    <div id="destinationDistanceRow" hidden><span>Distance</span><strong id="distanceValue">—</strong></div>
-    <div><span>Camera</span><strong id="cameraValue">0 m</strong></div>
-    <div><span>Visible range</span><strong id="visibilityValue">100 m</strong></div>
-    <div><span>Weather</span><strong id="weatherValue">Loading…</strong></div>
-    <div><span>Sunrise / sunset</span><strong id="sunValue">—</strong></div>
-    <div><span>Moon</span><strong id="moonValue">—</strong></div>
+  <section id="statsPanel" class="panel telemetry-panel" aria-label="Stats" data-collapsible="Stats">
     <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
     <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
     <div class="water"><span>Water</span><strong id="waterValue">●●●●●●●●●●</strong></div>
     <div class="body-heat"><span>Heat</span><strong id="bodyHeatValue">Comfortable · 50%</strong></div>
+    <div><span>Level</span><strong id="playerLevelValue">1</strong></div>
+    <progress id="playerExperience" max="100" value="0" aria-label="Experience toward next level"></progress>
+    <small id="playerExperienceText">0 / 100 XP</small>
+    <div><span>Alignment</span><strong id="alignmentValue">Neutral</strong></div>
+    <button id="openProgression" type="button">Character stats</button>
+    <div id="dungeonComplete" hidden>Dungeon complete · Grand treasure unlocked</div>
+    <div><span>Crafting</span><strong id="craftingLevelValue">Level 1 · 0%</strong></div>
     <div><span>Wanted</span><strong id="wantedValue">None</strong></div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
-    <div class="compass-row"><span>Base</span><strong id="baseCompassValue">—</strong></div>
-    <button id="centerButton" type="button">Center on player</button>
-    <div class="admin-controls">
-      <label><input id="godMode" type="checkbox"> God Mode</label>
-      <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
-      <button id="serverConfigButton" type="button" hidden>Server config</button>
-    </div>
   </section>
-  <section id="activeEventsPanel" class="panel active-events-panel" data-collapsible="Active server events" hidden>
-    <div class="active-events-heading"><strong>Server events</strong><span>Happening now</span></div>
+  <section id="progressionWindow" class="panel progression-panel" data-collapsible="Character stats" hidden>
+    <h2>Character stats</h2>
+    <p id="progressionSummary"></p>
+    <p id="alignmentSummary"></p>
+    <p>Each level grants one point. You can redistribute your points at any time; no stat can go below zero.</p>
+    <strong id="statPointsRemaining" aria-live="polite"></strong>
+    <div id="statAllocation"></div>
+    <div class="progression-actions"><button id="saveStats" type="button">Save points</button><button id="closeProgression" type="button">Close</button></div>
+  </section>
+  <section id="activeEventsPanel" class="panel active-events-panel" data-collapsible="Reality inversion" hidden>
+    <div class="active-events-heading"><strong>Reality inversion</strong><span>Happening now</span></div>
     <div id="activeEventsList" class="active-events-list" aria-live="polite"></div>
   </section>
   <section id="miniMapPanel" class="panel minimap-panel" data-collapsible="Mini map">
-    <strong>Mini map</strong>
     <canvas id="miniMap" width="372" height="220" aria-label="Nearby stores, players, graves, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
     <div id="miniMapTooltip" class="minimap-tooltip" role="tooltip" hidden></div>
-    <button id="miniMapTeleportHomeButton" class="minimap-home-button" type="button" disabled>⌂ Teleport Home</button>
     <div class="minimap-legend"><span class="you">● You</span><span class="store">◆ Store</span><span class="player">● Player</span><span class="grave">✝ Grave</span><span class="flag">⚑ Your flag</span><span class="home">⌂ Home</span></div>
-    <div class="minimap-hint">Click your Home or flags to teleport</div>
+    <div class="minimap-actions" role="group" aria-label="Map and inventory actions">
+      <button id="miniMapTeleportHomeButton" class="minimap-home-button" type="button" title="Teleport Home" aria-label="Teleport Home" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/></svg>
+      </button>
+      <button id="centerButton" type="button" title="Center on player" aria-label="Center on player">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
+      </button>
+      <button id="openInventoryButton" type="button" title="Inventory" aria-label="Inventory" aria-controls="inventoryPanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M7 6h10a3 3 0 0 1 3 3v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a3 3 0 0 1 3-3Z"/><rect x="7" y="13" width="10" height="6" rx="1"/><path d="M9 9h6m-3 4v2"/></svg>
+      </button>
+      <button id="openChatButton" type="button" title="Chat" aria-label="Chat" aria-controls="chatPanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-9l-6 4v-4H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M7 8h10M7 12h7"/></svg>
+      </button>
+    </div>
+    <div class="minimap-location" role="group" aria-label="Location">
+      <strong>Location</strong>
+      <div class="location-summary" aria-label="GPS, terrain and elevation">
+        <strong id="playerGpsValue" title="GPS coordinates">—</strong>
+        <strong id="terrainValue" title="Terrain">—</strong>
+        <strong id="elevationValue" title="Elevation">—</strong>
+      </div>
+      <div id="destinationGpsRow" class="gps-row" hidden><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
+    <div id="destinationDistanceRow" hidden><span>Distance</span><strong id="distanceValue">—</strong></div>
+    </div>
   </section>
   <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
     <strong>Performance</strong>
@@ -66,9 +89,17 @@
     <div><span>Server memory</span><strong id="performanceServer">—</strong></div>
     <div><span>Last map load</span><strong id="performanceLoad">—</strong></div>
   </section>
-  <section id="travelPanel" class="panel travel-panel" aria-label="Travel mode" data-collapsible="Travel">
+  <section id="travelPanel" class="panel travel-panel" aria-label="Behavior" data-collapsible="Behavior">
+    <strong id="posturingLabel">Posturing</strong>
+    <div class="posture-buttons" role="group" aria-labelledby="posturingLabel">
+      <button type="button" data-posture="timid" aria-pressed="false"><span class="posture-check" aria-hidden="true">✓</span>Timid</button>
+      <button type="button" data-posture="defensive" aria-pressed="false"><span class="posture-check" aria-hidden="true">✓</span>Defensive</button>
+      <button type="button" data-posture="neutral" aria-pressed="true"><span class="posture-check" aria-hidden="true">✓</span>Neutral</button>
+      <button type="button" data-posture="attackReady" aria-pressed="false"><span class="posture-check" aria-hidden="true">✓</span>Poised</button>
+      <button type="button" data-posture="aggressive" aria-pressed="false"><span class="posture-check" aria-hidden="true">✓</span>Aggressive</button>
+    </div>
     <strong>Travel mode</strong>
-    <div class="mode-buttons">
+    <div class="mode-buttons" role="group" aria-label="Travel modes">
       <button type="button" data-mode="walk">Walk</button>
       <button type="button" data-mode="run">Run</button>
       <button type="button" data-mode="skateboard">Skateboard</button>
@@ -79,34 +110,17 @@
       <button type="button" data-mode="raft">Raft</button>
       <button type="button" data-mode="ufo">UFO</button>
     </div>
-  </section>
-  <section id="inventoryPanel" class="panel inventory-panel">
-    <div class="inventory-header"><strong>Inventory &amp; equipment</strong><button id="toggleInventoryButton" type="button">Hide</button></div>
-    <div id="inventoryContent" class="equipment-layout">
-      <div class="equipment-doll" role="group" aria-label="Equipped clothing and weapon">
-        <svg class="person-outline" viewBox="0 0 100 180" aria-hidden="true">
-          <circle cx="50" cy="25" r="17"></circle>
-          <path d="M35 48 L65 48 L75 105 L62 105 L68 165 M38 105 L32 165 M36 58 L14 108 M64 58 L86 108"></path>
-        </svg>
-        <button id="equipmentHat" class="equipment-slot slot-hat" type="button"><span>Hat</span><em>Empty</em></button>
-        <button id="equipmentShirt" class="equipment-slot slot-shirt" type="button"><span>Shirt</span><em>Empty</em></button>
-        <button id="equipmentOffhand" class="equipment-slot slot-gloves" type="button"><span>Offhand</span><em>Empty</em></button>
-        <button id="equipmentPants" class="equipment-slot slot-pants" type="button"><span>Pants</span><em>Empty</em></button>
-        <button id="equipmentShoes" class="equipment-slot slot-shoes" type="button"><span>Shoes</span><em>Empty</em></button>
-        <button id="equipmentWeapon" class="equipment-slot slot-weapon" type="button"><span>Weapon</span><em>Fist</em></button>
-      </div>
-      <div class="backpack" aria-label="Backpack">
-        <div class="backpack-handle" aria-hidden="true"></div>
-        <strong class="carried-title">Backpack</strong>
-        <small id="backpackSummary">0.0 / 50 lb</small>
-        <nav class="backpack-tabs" aria-label="Backpack categories">
-          <button type="button" data-inventory-tab="weapon">Weapons <span id="weaponSlotCount">0/3</span></button>
-          <button type="button" data-inventory-tab="ammo">Ammo</button>
-          <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount">0/3</span></button>
-          <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount">0/6</span></button>
-        </nav>
-        <div id="inventoryItems" class="inventory-items">Empty</div>
-      </div>
+    <button id="travelProbulator" type="button" aria-pressed="false" hidden>Probulator: OFF</button>
+    <strong id="lootingLabel">Looting</strong>
+    <div class="mode-buttons looting-buttons" role="group" aria-labelledby="lootingLabel">
+      <button type="button" data-looting="all" aria-pressed="false">Take all</button>
+      <button type="button" data-looting="selective" aria-pressed="true" class="active">Selective</button>
+    </div>
+    <p id="lootingDescription" class="behavior-description" aria-live="polite">Open treasure to choose what to take or leave.</p>
+    <div class="admin-controls">
+      <label><input id="godMode" type="checkbox"> God Mode</label>
+      <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
+      <button id="serverConfigButton" type="button" hidden>Server config</button>
     </div>
   </section>
   <section id="characterPanel" class="panel character-panel" data-collapsible="Character manager" hidden>
@@ -138,27 +152,35 @@
       </div>
     </section>
   </section>
-  <section id="chatPanel" class="panel chat-panel" data-collapsible="Chat">
-    <strong>Recent chat</strong>
-    <div id="chatMessages" class="chat-messages"><div class="empty-chat">No messages yet.</div></div>
-    <form id="chatForm" class="chat-form">
-      <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
-      <button type="submit">Say</button>
-    </form>
+  <section id="craftingWindow" class="panel crafting-window" data-collapsible="Crafting table" hidden>
+    <h2>Crafting table</h2>
+    <p id="craftingSkillSummary"></p>
+    <p>Use supplies from your Home storage. Finished items go back into storage.</p>
+    <small>Recipes use invented game-item counts, not real measurements or preparation instructions.</small>
+    <div id="craftingRecipes" class="crafting-recipes"></div>
+    <button id="craftingRefresh" type="button">Refresh supplies</button>
+    <button id="craftingClose" type="button">Close</button>
   </section>
   <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
+    <button id="waitForBusButton" type="button" hidden>Wait for bus</button>
+    <button id="viewBusRouteButton" type="button" hidden>View route</button>
     <button id="enterBuildingButton" type="button" hidden>Enter building</button>
     <button id="pickLockButton" type="button" hidden>Pick lock</button>
     <button id="goUpstairsButton" type="button" hidden>Go upstairs</button>
     <button id="goDownstairsButton" type="button" hidden>Go downstairs</button>
     <button id="leaveDungeonButton" type="button" hidden>Leave dungeon</button>
+    <button data-test-character="npc" type="button" hidden>Place NPC here</button>
+    <button data-test-character="player" type="button" hidden>Place fake player here</button>
+    <button data-test-character="animal" type="button" hidden>Place animal here</button>
+    <button id="clearTestCharactersButton" type="button" hidden>Clear my test characters</button>
     <button id="teleportButton" type="button" hidden>Teleport here</button>
     <button id="placeFlagButton" type="button" hidden>Place flag</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
     <button id="questButton" type="button" hidden>Quest</button>
     <button id="capturePetButton" type="button" hidden>Capture pet</button>
+    <button id="tauntButton" type="button" hidden>Taunt</button>
     <button id="stalkButton" type="button" hidden>Stalk</button>
     <button id="continuousAttackButton" type="button" hidden>Attack</button>
     <button id="sprayPaintVehicleButton" type="button" hidden>Spray-paint car</button>
@@ -189,19 +211,23 @@
     <div id="tradeOffers"></div>
     <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm trade</button></div>
   </section>
-  <section id="treasureWindow" class="panel treasure-window" data-collapsible="Treasure" hidden>
+  <section id="treasureWindow" class="panel treasure-window" role="dialog" aria-label="Treasure and backpack" data-collapsible="Treasure" hidden>
     <h2>Treasure chest</h2>
     <div id="treasureCash" class="treasure-cash"></div>
-    <div id="treasureItems" class="treasure-items"></div>
+    <p>Choose quantities to take. Unselected items stay here.</p>
+    <div class="treasure-columns">
+      <div><h3>Treasure</h3><div id="treasureItems" class="treasure-items"></div></div>
+      <div><h3>Your backpack</h3><p>Drop items at your feet to make room.</p><div id="treasureInventory" class="treasure-items"></div></div>
+    </div>
     <div id="treasureWeight" class="treasure-weight"></div>
     <div id="treasureWarning" class="treasure-warning" hidden></div>
-    <div class="trade-actions"><button id="treasureClose" type="button">Leave items</button><button id="treasureTake" type="button">Review &amp; take</button></div>
+    <div class="trade-actions"><button id="treasureClose" type="button">Close</button><button id="treasureTakeAll" type="button" title="Take everything if it fits; otherwise select everything to review capacity">Take all</button><button id="treasureTake" type="button">Take selected</button></div>
   </section>
-  <section id="questLog" class="panel quest-log" data-collapsible="Quests">
+  <section id="questLog" class="panel quest-log" data-collapsible="Quests" hidden>
     <strong>Quests</strong><div id="questList"><small>No active quests.</small></div>
   </section>
-  <section id="questWindow" class="panel quest-window" data-collapsible="Quest details" hidden>
-    <h2 id="questTitle">Quest</h2><p id="questDescription"></p><strong id="questReward"></strong>
+  <section id="questWindow" class="panel quest-window" data-popup="Quest conversation" role="dialog" aria-modal="true" aria-labelledby="questTitle" hidden>
+    <h2 id="questTitle">Quest</h2><div class="quest-speakers"><div><canvas id="questPlayerPortrait" width="100" height="110"></canvas><b id="questPlayerName"></b></div><p id="questQuestion"></p><div><canvas id="questGiverPortrait" width="100" height="110"></canvas><b id="questGiverName"></b></div></div><p id="questDescription"></p><p id="questNavigation"></p><strong id="questReward"></strong><p id="questOfferPrompt"></p>
     <div class="trade-actions"><button id="questAbandon" type="button" hidden>Abandon</button><button id="questClose" type="button">Close</button><button id="questAccept" type="button" hidden>Accept</button><button id="questComplete" type="button" hidden>Complete</button></div>
   </section>
   <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
@@ -213,7 +239,7 @@
       <button type="button" role="tab" data-server-config-tab="quests">Quest Items</button>
       <button type="button" role="tab" data-server-config-tab="misc">Misc</button>
       <button type="button" role="tab" data-server-config-tab="movement">Terrain &amp; Movement</button>
-      <button type="button" role="tab" data-server-config-tab="events">Server Events</button>
+      <button type="button" role="tab" data-server-config-tab="events">Reality inversion</button>
     </nav>
     <section class="server-config-page" data-server-config-page="vehicles">
       <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigVehicles"></div></div>
@@ -252,20 +278,58 @@
         <div class="server-event-row"><label>Street lights off (hour)<input id="streetLightsOffConfig" type="number" min="0" max="23" step="1"></label></div>
         <div class="server-event-row"><label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
         <div class="server-event-row"><label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
-        <div class="server-event-row"><label>Door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="ufoEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="trexEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="brontosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="stegosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="stegosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="stegosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="stegosaurus">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="raptorEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Event name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
+        <div class="server-event-row"><label>Dungeon door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="ufoEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="trexEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="brontosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="stegosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="stegosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="stegosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="stegosaurus">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="raptorEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
+        <div class="server-event-row world-event-row"><label>Inversion name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
         <div class="server-event-row"><label>Wanted level for SWAT deployment<input id="wantedSwatThresholdConfig" type="number" min="1" max="100" step="1"></label></div>
       </div>
-      <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save server events</button><button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button></div>
+      <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save Reality inversion settings</button><button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button></div>
     </section>
   </section>
   </aside>
+  <section id="inventoryPanel" class="panel inventory-panel panel-popup" data-popup="Inventory" role="dialog" aria-labelledby="inventoryTitle" hidden>
+    <div class="inventory-header"><strong id="inventoryTitle">Inventory &amp; equipment</strong><button id="closeInventoryButton" class="popup-close" type="button" aria-label="Close Inventory" title="Close Inventory">×</button></div>
+    <div id="inventoryContent" class="equipment-layout">
+      <div class="equipment-doll" role="group" aria-label="Equipped clothing and weapon">
+        <svg class="person-outline" viewBox="0 0 100 180" aria-hidden="true">
+          <circle cx="50" cy="25" r="17"></circle>
+          <path d="M35 48 L65 48 L75 105 L62 105 L68 165 M38 105 L32 165 M36 58 L14 108 M64 58 L86 108"></path>
+        </svg>
+        <button id="equipmentHat" class="equipment-slot slot-hat" type="button"><span>Hat</span><em>Empty</em></button>
+        <button id="equipmentShirt" class="equipment-slot slot-shirt" type="button"><span>Shirt</span><em>Empty</em></button>
+        <button id="equipmentOffhand" class="equipment-slot slot-gloves" type="button"><span>Offhand</span><em>Empty</em></button>
+        <button id="equipmentPants" class="equipment-slot slot-pants" type="button"><span>Pants</span><em>Empty</em></button>
+        <button id="equipmentShoes" class="equipment-slot slot-shoes" type="button"><span>Shoes</span><em>Empty</em></button>
+        <button id="equipmentWeapon" class="equipment-slot slot-weapon" type="button"><span>Weapon</span><em>Fist</em></button>
+      </div>
+      <div class="backpack" aria-label="Backpack">
+        <div class="backpack-handle" aria-hidden="true"></div>
+        <strong class="carried-title">Backpack</strong>
+        <small id="backpackSummary">0.0 / 50 lb</small>
+        <nav class="backpack-tabs" aria-label="Backpack categories">
+          <button type="button" data-inventory-tab="weapon">Weapons <span id="weaponSlotCount">0/3</span></button>
+          <button type="button" data-inventory-tab="ammo">Ammo</button>
+          <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount">0/3</span></button>
+          <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount">0/6</span></button>
+        </nav>
+        <div id="inventoryItems" class="inventory-items">Empty</div>
+      </div>
+    </div>
+  </section>
+  <section id="chatPanel" class="panel chat-panel panel-popup" data-popup="Chat" role="dialog" aria-labelledby="chatTitle" hidden>
+    <div class="window-header"><strong id="chatTitle">Chat</strong><button id="closeChatButton" class="popup-close" type="button" aria-label="Close Chat" title="Close Chat">×</button></div>
+    <div id="chatMessages" class="chat-messages"><div class="empty-chat">No messages yet.</div></div>
+    <form id="chatForm" class="chat-form">
+      <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
+      <button type="submit">Say</button>
+    </form>
+  </section>
+
   <div id="actorTooltip" class="actor-tooltip" hidden></div>
   <section id="accountSetup" class="account-setup">
     <form id="accountForm" class="panel account-card">
@@ -295,6 +359,12 @@
     </form>
   </section>
   <div id="toast" role="status"></div>
-  <script src="app.js?v=96"></script>
+  <section id="busRidePanel" class="bus-ride-panel" aria-live="polite" hidden><span id="busRideStatus"></span><button id="getOffBusButton" type="button" hidden>Get off bus now</button><button id="cancelBusWaitButton" type="button" hidden>Cancel waiting</button><button id="rideViewRouteButton" type="button">View route</button></section>
+  <dialog id="busRouteDialog" aria-labelledby="busRouteTitle"><h2 id="busRouteTitle">Bus route</h2><button id="closeBusRouteButton" type="button">Close route</button><label>Service <select id="busRouteSelect"></select></label><p id="busRouteSummary"></p><canvas id="busRouteCanvas" width="800" height="480" aria-label="Bus route, direction arrows and numbered stops"></canvas><ol id="busRouteStops"></ol><button id="routeWaitForBusButton" type="button">Wait at selected stop</button></dialog>
+  <script src="transit.js?v=1"></script>
+  <script src="commands.js?v=5"></script>
+  <script src="combat-effects.js?v=2"></script>
+  <script src="quest-navigation.js?v=1"></script>
+  <script src="app.js?v=136"></script>
 </body>
 </html>

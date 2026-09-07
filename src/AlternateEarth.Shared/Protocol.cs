@@ -5,18 +5,19 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 44;
+    public const int Version = 58;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
 public sealed record MoveRequest(double X, double Y, long Sequence, double? MaximumDistanceMeters = null, double? DestinationX = null, double? DestinationY = null);
-public sealed record PathRequest(double X, double Y, long Sequence);
+public sealed record PathRequest(double X, double Y, long Sequence, bool IncludeSnapshot = false);
 public sealed record SetTravelModeRequest(TravelMode Mode);
 public sealed record RebuildAreaRequest(bool GodMode);
 public sealed record TeleportRequest(double X, double Y, bool GodMode);
 public sealed record MapFastTravelRequest(string TargetType, string TargetId);
 public sealed record SayRequest(string Message);
 public sealed record SetGodModeRequest(bool Enabled);
+public sealed record PlaceTestCharacterRequest(string Kind, double X, double Y);
 public sealed record TriggerWorldEventRequest(string EventType);
 public sealed record EnterDungeonRequest(string DoorId);
 public sealed record ExitDungeonRequest();
@@ -38,6 +39,7 @@ public sealed record ConsumeItemRequest(string ItemType);
 public sealed record DropItemRequest(string ItemType, int Quantity = 1);
 public sealed record OpenChestRequest(string ChestId);
 public sealed record TakeChestItemsRequest(string ChestId, IReadOnlyList<PurchaseLine> Items);
+public sealed record TakeLootItemsRequest(string LootId, IReadOnlyList<PurchaseLine> Items);
 public sealed record ChestSeenRequest(string ChestId);
 public sealed record RestAtBedRequest(string BedId);
 public sealed record MoveFurnitureRequest(string FurnitureId, double X, double Y);
@@ -80,6 +82,7 @@ public sealed record PlaceFlagRequest(double X, double Y, string Label);
 public sealed record RemoveObjectRequest(string EntityId);
 public sealed record RequestChunkRequest(int X, int Y);
 public sealed record RequestAreaRequest(double X,double Y);
+public sealed record RequestMapWindowRequest(double MinimumX, double MinimumY, double MaximumX, double MaximumY, long Sequence);
 public sealed record PrefetchAreaRequest(double X, double Y, double OriginX, double OriginY);
 
 public static class SharedJson

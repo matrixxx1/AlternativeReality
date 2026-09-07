@@ -108,7 +108,13 @@ public sealed record PlayerState(
     DateTimeOffset? CandleUntilUtc = null,
     bool ShieldOn = false,
     string Ar15FireMode = "single",
-    double FlamethrowerGasGallons = 0);
+    double FlamethrowerGasGallons = 0,
+    bool IsTestCharacter = false,
+    ProbulatorAbductionState? Abduction = null,
+    DateTimeOffset? AsleepUntilUtc = null,
+    double UfoRemainingMeters = 0,
+    string? WaitingAtBusStopId = null,
+    string? RidingBusId = null);
 
 public sealed record ActorState(
     string Id,
@@ -132,7 +138,19 @@ public sealed record ActorState(
     DateTimeOffset? EventStartedAtUtc = null,
     DateTimeOffset? EventEndsAtUtc = null,
     string? EventName = null,
-    string WeaponQuality = "Common");
+    string WeaponQuality = "Common",
+    bool IsTestCharacter = false,
+    ProbulatorAbductionState? Abduction = null,
+    DateTimeOffset? AsleepUntilUtc = null,
+    bool OffersFoodDelivery = false)
+{
+    public const int PortalSeconds = 6;
+    public int EventPortalDurationSeconds => EventStartedAtUtc is null ? 0 : PortalSeconds;
+
+    public bool IsPassingThroughPortal(DateTimeOffset now) =>
+        EventStartedAtUtc is { } start && EventEndsAtUtc is { } end &&
+        (now < start.AddSeconds(PortalSeconds) || now >= end.AddSeconds(-PortalSeconds));
+}
 
 public enum InventoryCategory { Weapon, Quest, Other }
 public sealed record ItemStack(
@@ -212,12 +230,16 @@ public sealed record QuestState(
     string? RequiredItemType = null, int RequiredQuantity = 0,
     string? TargetActorId = null, string? TargetName = null,
     string? DestinationActorId = null, string? DestinationName = null,
-    string? DestinationClue = null, int Progress = 0);
+    string? DestinationClue = null, int Progress = 0,
+    int? DeliveryMinutes = null, DateTimeOffset? DeadlineUtc = null, DateTimeOffset? FailedAtUtc = null,
+    ActorState? DeliveryRecipient = null, bool FoodDamaged = false, string? FoodDamageReason = null, bool DeliveryRefused = false,
+    IReadOnlyList<ItemStack>? RewardItems = null, WorldPosition? NextStagePosition = null, string? NextStageName = null,
+    string? NextStageLocationId = null, IReadOnlyList<string>? ObjectiveActorIds = null);
 public sealed record QuestInteraction(QuestState Quest, bool IsOffer, bool CanComplete, string InteractionActorId);
 public sealed record RelationshipState(string PlayerId, string ActorId, double FriendRating);
 public sealed record DungeonRoom(double X, double Y, double Width, double Height);
 public sealed record DungeonWall(double X1, double Y1, double X2, double Y2, double DoorStart = -1, double DoorEnd = -1);
-public sealed record TreasureChestState(string Id, WorldPosition Position, string LocationId, DateTimeOffset? ExpiresAtUtc = null, bool IsOpened = false);
+public sealed record TreasureChestState(string Id, WorldPosition Position, string LocationId, DateTimeOffset? ExpiresAtUtc = null, bool IsOpened = false, bool IsGrand = false);
 public sealed record ChestContentsState(string ChestId, long MoneyCents, IReadOnlyList<ItemStack> Items);
 public sealed record LootDropState(string Id, WorldPosition Position, string LocationId, long MoneyCents, IReadOnlyList<ItemStack> Items, DateTimeOffset ExpiresAtUtc,
     string DropKind = "loot", string? OwnerName = null, string? OwnerId = null);
@@ -231,7 +253,7 @@ public sealed record DungeonState(
     int Level = 1, int LevelCount = 1, WorldPosition? Stairs = null,
     WorldPosition? Doorway = null, string? SessionId = null,
     bool IsStore = false, string? StoreCategory = null,
-    int Difficulty = 1);
+    int Difficulty = 1, bool IsCompleted = false);
 public sealed record BaseState(
     string BuildingId,
     string DoorId,
@@ -254,7 +276,9 @@ public sealed record PlayerPrivateState(
     InventoryState? HomeItemStorage = null,
     IReadOnlyList<QuestState>? Quests = null,
     bool CanEditHome = false,
-    long HomeStorageMoneyCents = 0);
+    long HomeStorageMoneyCents = 0,
+    IReadOnlyList<string>? LearnedRecipes = null, CraftingSkillState? CraftingSkill = null,
+    IReadOnlyList<string>? OwnedVehicles = null, ProgressionState? Progression = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
     WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null);
 
@@ -333,7 +357,13 @@ public sealed record GeographicDataset(
     IReadOnlyList<ElevationSample> Elevation,
     DateTimeOffset CachedAtUtc);
 
-public sealed record DoorLockState(string DoorId, string BuildingId, bool Locked);
+public sealed record StoreOpeningHours(int OpenHour)
+{
+    public int CloseHour => (OpenHour + 12) % 24;
+    public bool IsOpen(DateTimeOffset serverTime) => (serverTime.TimeOfDay.TotalHours - OpenHour + 24) % 24 < 12;
+}
+
+public sealed record DoorLockState(string DoorId, string BuildingId, bool Locked, StoreOpeningHours? StoreHours = null);
 
 public sealed record WorldSnapshot(
     RealityConfiguration Reality,
@@ -348,4 +378,21 @@ public sealed record WorldSnapshot(
     IReadOnlyList<DoorLockState>? DoorLocks = null,
     DateTimeOffset? DoorLockCycleEndsAtUtc = null,
     IReadOnlyList<PublicBaseState>? PublicBases = null,
-    IReadOnlyList<LootDropState>? Graves = null);
+    IReadOnlyList<LootDropState>? Graves = null,
+    IReadOnlyList<AreaHazardState>? AreaHazards = null,
+    IReadOnlyList<WorldBounds>? MapCoverage = null,
+    TransitSnapshot? Transit = null);
+
+public sealed record WorldMapWindow(IReadOnlyList<CanonicalEntity> BaseEntities,
+    IReadOnlyList<ElevationSample> Elevation, IReadOnlyList<WorldBounds> Coverage);
+
+public sealed record ProbulatorAbductionState(string PilotId, DateTimeOffset StartedAtUtc, WorldPosition Origin,
+    WorldPosition ShipPosition, WorldPosition DropPosition)
+{
+    public const int LiftSeconds = 10;
+    public const int AboardSeconds = 15;
+    public const int LowerSeconds = 2;
+    public const int TotalSeconds = LiftSeconds + AboardSeconds + LowerSeconds;
+    public DateTimeOffset LoweringAtUtc => StartedAtUtc.AddSeconds(LiftSeconds + AboardSeconds);
+    public DateTimeOffset EndsAtUtc => LoweringAtUtc.AddSeconds(LowerSeconds);
+}

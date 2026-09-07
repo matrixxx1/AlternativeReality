@@ -64,14 +64,18 @@ builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<RealitySocketHub>();
 builder.Services.AddHostedService<WeatherRefreshService>();
 builder.Services.AddHostedService<ActorSimulationService>();
+builder.Services.AddHostedService<BusSimulationService>();
+builder.Services.AddHostedService<BusAreaLoadingService>();
 builder.Services.AddHostedService<SmokeTestAccountCleanupService>();
 
 var app = builder.Build();
 var sourceClientDirectory = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "../AlternateEarth.Client2D"));
 var publishedClientDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "wwwroot"));
-var clientDirectory = Directory.Exists(sourceClientDirectory)
-    ? sourceClientDirectory
-    : publishedClientDirectory;
+// Serve the client copied with this build so source edits cannot send newer
+// protocol messages to a server process that has not been rebuilt/restarted.
+var clientDirectory = Directory.Exists(publishedClientDirectory)
+    ? publishedClientDirectory
+    : sourceClientDirectory;
 app.Environment.WebRootPath = clientDirectory;
 app.Environment.WebRootFileProvider = new PhysicalFileProvider(clientDirectory);
 app.UseDefaultFiles();

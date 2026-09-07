@@ -25,7 +25,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     public async Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            FormattableString.Invariant($"v4:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
+            FormattableString.Invariant($"v5:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_legacyCacheDirectory, $"area-{cacheKey}.json");
         if (File.Exists(canonicalCachePath))
         {
@@ -102,7 +102,8 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     private static string BuildQuery(GeographicArea area)
     {
         const double metersPerLatitudeDegree = 111_320.0;
-        var half = area.SizeMeters / 2.0;
+        // Overlap queries so sparse road nodes just beyond a block are included.
+        var half = area.SizeMeters / 2.0 + 500;
         var latitudeDelta = half / metersPerLatitudeDegree;
         var longitudeDelta = half / (metersPerLatitudeDegree * Math.Cos(area.Center.Latitude * Math.PI / 180.0));
         var south = area.Center.Latitude - latitudeDelta;
@@ -120,12 +121,14 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
                $"way[\"landuse\"]({bbox});" +
                $"way[\"leisure\"~\"park|garden|recreation_ground\"]({bbox});" +
                $"way[\"amenity\"=\"parking\"]({bbox});" +
-               $"nwr[\"amenity\"=\"fuel\"]({bbox});" +
+               $"nwr[\"amenity\"~\"^(fuel|restaurant|fast_food|food_court|cafe|ice_cream)$\"]({bbox});" +
                $"nwr[\"shop\"]({bbox});" +
+               $"nwr[\"takeaway\"~\"^(yes|only)$\"]({bbox});" +
+               $"nwr[\"delivery\"=\"yes\"]({bbox});" +
                $"nwr[\"aeroway\"=\"aerodrome\"]({bbox});" +
                $"way[\"boundary\"~\"parcel|lot|cadastral\"]({bbox});" +
                $"way[\"boundary\"=\"administrative\"][\"admin_level\"=\"4\"]({bbox});" +
-               ");out body;>;out skel qt;";
+               ");(._;rel(bw)[\"type\"=\"restriction\"];);out body;>;out skel qt;";
     }
 
     private static IReadOnlyList<CanonicalEntity> ParseFeatures(string rawJson, GeographicArea area)
@@ -135,6 +138,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         var taggedNodes = new List<(long Id, GeoCoordinate Coordinate, Dictionary<string, string> Tags)>();
         var ways = new List<(long Id, long[] Nodes, Dictionary<string, string> Tags)>();
         var relations = new List<(long Id, long[] Ways, Dictionary<string, string> Tags)>();
+        var turnRestrictions = new List<RoadTurnRestriction>();
 
         foreach (var element in document.RootElement.GetProperty("elements").EnumerateArray())
         {
@@ -156,6 +160,17 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             }
             else if (type == "relation" && element.TryGetProperty("members", out var members))
             {
+                var tags = ReadTags(element);
+                if (tags.GetValueOrDefault("type") == "restriction" &&
+                    !(tags.GetValueOrDefault("except") ?? "").Split(';').Any(value => value.Trim() is "bus" or "psv"))
+                {
+                    var rule = tags.GetValueOrDefault("restriction:bus") ?? tags.GetValueOrDefault("restriction:psv") ?? tags.GetValueOrDefault("restriction");
+                    var from = members.EnumerateArray().FirstOrDefault(m => m.GetProperty("role").GetString() == "from" && m.GetProperty("type").GetString() == "way");
+                    var to = members.EnumerateArray().FirstOrDefault(m => m.GetProperty("role").GetString() == "to" && m.GetProperty("type").GetString() == "way");
+                    var via = members.EnumerateArray().FirstOrDefault(m => m.GetProperty("role").GetString() == "via" && m.GetProperty("type").GetString() == "node");
+                    if (rule is not null && from.ValueKind != JsonValueKind.Undefined && to.ValueKind != JsonValueKind.Undefined && via.ValueKind != JsonValueKind.Undefined)
+                        turnRestrictions.Add(new($"geo:osm:way:{from.GetProperty("ref").GetInt64()}", $"geo:osm:way:{to.GetProperty("ref").GetInt64()}", $"osm:{via.GetProperty("ref").GetInt64()}", rule));
+                }
                 relations.Add((element.GetProperty("id").GetInt64(), members.EnumerateArray()
                     .Where(member => member.GetProperty("type").GetString() == "way")
                     .Select(member => member.GetProperty("ref").GetInt64()).ToArray(), ReadTags(element)));
@@ -184,7 +199,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             var geometry = way.Nodes
                 .Where(nodeId => nodes.ContainsKey(nodeId) && RegionId.FromGeo(nodes[nodeId]) == area.Region)
                 .Select(nodeId => projection.Project(nodes[nodeId]))
-                .Where(position => area.Bounds.Contains(position.X, position.Y))
+                .Where(position => kind is EntityKind.Road or EntityKind.Sidewalk || area.Bounds.Contains(position.X, position.Y))
                 .Select(position => new GeometryPoint(position.X, position.Y, position.Z))
                 .ToArray();
             if (geometry.Length < 2)
@@ -198,6 +213,8 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
                 .Where(pair => KeepProperty(pair.Key))
                 .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
             AddDerivedProperties(properties, way.Tags);
+            var restrictions = turnRestrictions.Where(r => r.FromWayId == $"geo:osm:way:{way.Id}").ToArray();
+            if (restrictions.Length > 0) properties["turnRestrictions"] = JsonSerializer.Serialize(restrictions, SharedJson.Options);
             if (kind == EntityKind.StateBoundary) properties["stateName"] = way.Tags.GetValueOrDefault("name") ?? "State boundary";
             if (kind == EntityKind.Terrain)
             {
@@ -206,6 +223,8 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
             if (kind == EntityKind.Road || kind == EntityKind.Sidewalk)
             {
                 properties["widthMeters"] = EstimateWidthMeters(way.Tags).ToString("F1", CultureInfo.InvariantCulture);
+                properties["osmNodeIds"] = string.Join(',', way.Nodes.Where(nodeId => nodes.ContainsKey(nodeId) && RegionId.FromGeo(nodes[nodeId]) == area.Region));
+                properties["roadClass"] = RoadClassification.Classify(properties);
             }
             result.Add(new CanonicalEntity(
                 $"geo:osm:way:{way.Id}",
@@ -253,7 +272,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         return tags;
     }
 
-    private static bool KeepProperty(string key) => key is "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
+    private static bool KeepProperty(string key) => key is "oneway" or "junction" or "lanes" or "maxspeed" or "ref" or "layer" or "bridge" or "tunnel" or "access" or "vehicle" or "motor_vehicle" or "bus" or "motorroad" or "area" or "cuisine" or "takeaway" or "delivery" or "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
 
     private static void AddDerivedProperties(Dictionary<string, string> properties, IReadOnlyDictionary<string, string> tags)
     {
@@ -272,6 +291,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     private static string? MerchantCategory(IReadOnlyDictionary<string, string> tags)
     {
         if (tags.GetValueOrDefault("amenity") == "fuel") return "gas";
+        if (FoodBusinesses.OffersDelivery(tags)) return "food";
         if (!tags.TryGetValue("shop", out var shop)) return null;
         if (shop is "furniture" or "interior_decoration" or "bed" or "carpet") return "furniture";
         if (shop is "clothes" or "fashion" or "shoes" or "tailor") return "clothing";
@@ -292,7 +312,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         if (tags.TryGetValue("natural", out var natural) && natural == "water") return EntityKind.Water;
         if (tags.ContainsKey("waterway")) return EntityKind.Water;
         if (tags.ContainsKey("building")) return EntityKind.Building;
-        if (tags.ContainsKey("shop") || tags.GetValueOrDefault("amenity") == "fuel") return EntityKind.PointOfInterest;
+        if (tags.ContainsKey("shop") || FoodBusinesses.OffersDelivery(tags) || tags.GetValueOrDefault("amenity") == "fuel") return EntityKind.PointOfInterest;
         if (tags.TryGetValue("barrier", out var barrier) && barrier == "fence") return EntityKind.Fence;
         if (tags.TryGetValue("highway", out var highway))
             return highway is "footway" or "pedestrian" or "steps" ? EntityKind.Sidewalk : EntityKind.Road;

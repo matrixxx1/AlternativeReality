@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- The center is the click hotspot. Dark edging stays visible on pale terrain. -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M24 6v7m0 22v7M6 24h7m22 0h7" stroke="#10151b" stroke-width="7"/>
+    <path d="M24 6v7m0 22v7M6 24h7m22 0h7" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="24" cy="24" r="8" stroke="#10151b" stroke-width="7"/>
+    <circle cx="24" cy="24" r="8" stroke="#ffe46b" stroke-width="3"/>
+  </g>
+  <circle cx="24" cy="24" r="2" fill="#ffffff" stroke="#10151b" stroke-width="1.5"/>
+</svg>
