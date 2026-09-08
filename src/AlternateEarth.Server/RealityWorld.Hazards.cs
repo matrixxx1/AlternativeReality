@@ -17,6 +17,7 @@ public sealed partial class RealityWorld
         EnsureNotProbulatorAbducted(playerId);
         if (IsGasAsleep(playerId)) throw new InvalidOperationException("You are asleep until the gas effect wears off.");
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (player.FearedUntilUtc > _probulatorClock.GetUtcNow()) throw new InvalidOperationException("You are fleeing in fear.");
         var definition = HazardCatalog.Find(player.EquippedWeapon) ?? throw new InvalidOperationException("Equip a crafted gas bottle or jar first.");
         if (player.TravelMode == TravelMode.Ufo) throw new InvalidOperationException("Leave your UFO before throwing a bottle or jar.");
         if (!double.IsFinite(request.X) || !double.IsFinite(request.Y)) throw new InvalidOperationException("Choose a valid throw destination.");
@@ -81,14 +82,15 @@ public sealed partial class RealityWorld
                 if (damage <= 0 && !sleeps) continue;
                 var until = sleeps ? now.AddSeconds(pending.Definition.SleepSeconds) : target.AsleepUntilUtc;
                 if (sleeps) { until = _sleepUntil.AddOrUpdate(target.Id, until!.Value, (_, prior) => prior > until.Value ? prior : until.Value); }
-                var health = target.GodMode ? Math.Max(1, target.HealthHearts - damage) : Math.Max(0, target.HealthHearts - damage);
+                var actualDamage = ApplyTypedAttack(zone.OwnerId, target.Id, target.LocationId, zone.Effect, damage);
+                var health = target.GodMode ? Math.Max(1, target.HealthHearts - actualDamage) : Math.Max(0, target.HealthHearts - actualDamage);
                 var died = health <= 0;
                 var updated = target with { HealthHearts = health, AsleepUntilUtc = until, SpeedMetersPerSecond = sleeps ? 0 : target.SpeedMetersPerSecond, Version = target.Version + 1 };
                 if (died) { _sleepUntil.TryRemove(target.Id, out _); updated = await DieAndResetPlayerAsync(updated with { AsleepUntilUtc = null }, cancellationToken); }
                 if (!await SavePlayerAsync(updated, cancellationToken)) continue;
                 if (died) await RewardPlayerKillAsync(zone.OwnerId, target, cancellationToken);
                 players.Add(updated);
-                combat.Add(HazardCombat(zone, target.Id, target.Name, target.Position, damage, updated.HealthHearts, died, sleeps, until));
+                combat.Add(HazardCombat(zone, target.Id, target.Name, target.Position, actualDamage, updated.HealthHearts, died, sleeps, until));
             }
             foreach (var target in ActorsAtLocation(zone.LocationId).Where(actor => actor.Subtype != "ufo" && !actor.IsPassingThroughPortal(now) && !IsProbulatorAbducted(actor.Id) && HazardTouches(zone, actor.Position)).ToArray())
             {
@@ -96,7 +98,8 @@ public sealed partial class RealityWorld
                 if (damage <= 0 && !sleeps) continue;
                 var until = sleeps ? now.AddSeconds(pending.Definition.SleepSeconds) : target.AsleepUntilUtc;
                 if (sleeps) { until = _sleepUntil.AddOrUpdate(target.Id, until!.Value, (_, prior) => prior > until.Value ? prior : until.Value); }
-                var health = Math.Max(0, target.HealthHearts - damage); var died = health <= 0;
+                var actualDamage = ApplyTypedAttack(zone.OwnerId, target.Id, target.LocationId, zone.Effect, damage);
+                var health = Math.Max(0, target.HealthHearts - actualDamage); var died = health <= 0;
                 var updated = target with { HealthHearts = health, AsleepUntilUtc = until, IsMoving = sleeps ? false : target.IsMoving, Version = target.Version + 1 };
                 if (died)
                 {
@@ -105,7 +108,7 @@ public sealed partial class RealityWorld
                     await UpdateActorHealthAsync(owner with { LocationId = zone.LocationId }, target, 0, true, cancellationToken); actors.Remove(target.Id);
                 }
                 else { SetActor(zone.LocationId, updated); actors[updated.Id] = updated; }
-                combat.Add(HazardCombat(zone, target.Id, target.Name, target.Position, damage, health, died, sleeps, until));
+                combat.Add(HazardCombat(zone, target.Id, target.Name, target.Position, actualDamage, health, died, sleeps, until));
             }
             pending.AppliedPulses = due;
             if (now >= zone.EndsAtUtc && _areaHazards.TryRemove(zone.Id, out _)) Interlocked.Increment(ref _areaHazardRevision);

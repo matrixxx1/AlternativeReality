@@ -11,7 +11,10 @@ public sealed partial class RealityWorld
             throw new InvalidOperationException("Treasure is no longer available.");
         if (player.Position.Distance2D(loot.Position) > 4)
             throw new InvalidOperationException("Move closer to the treasure.");
-        return loot with { Items = loot.Items.Select(item => InventoryStack(item.ItemType, item.Quantity, quality: item.Quality)).ToArray() };
+        if (loot.OwnerId is not null && loot.DropKind == "eventReward" && loot.OwnerId != playerId) throw new InvalidOperationException("This is another player’s event reward.");
+        var leveled = loot with { Items = loot.Items.Select(item => LevelLoot(playerId, item, loot.DropKind == "eventReward")).ToArray() };
+        _loot[lootId] = leveled;
+        return leveled;
     }
 
     public async Task<LootTakeResult> TakeLootItemsAsync(string playerId, TakeLootItemsRequest request, CancellationToken cancellationToken = default)
@@ -40,7 +43,7 @@ public sealed partial class RealityWorld
             if (rewards.Count > 0 && !CanAddToBackpack(playerId, rewards, out var capacityMessage))
                 throw new InvalidOperationException(capacityMessage + " Drop carried items or select fewer items.");
 
-            foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity, reward.Quality);
+            foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity, reward.Quality, reward.Gear);
             var player = _players[playerId];
             var updated = player with { WalletCents = player.WalletCents + loot.MoneyCents, Version = player.Version + 1 };
             var remainder = remaining.Count == 0 ? null : loot with { Items = remaining.ToArray(), MoneyCents = 0 };
@@ -48,7 +51,7 @@ public sealed partial class RealityWorld
             else _loot[loot.Id] = remainder;
             await SaveInventoryAsync(playerId, cancellationToken);
             await SavePlayerAsync(updated, cancellationToken);
-            if (loot.DropKind == "tombstone")
+            if (loot.DropKind is "tombstone" or "eventReward")
             {
                 if (remainder is null) await _store.RemovePersistentLootAsync(loot.Id, cancellationToken);
                 else await _store.SavePersistentLootAsync(Configuration.Id, remainder, cancellationToken);

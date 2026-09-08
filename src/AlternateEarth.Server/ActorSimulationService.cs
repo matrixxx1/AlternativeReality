@@ -40,6 +40,9 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.BroadcastActorsAsync(hostile.Actors, stoppingToken);
             await _hub.BroadcastPlayersAsync(hostile.Players, stoppingToken);
             await _hub.BroadcastCombatAsync(hostile.Combat, stoppingToken);
+            await _hub.BroadcastIncursionAsync(stoppingToken);
+            await _hub.BroadcastRemovedActorsAsync(_world.TakeIncursionRemovals(), stoppingToken);
+            await _hub.BroadcastChatAsync(_world.TakeIncursionSpeech(), stoppingToken);
             var hazardRevision = _world.AreaHazardRevision;
             if (_areaHazardRevision != hazardRevision)
             {

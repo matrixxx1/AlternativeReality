@@ -1547,8 +1547,9 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         {
             var pulses = events.Where(hit => hit.TargetId == id && hit.Damage > 0).ToArray();
             Assert.Equal(9, pulses.Length);
-            Assert.All(pulses, pulse => Assert.Equal(4d / 9, pulse.Damage, 6));
-            Assert.Equal(4, pulses.Sum(pulse => pulse.Damage), 6);
+            var resistedDamage = CombatRules.Reduce(4, DamageType.Physical, world.ResistancesFor(id));
+            Assert.All(pulses, pulse => Assert.Equal(resistedDamage / 9, pulse.Damage, 6));
+            Assert.Equal(resistedDamage, pulses.Sum(pulse => pulse.Damage), 6);
             var reactions = events.Where(hit => hit.TargetId == id && hit.Dialogue is not null).Select(hit => hit.Dialogue).ToArray();
             Assert.Equal(5, reactions.Length);
             Assert.Equal(reactions.Length, reactions.Distinct().Count());

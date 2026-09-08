@@ -229,7 +229,8 @@ public sealed partial class RealityWorld
             existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none", existing?.WantedLevel ?? 0, existing?.EBikeRemainingMeters ?? 1609.344,
             existing?.EnergyDrinkBoostUntilUtc, existing?.EnergyDrinkCrashUntilUtc, existing?.ProbedUntilUtc, existing?.CandleUntilUtc, existing?.ShieldOn ?? false, existing?.Ar15FireMode is "burst" ? "burst" : "single", Math.Clamp(existing?.FlamethrowerGasGallons ?? 0, 0, 5));
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
-        player = player with { UfoRemainingMeters = existing?.UfoRemainingMeters ?? 0 };
+        player = player with { UfoRemainingMeters = existing?.UfoRemainingMeters ?? 0, AlcoholUntilUtc = existing?.AlcoholUntilUtc, AlcoholNutUp = existing?.AlcoholNutUp ?? 0,
+            FearedUntilUtc = existing?.FearedUntilUtc, FearSourceId = existing?.FearSourceId, Effects = existing?.Effects };
         var offhand = ActiveOffhand(player);
         player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser", ShieldOn = offhand == "shield" };
         if (IsGasAsleep(characterId)) player = player with { AsleepUntilUtc = _sleepUntil[characterId] };
@@ -251,6 +252,8 @@ public sealed partial class RealityWorld
             }
         }
         var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
+        RestoreGear(characterId, inventory.Items);
+        foreach (var effect in player.Effects ?? []) if (effect.EndsAtUtc > _probulatorClock.GetUtcNow()) _combatEffects[(characterId, effect.SourceId, effect.Type)] = effect with { NextTickUtc = _probulatorClock.GetUtcNow().AddSeconds(1) };
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(accountId)) await ParkCarriedVehiclesAsync(characterId, accountId, cancellationToken);
         foreach (var item in inventory.Items.Where(item => !string.IsNullOrWhiteSpace(item.Quality)))
@@ -275,6 +278,8 @@ public sealed partial class RealityWorld
             }
         }
         await _store.SaveCharacterAsync(Configuration.Id, player, cancellationToken);
+        player = EnforceGearLevel(player) with { Version = player.Version + 1 };
+        await SavePlayerAsync(player, cancellationToken);
         return player;
     }
 
@@ -441,6 +446,7 @@ public sealed partial class RealityWorld
     private async Task<MovementOutcome?> MoveCoreAsync(string characterId, MoveRequest request, CancellationToken cancellationToken)
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
+        if (player.FearedUntilUtc > _probulatorClock.GetUtcNow()) return new(player, false, true, false, false, false, "You are fleeing in fear.");
         if (player.RidingBusId is not null) return new(player, false, true, false, false, false, "Use Get off bus now before moving.");
         if (player.WaitingAtBusStopId is not null) return new(player, false, true, false, false, false, "Cancel waiting before moving.");
         if (IsGasAsleep(characterId)) return new(player, false, true, false, false, false, "You are asleep until the gas effect wears off.");
@@ -883,6 +889,7 @@ public sealed partial class RealityWorld
             foreach (var pair in _actors)
             {
                 var actor = pair.Value;
+                if (IsIncursionActor(actor)) continue;
                 if (waitingRecipients.TryGetValue(actor.Id, out var waiting) && !IsProbulatorAbducted(actor.Id))
                 {
                     if (actor.Position != waiting.Position || actor.IsMoving)
@@ -996,7 +1003,7 @@ public sealed partial class RealityWorld
         {
             foreach (var actor in _actors.Values)
             {
-                if (IsProbulatorAbducted(actor.Id) || IsGasAsleep(actor.Id)) continue;
+                if (IsIncursionActor(actor) || _northParkOriginals.ContainsKey(actor.Id) || IsProbulatorAbducted(actor.Id) || IsGasAsleep(actor.Id)) continue;
                 if (!_nextActorSpeech.TryGetValue(actor.Id, out var next))
                 {
                     _nextActorSpeech[actor.Id] = now.AddSeconds(_actorRandom.Next(10, 61));
@@ -1143,7 +1150,7 @@ public sealed partial class RealityWorld
         return new(Configuration, _loadedBounds ?? Configuration.Area.Bounds,
             map?.BaseEntities ?? _baseEntities.Values.OrderBy(entity => entity.Id).ToArray(), visibleRealityEntities,
             _players.Values.OrderBy(player => player.Id).ToArray(), map?.Elevation ?? _elevationSamples.Values.ToArray(),
-            Weather, _actors.Values.OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray(),
+            Weather, _actors.Values.Select(EnsureActorGear).OrderBy(actor => actor.Id).ToArray(), _loadedAreas.Values.OrderBy(area => area.MinimumX).ThenBy(area => area.MinimumY).ToArray(),
             lockSchedule.Doors, lockSchedule.EndsAtUtc,
             _publicBaseClaims.Values.OrderBy(claim => claim.OwnerName).Select(claim => new PublicBaseState(claim.BuildingId, claim.OwnerName)).ToArray(),
             _loot.Values.Where(loot => loot.DropKind == "tombstone" && loot.LocationId == "outdoor").OrderBy(loot => loot.Id).ToArray(), AreaHazards: GetAreaHazards(), MapCoverage: map?.Coverage, Transit: GetTransitSnapshot());
@@ -1532,6 +1539,7 @@ public sealed partial class RealityWorld
 
     private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken, int kryptoniteUsed = 0)
     {
+        player = EnforceGearLevel(player) with { Effects = EffectsFor(player.Id) };
         var saveLock = _playerSaveLocks.GetOrAdd(player.Id, _ => new SemaphoreSlim(1, 1));
         await saveLock.WaitAsync(cancellationToken);
         try

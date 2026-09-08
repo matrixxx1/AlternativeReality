@@ -50,14 +50,15 @@ public sealed partial class RealityWorld
             var priorQuantity = current?.Quantity ?? 0;
             var difference = request.Quantity - priorQuantity;
             var quality = current?.Quality ?? _weaponQualities.GetValueOrDefault((playerId, itemType));
+            var gear = current?.Gear ?? GearFor(playerId, itemType);
             if (difference > 0 && !RemoveInventory(playerId, itemType, difference)) throw new InvalidOperationException($"You need {difference} more {definition.DisplayName} in your inventory.");
             if (difference < 0)
             {
                 var returned = InventoryStack(itemType, -difference, quality: quality);
                 if (!CanAddToBackpack(playerId, new[] { returned }, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
-                AddInventory(playerId, itemType, -difference, quality);
+                AddInventory(playerId, itemType, -difference, quality, gear);
             }
-            await _store.SaveHomeShopListingAsync(access.OwnerAccountId, Configuration.Id, new HomeShopListingRecord(itemType, request.Quantity, request.UnitPriceCents, quality), cancellationToken);
+            await _store.SaveHomeShopListingAsync(access.OwnerAccountId, Configuration.Id, new HomeShopListingRecord(itemType, request.Quantity, request.UnitPriceCents, quality, gear), cancellationToken);
             await SaveInventoryAsync(playerId, cancellationToken);
             var shop = await RequestHomeShopAsync(playerId, request.FurnitureId, cancellationToken);
             return new HomeShopResult(access.Player, GetPrivateState(playerId), shop, request.Quantity == 0 ? $"Removed {definition.DisplayName} from the shop." : $"Listed {request.Quantity} {definition.DisplayName} at {request.UnitPriceCents / 100d:C} each.");
@@ -83,7 +84,7 @@ public sealed partial class RealityWorld
 
             var remaining = listing.Quantity - request.Quantity;
             await _store.SaveHomeShopListingAsync(access.OwnerAccountId, Configuration.Id, listing with { Quantity = remaining }, cancellationToken);
-            AddInventory(playerId, listing.ItemType, request.Quantity, listing.Quality);
+            AddInventory(playerId, listing.ItemType, request.Quantity, listing.Quality, listing.Gear);
             buyer = buyer with { WalletCents = buyer.GodMode ? buyer.WalletCents : buyer.WalletCents - total, Version = buyer.Version + 1 };
             await SaveInventoryAsync(playerId, cancellationToken);
             await SavePlayerAsync(buyer, cancellationToken);

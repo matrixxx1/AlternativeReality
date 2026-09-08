@@ -20,7 +20,7 @@ public sealed partial class RealityWorld
         var profile = _progression.GetValueOrDefault(playerId) ?? NewProgression;
         var (level, earned, required) = ProgressionRules.LevelAt(profile.Experience);
         var stats = profile.Stats;
-        return new(level, profile.Experience, earned, required, 7 + level - 1 - stats.Total, stats,
+        return new(level, profile.Experience, earned, required, 8 + level - 1 - stats.Total, stats,
             ProgressionRules.Damage(stats), ProgressionRules.Capacity(stats), ProgressionRules.Accuracy(stats),
             ProgressionRules.Vision(stats), ProgressionRules.Stamina(stats), ProgressionRules.Charisma(stats),
             ProgressionRules.Experience(stats), ProgressionRules.Drain(stats), ProgressionRules.NpcSight(stats),
@@ -76,7 +76,7 @@ public sealed partial class RealityWorld
         try
         {
             var current = _progression[playerId];
-            var budget = 7 + ProgressionRules.LevelAt(current.Experience).Level - 1;
+            var budget = 8 + ProgressionRules.LevelAt(current.Experience).Level - 1;
             if (request.Stats.Total > budget) throw new InvalidOperationException($"You have {budget} total stat points. Remove a point from another stat or gain a level.");
             var next = current with { Stats = request.Stats };
             await _store.SaveProgressionAsync(Configuration.Id, playerId, next, cancellationToken);

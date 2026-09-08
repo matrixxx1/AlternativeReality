@@ -9,7 +9,8 @@ public sealed partial class RealityWorld
     private async Task<PlayerState> DieAndResetPlayerAsync(PlayerState defeated, CancellationToken cancellationToken)
     {
         _sleepUntil.TryRemove(defeated.Id, out _);
-        defeated = defeated with { AsleepUntilUtc = null };
+        ClearCombatEffects(defeated.Id);
+        defeated = defeated with { AsleepUntilUtc = null, Effects = [], FearedUntilUtc = null, FearSourceId = null, AlcoholUntilUtc = null, AlcoholNutUp = 0 };
         // Simulated players exercise player death/respawn without leaving account data or graves.
         if (defeated.IsTestCharacter) return ResetPlayer(defeated);
         foreach (var quest in _quests.Values.Where(q => q.PlayerId == defeated.Id && q.Kind == "inversion" && q.Status == "active").ToArray())
@@ -36,6 +37,7 @@ public sealed partial class RealityWorld
         }
         foreach (var quality in _weaponQualities.Keys.Where(key => key.Player == defeated.Id).ToArray())
             _weaponQualities.TryRemove(quality, out _);
+        foreach (var key in _gear.Keys.Where(key => key.Owner == defeated.Id).ToArray()) _gear.TryRemove(key, out _);
         _weaponQualities[(defeated.Id, "fist")] = "Common";
         _loot[tombstone.Id] = tombstone;
 
@@ -79,6 +81,7 @@ public sealed partial class RealityWorld
         {
             if (_homeItemStorage.ContainsKey(accountId)) return;
             var stored = await _store.LoadInventoryAsync(HomeItemStorageOwnerId(accountId), cancellationToken);
+            RestoreGear(HomeItemStorageOwnerId(accountId), stored.Items);
             _homeItemStorage[accountId] = stored.Items.Where(item => item.Quantity > 0)
                 .ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
             _homeCash[accountId] = await _store.LoadHomeCashAsync(accountId, Configuration.Id, cancellationToken);
@@ -92,7 +95,7 @@ public sealed partial class RealityWorld
         if (_homeItemStorage.TryGetValue(accountId, out var storage))
         {
             lock (storage) items = storage.Where(pair => pair.Value > 0).OrderBy(pair => pair.Key)
-                .Select(pair => InventoryStack(pair.Key, pair.Value)).ToArray();
+                .Select(pair => InventoryStack(pair.Key, pair.Value) with { Gear = _gear.GetValueOrDefault((HomeItemStorageOwnerId(accountId), pair.Key)) }).ToArray();
         }
         return new InventoryState(HomeItemStorageOwnerId(accountId), items, WeightPounds: Math.Round(items.Sum(item => item.UnitWeightPounds * item.Quantity), 3), Unlimited: true);
     }
@@ -134,7 +137,9 @@ public sealed partial class RealityWorld
             var storage = _homeItemStorage[access.AccountId];
             if (request.ToStorage)
             {
+                var transferredGear = GearFor(playerId, itemType);
                 if (!RemoveInventory(playerId, itemType, request.Quantity)) throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
+                if (transferredGear is not null) _gear.TryAdd((HomeItemStorageOwnerId(access.AccountId), itemType), transferredGear);
                 lock (storage) storage[itemType] = storage.GetValueOrDefault(itemType) + request.Quantity;
             }
             else
@@ -144,12 +149,13 @@ public sealed partial class RealityWorld
                     if (storage.GetValueOrDefault(itemType) < request.Quantity) throw new InvalidOperationException($"The chest does not contain that many {DisplayItem(itemType)}.");
                 }
                 if (!CanAddToBackpack(playerId, new[] { InventoryStack(itemType, request.Quantity) }, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
+                var withdrawnGear = _gear.GetValueOrDefault((HomeItemStorageOwnerId(access.AccountId), itemType));
                 lock (storage)
                 {
                     storage[itemType] -= request.Quantity;
-                    if (storage[itemType] <= 0) storage.Remove(itemType);
+                    if (storage[itemType] <= 0) { storage.Remove(itemType); _gear.TryRemove((HomeItemStorageOwnerId(access.AccountId), itemType), out _); }
                 }
-                AddInventory(playerId, itemType, request.Quantity);
+                AddInventory(playerId, itemType, request.Quantity, gear: withdrawnGear);
             }
 
             var player = NormalizeEquipmentAfterInventoryChange(access.Player);
@@ -207,7 +213,9 @@ public sealed partial class RealityWorld
         await _homeItemStorageLock.WaitAsync(cancellationToken);
         try
         {
+            var transferredGear = GearFor(playerId, itemType);
             if (!RemoveInventory(playerId, itemType, request.Quantity)) throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
+            if (transferredGear is not null) _gear.TryAdd((HomeItemStorageOwnerId(accountId), itemType), transferredGear);
             var storage = _homeItemStorage[accountId];
             lock (storage) storage[itemType] = storage.GetValueOrDefault(itemType) + request.Quantity;
             var updated = NormalizeEquipmentAfterInventoryChange(player);
@@ -296,10 +304,11 @@ public sealed partial class RealityWorld
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
         if (!_itemConfigurations.ContainsKey(itemType)) throw new InvalidOperationException("Unknown inventory item.");
         var quality = _weaponQualities.GetValueOrDefault((playerId, itemType));
+        var droppedGear = GearFor(playerId, itemType);
         if (!RemoveInventory(playerId, itemType, request.Quantity))
             throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
 
-        var droppedStack = InventoryStack(itemType, request.Quantity, quality: quality);
+        var droppedStack = InventoryStack(itemType, request.Quantity, quality: quality) with { Gear = droppedGear };
         var drop = new LootDropState(
             $"loot:{Guid.NewGuid():N}",
             currentPlayer.Position,

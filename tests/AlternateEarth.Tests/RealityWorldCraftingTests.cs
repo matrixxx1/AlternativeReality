@@ -263,7 +263,7 @@ public sealed partial class RealityWorldTests
         clock.Advance(1);
         var tick = await world.AdvanceHostilityAsync(TimeSpan.FromSeconds(1));
         foreach (var id in new[] { pilot.Id, victim.Id, npc.Id, animal.Id })
-            Assert.Equal(damage, Assert.Single(tick.Combat, hit => hit.Weapon == "areaHazard" && hit.TargetId == id).Damage);
+            Assert.Equal(CombatRules.Reduce(damage, CombatRules.Attack(weapon)[0].Type, world.ResistancesFor(id)), Assert.Single(tick.Combat, hit => hit.Weapon == "areaHazard" && hit.TargetId == id).Damage, 8);
         Assert.DoesNotContain(tick.Combat, hit => hit.Weapon == "areaHazard" && hit.TargetId == outside.Id);
         Assert.DoesNotContain((await world.AdvanceHostilityAsync(TimeSpan.FromSeconds(.5))).Combat, hit => hit.Weapon == "areaHazard");
         clock.Advance(duration - 2);

@@ -69,7 +69,7 @@ public sealed partial class RealityWorld
             // without increasing the configured total damage or applying pulses twice.
             const int pulseCount = ProbulatorAbductionState.TotalSeconds / 3;
             var duePulses = Math.Min(pulseCount, (int)(seconds / 3));
-            var damage = pending.Damage / pulseCount * Math.Max(0, duePulses - pending.AppliedPulses);
+            var damage = TypedPulse(pair.Key, DamageType.Physical, pending.Damage / pulseCount * Math.Max(0, duePulses - pending.AppliedPulses));
             var name = player?.Name ?? actor!.Name;
             var oldHealth = player?.HealthHearts ?? actor!.HealthHearts;
             var health = Math.Round(player?.GodMode == true ? Math.Max(1, oldHealth - damage) : Math.Max(0, oldHealth - damage), 10);

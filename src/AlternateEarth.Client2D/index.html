@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=79">
+  <link rel="stylesheet" href="styles.css?v=80">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -161,6 +161,8 @@
     <button id="craftingRefresh" type="button">Refresh supplies</button>
     <button id="craftingClose" type="button">Close</button>
   </section>
+  <section id="actorInspection" class="panel" hidden></section>
+  <aside id="incursionBanner" hidden aria-live="polite"></aside>
   <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
     <strong>Actions</strong>
     <div id="noActions">No actions available.</div>
@@ -279,6 +281,8 @@
         <div class="server-event-row"><label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
         <div class="server-event-row"><label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
         <div class="server-event-row"><label>Dungeon door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
+        <div class="server-event-row"><strong>North park Hydra invasion</strong><button type="button" data-incursion="northPark">Trigger now</button></div>
+        <div class="server-event-row"><strong>Alanee incursion</strong><button type="button" data-incursion="alanee">Trigger now</button></div>
         <div class="server-event-row world-event-row"><label>Inversion name<input id="ufoEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
         <div class="server-event-row world-event-row"><label>Inversion name<input id="trexEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
         <div class="server-event-row world-event-row"><label>Inversion name<input id="brontosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
@@ -366,6 +370,7 @@
   <script src="combat-effects.js?v=2"></script>
   <script src="map-markers.js?v=1"></script>
   <script src="quest-navigation.js?v=1"></script>
-  <script src="app.js?v=137"></script>
+  <script src="combat-presentation.js?v=1"></script>
+  <script src="app.js?v=138"></script>
 </body>
 </html>

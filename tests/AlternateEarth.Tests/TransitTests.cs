@@ -158,14 +158,14 @@ public sealed partial class RealityWorldTests
     }
 
     [Fact]
-    public async Task BusHitsPlayersAndNpcsOnceForFiveHeartsAndFlingsThemClear()
+    public async Task BusHitsPlayersAndNpcsOnceWithPhysicalResistanceAndFlingsThemClear()
     {
         var (world,player)=await TransitWorld();
         var npc=world.PlaceTestCharacter(player.Id,new("npc",-175,-2)).Actor!;
         var target=world.PlaceTestCharacter(player.Id,new("player",-160,-2)).Player!;
         var events=new List<CombatEvent>();
         for(var i=0;i<70;i++)events.AddRange((await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100))).Combat);
-        Assert.Equal(5,world.CreateSnapshot().Actors!.Single(a=>a.Id==npc.Id).HealthHearts);
+        Assert.Equal(10-CombatRules.Reduce(5,DamageType.Physical,world.ResistancesFor(npc.Id)),world.CreateSnapshot().Actors!.Single(a=>a.Id==npc.Id).HealthHearts,8);
         var hitPlayer=world.CreateSnapshot().Players.Single(p=>p.Id==target.Id);
         Assert.Equal(5,hitPlayer.HealthHearts);Assert.True(hitPlayer.Position.Y < -5);Assert.True(hitPlayer.Position.X>target.Position.X);
         Assert.Single(events,e=>e.TargetId==npc.Id);Assert.Single(events,e=>e.TargetId==target.Id);

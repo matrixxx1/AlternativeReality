@@ -1,10 +1,10 @@
 namespace AlternateEarth.Shared;
 
 public sealed record CharacterStats(int Strength = 1, int Perception = 1, int Endurance = 1,
-    int Charisma = 1, int Intelligence = 1, int Agility = 1, int Luck = 1)
+    int Charisma = 1, int Intelligence = 1, int Agility = 1, int Luck = 1, int NutUp = 1)
 {
-    public int Total => Strength + Perception + Endurance + Charisma + Intelligence + Agility + Luck;
-    public bool IsValid => new[] { Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck }.All(value => value is >= 0 and <= 10_000);
+    public int Total => NutUp + Strength + Perception + Endurance + Charisma + Intelligence + Agility + Luck;
+    public bool IsValid => new[] { NutUp, Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck }.All(value => value is >= 0 and <= 10_000);
 }
 
 public sealed record ProgressionProfile(double Experience, CharacterStats Stats, IReadOnlyList<string> Rewards,

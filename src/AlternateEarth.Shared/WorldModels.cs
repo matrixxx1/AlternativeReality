@@ -114,7 +114,7 @@ public sealed record PlayerState(
     DateTimeOffset? AsleepUntilUtc = null,
     double UfoRemainingMeters = 0,
     string? WaitingAtBusStopId = null,
-    string? RidingBusId = null);
+    string? RidingBusId = null, DateTimeOffset? AlcoholUntilUtc = null, int AlcoholNutUp = 0, DateTimeOffset? FearedUntilUtc = null, string? FearSourceId = null, IReadOnlyList<CombatEffect>? Effects = null);
 
 public sealed record ActorState(
     string Id,
@@ -142,7 +142,7 @@ public sealed record ActorState(
     bool IsTestCharacter = false,
     ProbulatorAbductionState? Abduction = null,
     DateTimeOffset? AsleepUntilUtc = null,
-    bool OffersFoodDelivery = false)
+    bool OffersFoodDelivery = false, int Level = 0, IReadOnlyDictionary<string, GearStats>? Gear = null, IReadOnlyList<CombatEffect>? Effects = null, bool DamageImmune = false, DateTimeOffset? PouringUntilUtc = null)
 {
     public const int PortalSeconds = 6;
     public int EventPortalDurationSeconds => EventStartedAtUtc is null ? 0 : PortalSeconds;
@@ -159,7 +159,7 @@ public sealed record ItemStack(
     InventoryCategory Category = InventoryCategory.Other,
     double UnitWeightPounds = 1,
     bool CarriedInBackpack = true,
-    string? Quality = null);
+    string? Quality = null, GearStats? Gear = null);
 public sealed record InventoryState(
     string PlayerId,
     IReadOnlyList<ItemStack> Items,
@@ -172,7 +172,7 @@ public sealed record InventoryState(
     int OtherSlotsUsed = 0,
     int MaximumOtherSlots = 6,
     bool Unlimited = false);
-public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true, double Accuracy = 1, double AttackIntervalSeconds = .5);
+public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true, double Accuracy = 1, double AttackIntervalSeconds = .5) { public IReadOnlyList<DamageComponent> DamageEffects => CombatRules.Attack(ItemType); }
 public sealed record MovementConfiguration(
     double BaseSpeedMph,
     double BaseVisibilityMeters,
@@ -280,7 +280,8 @@ public sealed record PlayerPrivateState(
     IReadOnlyList<string>? LearnedRecipes = null, CraftingSkillState? CraftingSkill = null,
     IReadOnlyList<string>? OwnedVehicles = null, ProgressionState? Progression = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
-    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null);
+    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null)
+{ public IReadOnlyList<DamageComponent> DamageEffects => CombatRules.Attack(Weapon); }
 
 public sealed record ChatMessage(
     string Id,

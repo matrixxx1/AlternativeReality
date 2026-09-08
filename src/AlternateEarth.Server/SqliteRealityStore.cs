@@ -148,6 +148,8 @@ public sealed partial class SqliteRealityStore
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "CombatJson", "TEXT", cancellationToken);
+        await EnsureColumnAsync(connection, "HomeShopListings", "GearJson", "TEXT", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Stamina", "REAL NOT NULL DEFAULT 10", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Water", "REAL NOT NULL DEFAULT 10", cancellationToken);
@@ -297,11 +299,12 @@ public sealed partial class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters, CombatJson FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
+        var combat = reader.IsDBNull(39) ? null : JsonSerializer.Deserialize<PersistentCombatState>(reader.GetString(39), SharedJson.Options);
         return new PlayerState(characterId, reader.GetString(0),
             new WorldPosition(new RegionId(reader.GetInt32(1), reader.GetInt32(2)), reader.GetDouble(3), reader.GetDouble(4), reader.GetDouble(5)),
             reader.GetInt64(6), HealthHearts: Math.Clamp(reader.GetDouble(7), 0, 10),
@@ -315,7 +318,7 @@ public sealed partial class SqliteRealityStore
             EquippedWeapon: reader.IsDBNull(24) ? "fist" : reader.GetString(24), BodyHeat: Math.Clamp(reader.GetDouble(25), 0, 100),
             EquippedHat: reader.IsDBNull(26) ? "none" : reader.GetString(26), EquippedShirt: reader.IsDBNull(27) ? "none" : reader.GetString(27),
             EquippedPants: reader.IsDBNull(28) ? "none" : reader.GetString(28), WantedLevel: reader.GetInt32(29), EBikeRemainingMeters: reader.GetDouble(30),
-            EnergyDrinkBoostUntilUtc: ReadDate(reader, 31), EnergyDrinkCrashUntilUtc: ReadDate(reader, 32), ProbedUntilUtc: ReadDate(reader, 33), CandleUntilUtc: ReadDate(reader, 34), ShieldOn: reader.GetInt64(35) != 0, Ar15FireMode: reader.IsDBNull(36) ? "single" : reader.GetString(36), FlamethrowerGasGallons: reader.GetDouble(37), UfoRemainingMeters: Math.Max(0, reader.GetDouble(38)));
+            EnergyDrinkBoostUntilUtc: ReadDate(reader, 31), EnergyDrinkCrashUntilUtc: ReadDate(reader, 32), ProbedUntilUtc: ReadDate(reader, 33), CandleUntilUtc: ReadDate(reader, 34), ShieldOn: reader.GetInt64(35) != 0, Ar15FireMode: reader.IsDBNull(36) ? "single" : reader.GetString(36), FlamethrowerGasGallons: reader.GetDouble(37), UfoRemainingMeters: Math.Max(0, reader.GetDouble(38)), AlcoholUntilUtc: combat?.AlcoholUntilUtc, AlcoholNutUp: combat?.AlcoholNutUp ?? 0, FearedUntilUtc: combat?.FearedUntilUtc, FearSourceId: combat?.FearSourceId, Effects: combat?.Effects);
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default, InventoryState? inventory = null)
@@ -325,8 +328,8 @@ public sealed partial class SqliteRealityStore
         var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction?)transaction;
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $bodyHeat, $equippedHat, $equippedShirt, $equippedPants, $wantedLevel, $eBikeRemaining, $energyBoostUntil, $energyCrashUntil, $probedUntil, $candleUntil, $shieldOn, $ar15FireMode, $flamethrowerGas, $ufoRemaining, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters, CombatJson, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $bodyHeat, $equippedHat, $equippedShirt, $equippedPants, $wantedLevel, $eBikeRemaining, $energyBoostUntil, $energyCrashUntil, $probedUntil, $candleUntil, $shieldOn, $ar15FireMode, $flamethrowerGas, $ufoRemaining, $combatJson, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
                 Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina, Water = excluded.Water,
                 WalletCents = excluded.WalletCents, GodMode = excluded.GodMode,
@@ -337,11 +340,12 @@ public sealed partial class SqliteRealityStore
                 EquippedWeapon=excluded.EquippedWeapon, BodyHeat=excluded.BodyHeat, EquippedHat=excluded.EquippedHat,
                 EquippedShirt=excluded.EquippedShirt, EquippedPants=excluded.EquippedPants, WantedLevel=excluded.WantedLevel, EBikeRemainingMeters=excluded.EBikeRemainingMeters,
                 EnergyDrinkBoostUntilUtc=excluded.EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc=excluded.EnergyDrinkCrashUntilUtc,
-                ProbedUntilUtc=excluded.ProbedUntilUtc, CandleUntilUtc=excluded.CandleUntilUtc, ShieldOn=excluded.ShieldOn, Ar15FireMode=excluded.Ar15FireMode, FlamethrowerGasGallons=excluded.FlamethrowerGasGallons, UfoRemainingMeters=excluded.UfoRemainingMeters,
+                ProbedUntilUtc=excluded.ProbedUntilUtc, CandleUntilUtc=excluded.CandleUntilUtc, ShieldOn=excluded.ShieldOn, Ar15FireMode=excluded.Ar15FireMode, FlamethrowerGasGallons=excluded.FlamethrowerGasGallons, CombatJson=excluded.CombatJson, UfoRemainingMeters=excluded.UfoRemainingMeters,
                 Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
         command.Parameters.AddWithValue("$reality", realityId);
+        command.Parameters.AddWithValue("$combatJson", JsonSerializer.Serialize(new PersistentCombatState(player.AlcoholUntilUtc, player.AlcoholNutUp, player.FearedUntilUtc, player.FearSourceId, player.Effects), SharedJson.Options));
         command.Parameters.AddWithValue("$name", player.Name);
         command.Parameters.AddWithValue("$regionLat", player.Position.Region.LatitudeBand);
         command.Parameters.AddWithValue("$regionLon", player.Position.Region.LongitudeBand);
@@ -509,13 +513,13 @@ public sealed partial class SqliteRealityStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            string? quality = null;
+            string? quality = null; GearStats? gear = null;
             if (!reader.IsDBNull(2))
             {
-                try { quality = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2), SharedJson.Options)?.GetValueOrDefault("quality"); }
+                try { var metadata = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2), SharedJson.Options); quality = metadata?.GetValueOrDefault("quality"); if (metadata?.GetValueOrDefault("gear") is { } json) gear = JsonSerializer.Deserialize<GearStats>(json, SharedJson.Options); }
                 catch (JsonException) { }
             }
-            items.Add(new ItemStack(reader.GetString(0), reader.GetInt32(1), Quality: quality));
+            items.Add(new ItemStack(reader.GetString(0), reader.GetInt32(1), Quality: quality, Gear: gear));
         }
         return new InventoryState(playerId, items);
     }
@@ -569,7 +573,7 @@ public sealed partial class SqliteRealityStore
             insert.CommandText = "INSERT INTO Inventories (OwnerId, Slot, ItemType, Quantity, MetadataJson) VALUES ($owner,$slot,$type,$quantity,$metadata)";
             insert.Parameters.AddWithValue("$owner", inventory.PlayerId); insert.Parameters.AddWithValue("$slot", slot);
             insert.Parameters.AddWithValue("$type", item.ItemType); insert.Parameters.AddWithValue("$quantity", item.Quantity);
-            insert.Parameters.AddWithValue("$metadata", item.Quality is null ? "{}" : JsonSerializer.Serialize(new Dictionary<string, string> { ["quality"] = item.Quality }, SharedJson.Options));
+            insert.Parameters.AddWithValue("$metadata", JsonSerializer.Serialize(new Dictionary<string, string> { ["quality"] = item.Gear?.Quality ?? item.Quality ?? "Common", ["gear"] = JsonSerializer.Serialize(item.Gear, SharedJson.Options) }, SharedJson.Options));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -940,10 +944,10 @@ public sealed partial class SqliteRealityStore
     { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT EXISTS(SELECT 1 FROM AccountCharacters WHERE Name=$n COLLATE NOCASE)";command.Parameters.AddWithValue("$n",name);return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken))!=0; }
 
     public async Task<IReadOnlyList<HomeShopListingRecord>> LoadHomeShopListingsAsync(string accountId,string realityId,CancellationToken cancellationToken=default)
-    { var result=new List<HomeShopListingRecord>();await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT ItemType,Quantity,UnitPriceCents,Quality FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND Quantity>0 ORDER BY ItemType";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);while(await reader.ReadAsync(cancellationToken))result.Add(new(reader.GetString(0),reader.GetInt32(1),reader.GetInt64(2),reader.IsDBNull(3)?null:reader.GetString(3)));return result; }
+    { var result=new List<HomeShopListingRecord>();await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT ItemType,Quantity,UnitPriceCents,Quality,GearJson FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND Quantity>0 ORDER BY ItemType";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);while(await reader.ReadAsync(cancellationToken))result.Add(new(reader.GetString(0),reader.GetInt32(1),reader.GetInt64(2),reader.IsDBNull(3)?null:reader.GetString(3),reader.IsDBNull(4)?null:JsonSerializer.Deserialize<GearStats>(reader.GetString(4),SharedJson.Options)));return result; }
 
     public async Task SaveHomeShopListingAsync(string accountId,string realityId,HomeShopListingRecord listing,CancellationToken cancellationToken=default)
-    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$i",listing.ItemType);if(listing.Quantity<=0)command.CommandText="DELETE FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND ItemType=$i";else{command.CommandText="INSERT INTO HomeShopListings(AccountId,RealityId,ItemType,Quantity,UnitPriceCents,Quality,UpdatedUtc) VALUES($a,$r,$i,$q,$p,$quality,$now) ON CONFLICT(AccountId,RealityId,ItemType) DO UPDATE SET Quantity=excluded.Quantity,UnitPriceCents=excluded.UnitPriceCents,Quality=excluded.Quality,UpdatedUtc=excluded.UpdatedUtc";command.Parameters.AddWithValue("$q",listing.Quantity);command.Parameters.AddWithValue("$p",listing.UnitPriceCents);command.Parameters.AddWithValue("$quality",(object?)listing.Quality??DBNull.Value);command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));}await command.ExecuteNonQueryAsync(cancellationToken); }
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$i",listing.ItemType);if(listing.Quantity<=0)command.CommandText="DELETE FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND ItemType=$i";else{command.CommandText="INSERT INTO HomeShopListings(AccountId,RealityId,ItemType,Quantity,UnitPriceCents,Quality,GearJson,UpdatedUtc) VALUES($a,$r,$i,$q,$p,$quality,$gear,$now) ON CONFLICT(AccountId,RealityId,ItemType) DO UPDATE SET Quantity=excluded.Quantity,UnitPriceCents=excluded.UnitPriceCents,Quality=excluded.Quality,GearJson=excluded.GearJson,UpdatedUtc=excluded.UpdatedUtc";command.Parameters.AddWithValue("$q",listing.Quantity);command.Parameters.AddWithValue("$p",listing.UnitPriceCents);command.Parameters.AddWithValue("$quality",(object?)listing.Quality??DBNull.Value);command.Parameters.AddWithValue("$gear",JsonSerializer.Serialize(listing.Gear,SharedJson.Options));command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));}await command.ExecuteNonQueryAsync(cancellationToken); }
 
     public async Task AddAccountNoticeAsync(string accountId,string realityId,string message,CancellationToken cancellationToken=default)
     { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="INSERT INTO AccountNotices(AccountId,RealityId,Message,CreatedUtc) VALUES($a,$r,$m,$now)";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$m",message);command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await command.ExecuteNonQueryAsync(cancellationToken); }
@@ -985,4 +989,4 @@ public sealed record AccountCharacter(string Id,string Name);
 public sealed record BaseAssignment(string BuildingId,WorldPosition? Position);
 public sealed record AccountRosterEntry(string AccountId,string Username,DateTimeOffset? LastSeenUtc,IReadOnlyList<AccountCharacter> Characters);
 public sealed record ExpiredTestAccount(string AccountId,string Username,IReadOnlyList<string> CharacterIds);
-public sealed record HomeShopListingRecord(string ItemType,int Quantity,long UnitPriceCents,string? Quality);
+public sealed record HomeShopListingRecord(string ItemType,int Quantity,long UnitPriceCents,string? Quality,GearStats? Gear = null);

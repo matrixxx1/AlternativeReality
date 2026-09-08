@@ -360,21 +360,24 @@ public sealed partial class RealityWorld
         {
             var p = _players.GetValueOrDefault(original.Id) ?? original;
             if (!TransitGeometry.Contains(footprint, p.Position) || !bus.HitPeople.Add(p.Id)) continue;
-            var health = p.GodMode ? Math.Max(1, p.HealthHearts - 5) : Math.Max(0, p.HealthHearts - 5);
+            var damage = TypedPulse(p.Id, DamageType.Physical, 5);
+            var health = p.GodMode ? Math.Max(1, p.HealthHearts - damage) : Math.Max(0, p.HealthHearts - damage);
             var updated = p with { HealthHearts = health, Position = Fling(p.Position), WaitingAtBusStopId = null, Version = p.Version + 1 };
             if (health <= 0) updated = await DieAndResetPlayerAsync(updated, token);
             await SavePlayerAsync(updated, token); players[p.Id] = _players[p.Id];
-            combat.Add(new(bus.State.Id, p.Id, "busCollision", bus.State.Position, p.Position, true, 5, health <= 0, "Hit by a bus for 5 hearts.", health, updated.Position));
+            combat.Add(new(bus.State.Id, p.Id, "busCollision", bus.State.Position, p.Position, true, damage, health <= 0, $"Hit by a bus for {damage:0.##} hearts.", health, updated.Position));
         }
         foreach (var original in outdoorActors.Where(a => _actors.ContainsKey(a.Id) && a.LocationId == "outdoor" && a.Abduction is null && a.Subtype != "ufo" && a.Position.Distance2D(bus.State.Position) < 7).ToArray())
         {
             if (!_actors.TryGetValue(original.Id, out var a)) continue;
             if (!TransitGeometry.Contains(footprint, a.Position) || !bus.HitPeople.Add(a.Id)) continue;
-            var health = Math.Max(0, a.HealthHearts - 5); var destination = Fling(a.Position);
-            if (health <= 0) { _actors.TryRemove(a.Id, out _); removed.Add(a.Id); }
+            if (a.DamageImmune) continue;
+            var damage = TypedPulse(a.Id, DamageType.Physical, 5);
+            var health = Math.Max(0, a.HealthHearts - damage); var destination = Fling(a.Position);
+            if (health <= 0) { _actors.TryRemove(a.Id, out _); removed.Add(a.Id); ClearCombatEffects(a.Id); _incursionKills.Enqueue((bus.State.Id, a, false)); }
             else { var updated = a with { HealthHearts = health, Position = destination, Version = a.Version + 1 }; _actors[a.Id] = updated; actors[a.Id] = updated; }
             _actorRoutes.TryRemove(a.Id, out _);
-            combat.Add(new(bus.State.Id, a.Id, "busCollision", bus.State.Position, a.Position, true, 5, health <= 0, "Hit by a bus for 5 hearts.", health, destination));
+            combat.Add(new(bus.State.Id, a.Id, "busCollision", bus.State.Position, a.Position, true, damage, health <= 0, $"Hit by a bus for {damage:0.##} hearts.", health, destination));
         }
     }
 

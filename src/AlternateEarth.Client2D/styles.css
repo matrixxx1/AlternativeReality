@@ -431,3 +431,6 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 #busRouteStops { columns:2; }
 
 .quest-speakers{display:flex;align-items:center;gap:18px}.quest-speakers>div{display:flex;flex-direction:column;text-align:center;min-width:100px}.quest-speakers p{font-size:16px;color:#f4db94}.quest-window #questDescription{font-size:15px;line-height:1.5}.quest-window .trade-actions{margin-top:18px}.quest-window #questAccept{background:#356e43;font-weight:bold}.quest-window #questNavigation{color:#ffe36d}
+
+#actorInspection{position:fixed;z-index:1000;right:22px;top:80px;width:min(460px,90vw);max-height:75vh;overflow:auto;padding:18px;background:#162031;color:#f4f6ff;border:1px solid #728095;border-radius:12px}#actorInspection h2{font-size:18px}#actorInspection p{overflow-wrap:anywhere}#incursionBanner{position:fixed;z-index:20;left:50%;top:70px;transform:translateX(-50%);max-width:50vw;padding:8px 14px;background:#182331ec;color:#f3e6a4;border-radius:8px;pointer-events:none;font-size:12px}.inventory-item small{display:block;max-width:300px;white-space:normal}
+#incursionBanner{left:16px;top:16px;transform:none;max-width:calc(100vw - 470px)}#typedCombatStatus{grid-column:1/-1;text-align:left;font-size:11px;line-height:1.5;margin:6px 0 0}@media(max-width:800px){#incursionBanner{max-width:calc(100vw - 32px);top:8px}}

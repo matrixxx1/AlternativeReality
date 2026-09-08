@@ -14,6 +14,8 @@ public sealed class RealitySocketHub
 
     public RealitySocketHub(RealityWorld world, AccountService accounts) { _world = world; _accounts = accounts; }
 
+    public Task BroadcastIncursionAsync(CancellationToken token) => BroadcastAsync(new { type = "incursionUpdated", incursion = _world.Incursion }, null, token);
+
     public async Task AcceptAsync(HttpContext context)
     {
         if (!context.WebSockets.IsWebSocketRequest)
@@ -39,7 +41,7 @@ public sealed class RealitySocketHub
             connectedPlayer = player;
             _clients[characterId] = connection;
             await connection.SendAsync(new { type = "sessionLoading", message = "Preparing the world view…" }, context.RequestAborted);
-            await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateClientSnapshot(characterId, connection.MapView), privateState = _world.GetPrivateState(characterId), homeNotice = _world.TakeHomeNotice(characterId) }, context.RequestAborted);
+            await connection.SendAsync(new { type = "welcome", protocolVersion = Protocol.Version, playerId = characterId, snapshot = _world.CreateClientSnapshot(characterId, connection.MapView), privateState = _world.GetPrivateState(characterId), incursion = _world.Incursion, homeNotice = _world.TakeHomeNotice(characterId) }, context.RequestAborted);
             await BroadcastAsync(new { type = "playerJoined", player }, characterId, context.RequestAborted);
             await BroadcastAsync(new { type = "chatSaid", chat = new ChatMessage($"presence:{Guid.NewGuid():N}", characterId, "Server", $"{player.Name} entered the reality.", DateTimeOffset.UtcNow) }, null, context.RequestAborted);
             foreach (var flag in _world.PersonalFlagsForOwner(characterId))
@@ -89,6 +91,13 @@ public sealed class RealitySocketHub
                     throw new InvalidOperationException("You cannot act while abducted or asleep.");
                 switch (type)
                 {
+                    case "inspectActor":
+                        await connection.SendAsync(new { type = "actorInspected", inspection = _world.InspectActor(characterId, root.GetProperty("actorId").GetString()!) }, cancellationToken);
+                        break;
+                    case "startIncursion":
+                        await _world.StartIncursionAsync(characterId, root.GetProperty("eventType").GetString()!, cancellationToken);
+                        await BroadcastIncursionAsync(cancellationToken);
+                        break;
                     case "taunt":
                         var taunt = await _world.TauntAsync(characterId, root.GetProperty("targetId").GetString() ?? string.Empty, cancellationToken);
                         await BroadcastChatAsync(new[] { taunt.Chat }, cancellationToken);
