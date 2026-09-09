@@ -11,6 +11,19 @@ test('vote buttons send replacement ballots and unchanged updates preserve focus
  state.inversions=JSON.parse(JSON.stringify(state.inversions));api.tick();assert.equal(panel.rebuilt,first);
  state.inversions.vote.options[1].voters=['Me'];state.inversions.vote.options[0].voters=[];api.tick();assert.equal(panel.rebuilt,first+1);
 });
+test('God mode cancel vote appears immediately on enabling and sends an administrative action',()=>{
+ const {api,state,sent,nodes}=fixture();api.tick();const panel=nodes.get('serverVotePanel');
+ const cancel=()=>panel.children.find(e=>e.tag==='button'&&e.textContent==='God mode: cancel vote');
+ assert.equal(cancel(),undefined);
+ state.players.get('p').godMode=true;api.tick();assert.ok(cancel());cancel().listeners.click();assert.equal(sent.at(-1).type,'cancelServerVote');
+ assert.equal(panel.children.filter(e=>e.className==='vote-option').length,2);
+ state.players.get('p').godMode=false;api.tick();assert.equal(cancel(),undefined);
+ state.players.get('p').godMode=true;state.inversions.vote=null;api.tick();assert.equal(cancel(),undefined);assert.equal(panel.hidden,true);
+});
+test('God mode cancel control is also available during a tie runoff',()=>{
+ const {api,state,nodes}=fixture();state.players.get('p').godMode=true;state.inversions.vote.round=2;api.tick();
+ assert.ok(nodes.get('serverVotePanel').children.some(e=>e.textContent==='God mode: cancel vote'));
+});
 test('private prizes open once and card canvas uses server-authoritative actions',()=>{
  const {api,state,sent}=fixture();state.privateState.loot=[{id:'private-prize',dropKind:'eventReward'}];api.tick();api.tick();assert.equal(sent.filter(r=>r.type==='openLoot').length,1);
  state.dungeon={eventBattle:{mode:'cards',turn:0,dungeonNumber:1,enemyName:'Boss',enemyHealth:24,maximumEnemyHealth:24,hand:['Strike','Guard','Second Wind']}};

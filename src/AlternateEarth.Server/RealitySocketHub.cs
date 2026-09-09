@@ -177,6 +177,10 @@ public sealed class RealitySocketHub
                         _world.StartServerVote(characterId);
                         await BroadcastInversionsAsync(cancellationToken);
                         break;
+                    case "cancelServerVote":
+                        _world.CancelServerVote(characterId);
+                        await BroadcastInversionsAsync(cancellationToken);
+                        break;
                     case "castServerVote":
                         _world.CastServerVote(characterId, root.GetProperty("option").GetString()!);
                         await BroadcastInversionsAsync(cancellationToken);

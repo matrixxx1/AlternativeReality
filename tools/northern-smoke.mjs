@@ -42,6 +42,15 @@ try{
   assert.ok(consumed.privateState.progression.visionMultiplier>welcome.privateState.progression.visionMultiplier);
   const html=await(await fetch(base)).text();assert.ok(html.includes('northern-exposure.js'));
   assert.ok((await(await fetch(base+'/northern-exposure.js')).text()).includes('drawCanadian'));
-  console.log(JSON.stringify({result:'PASS',protocol:62,weapons:['hockeyStick','iceSkate'],mapleSyrupConsumed:1,temporaryVisionBoost:true,clientAssetHttp:200}));
+  const voting=await command({type:'startServerVote'},'inversionsUpdated');assert.ok(voting.inversions.vote);
+  const canceled=await command({type:'cancelServerVote'},'inversionsUpdated');assert.equal(canceled.inversions.vote,null);assert.equal(canceled.inversions.active,null);assert.deepEqual(canceled.inversions.queued,[]);
+  assert.ok((await command({type:'startServerVote'},'inversionsUpdated')).inversions.vote);
+  await command({type:'setGodMode',enabled:false},'playerUpdated');
+  const rejectionAfter=messages.length;ws.send(JSON.stringify({type:'cancelServerVote'}));
+  for(let n=0;n<200&&!messages.slice(rejectionAfter).some(m=>m.type==='error');n++)await new Promise(r=>setTimeout(r,10));
+  assert.match(messages.slice(rejectionAfter).find(m=>m.type==='error')?.message||'',/God mode must be enabled/);
+  await command({type:'setGodMode',enabled:true},'playerUpdated');
+  assert.equal((await command({type:'cancelServerVote'},'inversionsUpdated')).inversions.vote,null);
+  console.log(JSON.stringify({result:'PASS',protocol:62,weapons:['hockeyStick','iceSkate'],mapleSyrupConsumed:1,temporaryVisionBoost:true,clientAssetHttp:200,godModeVoteCancellation:true,unauthorizedCancellationRejected:true}));
   ws.close();ws=null;
 }finally{ws?.close();server.kill();fs.closeSync(log);}
