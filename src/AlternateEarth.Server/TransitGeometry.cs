@@ -6,6 +6,26 @@ internal static class TransitGeometry
 {
     public const double BusLength = 9;
     public const double BusWidth = 2.5;
+    public static WorldPosition ClosestPoint(BusState bus, WorldPosition point)
+    {
+        var dx = Math.Cos(bus.HeadingRadians); var dy = Math.Sin(bus.HeadingRadians);
+        var x = point.X - bus.Position.X; var y = point.Y - bus.Position.Y;
+        var along = Math.Clamp(x * dx + y * dy, -BusLength / 2, BusLength / 2);
+        var side = Math.Clamp(x * -dy + y * dx, -BusWidth / 2, BusWidth / 2);
+        return bus.Position with { X = bus.Position.X + dx * along - dy * side, Y = bus.Position.Y + dy * along + dx * side };
+    }
+    public static bool SegmentHitsBus(WorldPosition from, WorldPosition to, BusState bus, double radius)
+    {
+        if (from.Region != bus.Position.Region) return false;
+        var footprint = Footprint(bus.Position, bus.HeadingRadians, BusLength + radius * 2, BusWidth + radius * 2);
+        // Let a player already caught inside a vehicle step out instead of trapping them there.
+        if (Contains(footprint, from)) return Contains(footprint, to) && to.Distance2D(bus.Position) <= from.Distance2D(bus.Position);
+        if (Contains(footprint, to)) return true;
+        var a = new GeometryPoint(from.X, from.Y); var b = new GeometryPoint(to.X, to.Y);
+        for (var i = 0; i < footprint.Length; i++)
+            if (Intersects(a, b, footprint[i], footprint[(i + 1) % footprint.Length])) return true;
+        return false;
+    }
     public static GeometryPoint[] Footprint(WorldPosition p, double heading, double length = BusLength, double width = BusWidth)
     {
         var dx = Math.Cos(heading); var dy = Math.Sin(heading);

@@ -35,7 +35,7 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
             code,
             current.GetProperty("temperature_2m").GetDouble(),
             current.GetProperty("precipitation").GetDouble(),
-            current.GetProperty("wind_speed_10m").GetDouble(),
+            ReadWind(current, "wind_speed_10m"),
             current.GetProperty("is_day").GetInt32() == 1,
             observedAt,
             "Open-Meteo",
@@ -43,8 +43,12 @@ public sealed class OpenMeteoWeatherProvider : IWeatherProvider
             sunset,
             moonPhase,
             moonIllumination,
-            WindDirectionDegrees: current.GetProperty("wind_direction_10m").GetDouble());
+            WindDirectionDegrees: ReadWind(current, "wind_direction_10m"));
     }
+
+    private static double ReadWind(JsonElement current, string property) =>
+        current.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number)
+            ? number : double.NaN;
 
     private static DateTimeOffset? ParseUtc(string? value) =>
         DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;

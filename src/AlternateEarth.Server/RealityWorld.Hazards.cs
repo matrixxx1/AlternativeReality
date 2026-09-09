@@ -17,6 +17,7 @@ public sealed partial class RealityWorld
         EnsureNotProbulatorAbducted(playerId);
         if (IsGasAsleep(playerId)) throw new InvalidOperationException("You are asleep until the gas effect wears off.");
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (EventPaused(player) || InsideInversion(player) && _activeInversion?.Type == "plants" || _dungeons.GetValueOrDefault(player.LocationId)?.EventBattle is not null) throw new InvalidOperationException("Use this event’s battle controls.");
         var definition = HazardCatalog.Find(player.EquippedWeapon) ?? throw new InvalidOperationException("Equip a crafted gas bottle or jar first.");
         if (player.TravelMode == TravelMode.Ufo) throw new InvalidOperationException("Leave your UFO before throwing a bottle or jar.");
         if (!double.IsFinite(request.X) || !double.IsFinite(request.Y)) throw new InvalidOperationException("Choose a valid throw destination.");

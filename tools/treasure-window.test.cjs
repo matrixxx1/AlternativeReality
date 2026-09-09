@@ -3,23 +3,40 @@ const source=fs.readFileSync(require.resolve('../src/AlternateEarth.Client2D/app
 function implementation(name){const start=source.indexOf(`  function ${name}(`);assert.ok(start>=0,name);return source.slice(start,source.indexOf('\n  function ',start+1));}
 function harness(){
   function element(){return{children:[],dataset:{},listeners:{},classList:{contains:()=>false},append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},setAttribute(){},addEventListener(type,listener){this.listeners[type]=listener;},focus(){}};}
-  const heading=element(),ui={treasureItems:element(),treasureInventory:element(),treasureCash:element(),treasureWeight:element(),treasureWarning:element(),treasureTake:element(),treasureClose:element(),treasureWindow:{hidden:true,scrollHeight:500,classList:{contains:()=>false},querySelector:()=>heading}};
+  const heading=element(),ui={treasureItems:element(),treasureCash:element(),treasureWeight:element(),treasureWarning:element(),treasureTake:element(),treasureClose:element(),treasureWindow:{hidden:true,scrollHeight:500,classList:{contains:()=>false},querySelector:()=>heading}};
   ui.treasureItems.querySelectorAll=()=>ui.treasureItems.children.map(row=>row.children.at(-1));
   const state={players:new Map([['me',{}]]),playerId:'me',loot:new Map(),chests:new Map(),privateState:{inventory:{items:[{itemType:'rock',quantity:98,category:'weapon',unitWeightPounds:.5}],weightPounds:49,maximumWeightPounds:50}}};
   const sent=[],c=vm.createContext({ui,state,sent,document:{createElement:element},itemDisplayName:type=>type,createItemArt:element,stackWeight:item=>item.quantity*item.unitWeightPounds,weightText:w=>w+' lb',effectiveCarryingCapacity:(_,capacity)=>capacity,send:message=>sent.push(message),innerWidth:1200,innerHeight:800,viewportWidth:()=>900,floatPanel:()=>{}});
-  for(const name of ['closeTreasure','openLootTreasure','openTreasure','refreshTreasure','renderTreasureInventory','treasureSelection','treasureCapacity','updateTreasureWeight','sendTreasureTake','tryAutomaticTreasure','recoverAutomaticTreasure','takeAllTreasure','takeTreasureSelection'])vm.runInContext(implementation(name),c);
+  for(const name of ['closeTreasure','openLootTreasure','openTreasure','refreshTreasure','treasureSelection','treasureCapacity','updateTreasureWeight','sendTreasureTake','tryAutomaticTreasure','recoverAutomaticTreasure','takeAllTreasure','takeTreasureSelection'])vm.runInContext(implementation(name),c);
   c.loot={id:'loot',moneyCents:123,items:[{itemType:'rock',quantity:10,category:'weapon',unitWeightPounds:.5}]};state.loot.set(c.loot.id,c.loot);
   return c;
 }
+
+test('Retro victory always opens a chest and closing it leaves exactly once',()=>{
+  const c=harness();c.state.lootingMode='all';c.state.privateState.inventory.weightPounds=0;
+  c.state.dungeon={isCompleted:true,retroBattle:{rewardChestId:'retro:chest'}};
+  c.openTreasure({chestId:'retro:chest',items:[]},'All clear',false,true);
+  assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.sent.length,0);
+  c.refreshTreasure();assert.equal(c.ui.treasureWindow.hidden,false);
+  c.closeTreasure();c.closeTreasure();assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'exitDungeon');
+});
+
+test('empty private Retro reward stays open until the player closes it',()=>{
+  const c=harness();c.state.dungeon={isCompleted:true,retroBattle:{},eventBattle:{dungeonNumber:2}};
+  const reward={id:'private-reward',dropKind:'eventReward',moneyCents:0,items:[]};
+  c.state.loot.set(reward.id,reward);c.openLootTreasure(reward);
+  c.state.loot.delete(reward.id);c.refreshTreasure();
+  assert.equal(c.sent.length,0);assert.equal(c.ui.treasureWindow.hidden,false);
+  c.closeTreasure();assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'exitDungeon');
+});
 test('opening treasure takes nothing; quantities block overweight pickups but allow a smaller selection',()=>{
   const c=harness();c.openLootTreasure(c.loot);assert.equal(c.sent.length,0);
   const input=c.ui.treasureItems.querySelectorAll()[0];assert.equal(input.value,'0');input.value='10';c.updateTreasureWeight();assert.equal(c.ui.treasureTake.disabled,true);
   c.takeTreasureSelection();assert.equal(c.sent.length,0);input.value='1';c.takeTreasureSelection();
   assert.equal(c.sent[0].type,'takeLootItems');assert.equal(c.sent[0].items[0].quantity,1);
 });
-test('drop controls send exact quantities and an inventory refresh preserves the treasure selection',()=>{
+test('backpack changes from Inventory refresh capacity without losing the treasure selection',()=>{
   const c=harness();c.openLootTreasure(c.loot);c.ui.treasureItems.querySelectorAll()[0].value='4';c.updateTreasureWeight();assert.equal(c.ui.treasureTake.disabled,true);
-  const controls=c.ui.treasureInventory.children[0].children.at(-1);controls.children[0].value='10';controls.children[1].listeners.click();assert.equal(c.sent[0].type,'dropItem');assert.equal(c.sent[0].quantity,10);
   c.state.privateState.inventory.items[0].quantity=88;c.state.privateState.inventory.weightPounds=44;c.refreshTreasure();
   assert.equal(c.ui.treasureItems.querySelectorAll()[0].value,'4');assert.equal(c.ui.treasureTake.disabled,false);
 });
@@ -59,4 +76,15 @@ test('an authoritative rejection reopens automatic loot for selection without re
   c.recoverAutomaticTreasure({commandSequence:41,message:'Unrelated'});assert.equal(c.ui.treasureWindow.hidden,true);
   c.recoverAutomaticTreasure({commandSequence:42,message:'Your backpack is full.'});assert.equal(c.ui.treasureWindow.hidden,false);
   assert.equal(c.ui.treasureCash.textContent,'Your backpack is full.');assert.equal(c.sent.length,1);assert.equal(c.state.automaticTreasure,null);
+});
+
+test('quest and other stacks have no slot cap for selective and automatic pickup',()=>{
+  for(const category of ['quest','other'])for(const automatic of [false,true]){
+    const c=harness();c.state.lootingMode=automatic?'all':'selective';
+    c.state.privateState.inventory={items:Array.from({length:30},(_,i)=>({itemType:`${category}:${i}`,quantity:1,category,unitWeightPounds:0})),weightPounds:0,maximumWeightPounds:50};
+    c.loot.items=[{itemType:`${category}:new`,quantity:1,category,unitWeightPounds:.1}];
+    c.openLootTreasure(c.loot,null,false,automatic);
+    if(!automatic){c.ui.treasureItems.querySelectorAll()[0].value='1';c.takeTreasureSelection();}
+    assert.equal(c.sent.length,1);assert.equal(c.sent[0].items[0].quantity,1);
+  }
 });

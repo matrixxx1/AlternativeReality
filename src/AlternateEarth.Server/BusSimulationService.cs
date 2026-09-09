@@ -9,6 +9,7 @@ public sealed class BusSimulationService(RealityWorld world, RealitySocketHub hu
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             if (!world.IsInitialized) continue;
+            using var tickTiming = world.Timings.Measure("transit.tick");
             await hub.BroadcastTransitAsync(await world.AdvanceTransitAsync(tick, stoppingToken), stoppingToken);
         }
     }

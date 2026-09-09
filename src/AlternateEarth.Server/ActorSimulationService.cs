@@ -22,6 +22,9 @@ public sealed class ActorSimulationService : BackgroundService
         using var timer = new PeriodicTimer(Tick);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            using var tickTiming = _world.Timings.Measure("actors.tick");
+            await _world.AdvanceInversionsAsync(Tick, stoppingToken);
+            await _hub.BroadcastInversionsAsync(stoppingToken);
             await _world.AdvanceProgressionAsync(DateTimeOffset.UtcNow, stoppingToken);
             await _hub.SendProgressionNoticesAsync(_world.TakeProgressionNotices(), stoppingToken);
             await _world.AdvanceFoodDeliveriesAsync(stoppingToken);

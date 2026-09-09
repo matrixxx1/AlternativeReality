@@ -57,7 +57,9 @@ public sealed partial class RealityWorldTests
         var next = world.RequestQuest("pilot", giver.Id);
         Assert.True(next.IsOffer);
         Assert.NotEqual(offer.Id, next.Quest.Id);
-        Assert.Equal("completed", (await store.LoadQuestsAsync(world.Configuration.Id, "pilot")).Single().Status);
+        var savedQuests = await store.LoadQuestsAsync(world.Configuration.Id, "pilot");
+        Assert.Equal("completed", Assert.Single(savedQuests, q => q.Id == offer.Id).Status);
+        Assert.DoesNotContain(savedQuests, q => q.Id == next.Quest.Id);
     }
 
     [Fact]

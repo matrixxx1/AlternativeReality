@@ -9,6 +9,7 @@ public sealed partial class RealityWorld
     private async Task<PlayerState> DieAndResetPlayerAsync(PlayerState defeated, CancellationToken cancellationToken)
     {
         _sleepUntil.TryRemove(defeated.Id, out _);
+        _bleeds.TryRemove(defeated.Id, out _); _mapleBoosts.TryRemove(defeated.Id, out _);
         defeated = defeated with { AsleepUntilUtc = null };
         // Simulated players exercise player death/respawn without leaving account data or graves.
         if (defeated.IsTestCharacter) return ResetPlayer(defeated);
@@ -79,6 +80,7 @@ public sealed partial class RealityWorld
         {
             if (_homeItemStorage.ContainsKey(accountId)) return;
             var stored = await _store.LoadInventoryAsync(HomeItemStorageOwnerId(accountId), cancellationToken);
+            RestorePhotographs(stored.Items);
             _homeItemStorage[accountId] = stored.Items.Where(item => item.Quantity > 0)
                 .ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
             _homeCash[accountId] = await _store.LoadHomeCashAsync(accountId, Configuration.Id, cancellationToken);

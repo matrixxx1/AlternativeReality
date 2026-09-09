@@ -39,7 +39,8 @@ public enum TravelMode
     DirtBike,
     Motorcycle,
     EBike,
-    Ufo
+    Ufo,
+    Swim
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -114,7 +115,7 @@ public sealed record PlayerState(
     DateTimeOffset? AsleepUntilUtc = null,
     double UfoRemainingMeters = 0,
     string? WaitingAtBusStopId = null,
-    string? RidingBusId = null);
+    string? RidingBusId = null, double Air = 10, double MaximumAir = 10, bool SwimExhausted = false, string? DisplayTitle = null);
 
 public sealed record ActorState(
     string Id,
@@ -142,7 +143,8 @@ public sealed record ActorState(
     bool IsTestCharacter = false,
     ProbulatorAbductionState? Abduction = null,
     DateTimeOffset? AsleepUntilUtc = null,
-    bool OffersFoodDelivery = false)
+    bool OffersFoodDelivery = false,
+    DateTimeOffset? FartUntilUtc = null, string? FartPose = null)
 {
     public const int PortalSeconds = 6;
     public int EventPortalDurationSeconds => EventStartedAtUtc is null ? 0 : PortalSeconds;
@@ -159,7 +161,9 @@ public sealed record ItemStack(
     InventoryCategory Category = InventoryCategory.Other,
     double UnitWeightPounds = 1,
     bool CarriedInBackpack = true,
-    string? Quality = null);
+    string? Quality = null,
+    PhotographState? Photograph = null);
+public sealed record PhotographState(string Evidence, string Subject, string Kind, string Subtype, string LocationId, DateTimeOffset TakenAtUtc, string? ThumbnailUrl = null);
 public sealed record InventoryState(
     string PlayerId,
     IReadOnlyList<ItemStack> Items,
@@ -168,9 +172,9 @@ public sealed record InventoryState(
     int WeaponSlotsUsed = 0,
     int MaximumWeaponSlots = 3,
     int QuestSlotsUsed = 0,
-    int MaximumQuestSlots = 3,
+    int? MaximumQuestSlots = null,
     int OtherSlotsUsed = 0,
-    int MaximumOtherSlots = 6,
+    int? MaximumOtherSlots = null,
     bool Unlimited = false);
 public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true, double Accuracy = 1, double AttackIntervalSeconds = .5);
 public sealed record MovementConfiguration(
@@ -211,7 +215,9 @@ public sealed record ServerEventConfiguration(
     string BearEventName = "The Great Bear",
     string ServerTimeMode = "auto",
     int ServerUtcOffsetMinutes = 0,
-    int WantedSwatThreshold = 5);
+    int WantedSwatThreshold = 5,
+    int RetroBattlesIntervalHours = 24, int RetroBattlesDurationMinutes = 10,
+    DateTimeOffset? RetroBattlesEndsAtUtc = null);
 public sealed record ServerConfigurationState(IReadOnlyList<ItemConfiguration> Items, MovementConfiguration Movement, ServerEventConfiguration Events);
 public sealed record MerchantOffer(
     string ItemType,
@@ -253,7 +259,11 @@ public sealed record DungeonState(
     int Level = 1, int LevelCount = 1, WorldPosition? Stairs = null,
     WorldPosition? Doorway = null, string? SessionId = null,
     bool IsStore = false, string? StoreCategory = null,
-    int Difficulty = 1, bool IsCompleted = false);
+    int Difficulty = 1, bool IsCompleted = false, RetroBattleState? RetroBattle = null, EventBattleState? EventBattle = null, IReadOnlyList<DungeonWater>? WaterAreas = null, IReadOnlyList<DungeonBarrier>? Barriers = null);
+public sealed record RetroEnemyState(int Id, double X, bool Defeated = false, int Hearts = 1, bool IsBoss = false);
+public sealed record RetroBattleState(double ScrollSpeed, double TrackLength, double Scroll,
+    double JumpHeight, double JumpVelocity, IReadOnlyList<RetroEnemyState> Enemies,
+    DateTimeOffset UpdatedAtUtc, string? RewardChestId = null);
 public sealed record BaseState(
     string BuildingId,
     string DoorId,
@@ -278,9 +288,9 @@ public sealed record PlayerPrivateState(
     bool CanEditHome = false,
     long HomeStorageMoneyCents = 0,
     IReadOnlyList<string>? LearnedRecipes = null, CraftingSkillState? CraftingSkill = null,
-    IReadOnlyList<string>? OwnedVehicles = null, ProgressionState? Progression = null);
+    IReadOnlyList<string>? OwnedVehicles = null, ProgressionState? Progression = null, InversionView? Inversions = null, IReadOnlyList<string>? Achievements = null, DateTimeOffset? MapleSyrupUntilUtc = null);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
-    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null);
+    WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null, bool FleeInFear = false);
 
 public sealed record ChatMessage(
     string Id,

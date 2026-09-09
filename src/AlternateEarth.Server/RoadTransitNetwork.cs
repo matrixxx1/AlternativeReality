@@ -34,6 +34,7 @@ internal sealed class RoadTransitNetwork
         }
         CreateStops();
         CreateRoutes();
+        ReduceStopDensity();
     }
 
     private void Add(RoadEdge edge)
@@ -70,7 +71,7 @@ internal sealed class RoadTransitNetwork
             // Terminals make short streets usable; intermediate stops are exactly one mile apart.
             var distances = new List<double> { Math.Min(20, length / 2) };
             for (var d = distances[0] + StopSpacingMeters; d < length - 20; d += StopSpacingMeters) distances.Add(d);
-            if (length - distances[^1] > 80) distances.Add(length - 20);
+            if (length - distances[^1] > StopSpacingMeters * .65) distances.Add(length - 20);
             foreach (var distance in distances)
             {
                 var remaining = distance;
@@ -78,12 +79,54 @@ internal sealed class RoadTransitNetwork
                 foreach (var part in chain) { target = part; if (remaining <= part.Length) break; remaining -= part.Length; }
                 var position = target.At(remaining, target.Width / 2 + 1.5);
                 var direction = Math.Abs(target.Dx) >= Math.Abs(target.Dy) ? target.Dx > 0 ? "eastbound" : "westbound" : target.Dy > 0 ? "northbound" : "southbound";
-                var stop = new BusStopState(FormattableString.Invariant($"bus-stop:{target.Id}:{remaining:F3}"), target.Name, position, target.Id, remaining, direction);
+                var bench = position with { X = position.X + target.Dx * 1.6 + target.Dy * .5, Y = position.Y + target.Dy * 1.6 - target.Dx * .5 };
+                var stop = new BusStopState(FormattableString.Invariant($"bus-stop:{target.Id}:{remaining:F3}"), target.Name, position, target.Id, remaining, direction, bench, target.Heading);
                 Stops.Add(stop);
                 if (!EdgeStops.TryGetValue(target.Id, out var list)) EdgeStops[target.Id] = list = [];
                 list.Add(stop);
             }
         }
+    }
+
+    private void ReduceStopDensity()
+    {
+        const double minimumSpacing = 400;
+        var servedEdges = Routes.Values.SelectMany(route => route).Select(e => e.Id).ToHashSet();
+        var kept = new Dictionary<string, BusStopState>();
+        var locations = new Dictionary<(int, int), List<WorldPosition>>();
+        var candidates = Stops.Where(s =>
+        {
+            var edge = Edges[s.EdgeId];
+            return (Math.Abs(edge.Dx) >= Math.Abs(edge.Dy) ? edge.Dx > 0 : edge.Dy > 0) ||
+                !Outgoing.GetValueOrDefault(edge.To, []).Any(reverse => reverse.To == edge.From && reverse.Road.Id == edge.Road.Id);
+        });
+        foreach (var stop in candidates.OrderBy(s => RoadClassification.Classify(Edges[s.EdgeId].Road.Properties) == "mainRoad" ? 0 : 1)
+            .ThenBy(s => s.Id, StringComparer.Ordinal))
+        {
+            var x = (int)Math.Floor(stop.Position.X / minimumSpacing); var y = (int)Math.Floor(stop.Position.Y / minimumSpacing);
+            var nearby = false;
+            for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++)
+                if (locations.GetValueOrDefault((x + dx, y + dy), []).Any(p => p.Region == stop.Position.Region && p.Distance2D(stop.Position) < minimumSpacing)) nearby = true;
+            if (nearby) continue;
+            kept[stop.Id] = stop;
+            if (!locations.TryGetValue((x, y), out var bucket)) locations[(x, y)] = bucket = [];
+            bucket.Add(stop.Position);
+            // Opposite directions share one stop location, instead of putting terminals at both ends of every short way.
+            var edge = Edges[stop.EdgeId];
+            var reverse = Outgoing.GetValueOrDefault(edge.To, []).FirstOrDefault(e => e.To == edge.From && e.Road.Id == edge.Road.Id && servedEdges.Contains(e.Id));
+            if (reverse is null) continue;
+            var along = edge.Length - stop.DistanceMeters;
+            var position = reverse.At(along, reverse.Width / 2 + 1.5);
+            var bench = position with { X = position.X + reverse.Dx * 1.6 + reverse.Dy * .5, Y = position.Y + reverse.Dy * 1.6 - reverse.Dx * .5 };
+            var direction = Math.Abs(reverse.Dx) >= Math.Abs(reverse.Dy) ? reverse.Dx > 0 ? "eastbound" : "westbound" : reverse.Dy > 0 ? "northbound" : "southbound";
+            var opposite = new BusStopState(FormattableString.Invariant($"bus-stop:{reverse.Id}:{along:F3}"), reverse.Name, position, reverse.Id, along, direction, bench, reverse.Heading);
+            kept[opposite.Id] = opposite;
+        }
+        Stops.Clear(); Stops.AddRange(kept.Values);
+        EdgeStops.Clear();
+        foreach (var group in Stops.GroupBy(s => s.EdgeId)) EdgeStops[group.Key] = group.ToList();
+        var passengerEdges = Stops.Select(s => s.EdgeId).ToHashSet();
+        foreach (var id in Routes.Where(pair => !pair.Value.Any(e => passengerEdges.Contains(e.Id))).Select(pair => pair.Key).ToArray()) Routes.Remove(id);
     }
 
     public RoadEdge? Next(RoadEdge current, IReadOnlyDictionary<string, int> visits)

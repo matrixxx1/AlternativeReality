@@ -5,14 +5,14 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 59;
+    public const int Version = 62;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);
 public sealed record MoveRequest(double X, double Y, long Sequence, double? MaximumDistanceMeters = null, double? DestinationX = null, double? DestinationY = null);
 public sealed record PathRequest(double X, double Y, long Sequence, bool IncludeSnapshot = false);
 public sealed record SetTravelModeRequest(TravelMode Mode);
-public sealed record RebuildAreaRequest(bool GodMode);
+public sealed record RebuildAreaRequest(bool GodMode, bool FromScratch = false);
 public sealed record TeleportRequest(double X, double Y, bool GodMode);
 public sealed record MapFastTravelRequest(string TargetType, string TargetId);
 public sealed record SayRequest(string Message);
@@ -76,7 +76,8 @@ public sealed record UpdateServerEventsRequest(
     string UfoEventName = "UFO Flyover", string TrexEventName = "T-Rex Portal",
     string BrontosaurusEventName = "Brontosaurus Portal", string StegosaurusEventName = "Stegosaurus Portal",
     string RaptorEventName = "Raptor Pack", string LandOfGiantsEventName = "Land of the Giants",
-    string BearEventName = "The Great Bear", string ServerTimeMode = "auto", int WantedSwatThreshold = 5);
+    string BearEventName = "The Great Bear", string ServerTimeMode = "auto", int WantedSwatThreshold = 5,
+    int RetroBattlesIntervalHours = 24, int RetroBattlesDurationMinutes = 10);
 public sealed record PlaceObjectRequest(string ObjectType, double X, double Y, double RotationDegrees = 0);
 public sealed record PlaceFlagRequest(double X, double Y, string Label);
 public sealed record RemoveObjectRequest(string EntityId);

@@ -4,6 +4,12 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
+    public static void ValidateMapView(WorldBounds view)
+    {
+        if (!double.IsFinite(view.MinimumX) || !double.IsFinite(view.MinimumY) || !double.IsFinite(view.MaximumX) || !double.IsFinite(view.MaximumY)
+            || view.MaximumX <= view.MinimumX || view.MaximumY <= view.MinimumY || view.MaximumX - view.MinimumX > 8000 || view.MaximumY - view.MinimumY > 8000)
+            throw new InvalidOperationException("Invalid map view bounds.");
+    }
     public WorldSnapshot CreateClientSnapshot(string playerId, WorldBounds? view = null)
     {
         var map = CreateMapWindow(playerId, view);
@@ -20,9 +26,7 @@ public sealed partial class RealityWorld
         var coverage = new List<WorldBounds> { new(origin.X - 600, origin.Y - 600, origin.X + 600, origin.Y + 600) };
         if (view is not null)
         {
-            if (!double.IsFinite(view.MinimumX) || !double.IsFinite(view.MinimumY) || !double.IsFinite(view.MaximumX) || !double.IsFinite(view.MaximumY)
-                || view.MaximumX <= view.MinimumX || view.MaximumY <= view.MinimumY || view.MaximumX - view.MinimumX > 8000 || view.MaximumY - view.MinimumY > 8000)
-                throw new InvalidOperationException("Invalid map view bounds.");
+            ValidateMapView(view);
             coverage.Add(new(view.MinimumX - 192, view.MinimumY - 192, view.MaximumX + 192, view.MaximumY + 192));
         }
         var entities = _baseEntities.Values.Where(entity => coverage.Any(area => MapEntityOverlaps(entity, area))).OrderBy(entity => entity.Id).ToArray();

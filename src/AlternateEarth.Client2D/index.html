@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=79">
+  <link rel="stylesheet" href="styles.css?v=81">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -12,8 +12,11 @@
     <div class="connection-task-card"><span class="connection-spinner" aria-hidden="true"></span><strong id="connectionTaskMessage">Connecting to the world…</strong><small id="connectionTaskElapsed">Controls will resume automatically</small></div>
   </div>
   <div id="worldTask" class="world-task" role="status" hidden>Loading area…</div>
+  <button id="openHomeStorageButton" class="open-home-storage-button" type="button" hidden>Home storage</button>
   <button id="safeExitButton" class="safe-exit-button" type="button" hidden>Leave Home</button>
   <aside id="rightRail" class="right-rail" aria-label="Game panels">
+  <section id="serverVotePanel" class="panel" aria-live="polite" hidden></section>
+  <section id="eventBattlePanel" class="panel" hidden></section>
   <div class="right-rail-heading"><div><strong>AlternativeReality</strong><span>Control rail</span></div><button id="openHelpWindowButton" class="rail-help-button" type="button">Help</button><button id="rightRailToggle" type="button" aria-label="Collapse control rail" aria-expanded="true">›</button></div>
   <header id="titlePanel" class="panel title-panel" data-collapsible="Reality link" hidden>
     <div class="eyebrow">ALTERNATIVEREALITY // REALITY LINK</div>
@@ -34,10 +37,11 @@
     <div id="dungeonComplete" hidden>Dungeon complete · Grand treasure unlocked</div>
     <div><span>Crafting</span><strong id="craftingLevelValue">Level 1 · 0%</strong></div>
     <div><span>Wanted</span><strong id="wantedValue">None</strong></div>
+    <div><span>Air</span><strong id="airValue">10 / 10</strong></div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
   </section>
-  <section id="progressionWindow" class="panel progression-panel" data-collapsible="Character stats" hidden>
-    <h2>Character stats</h2>
+  <section id="progressionWindow" class="panel progression-panel" data-collapsible="NOT SPECIAL" hidden>
+    <h2>NOT SPECIAL</h2>
     <p id="progressionSummary"></p>
     <p id="alignmentSummary"></p>
     <p>Each level grants one point. You can redistribute your points at any time; no stat can go below zero.</p>
@@ -108,6 +112,7 @@
       <button type="button" data-mode="dirtBike">Dirt bike</button>
       <button type="button" data-mode="motorcycle">Motorcycle</button>
       <button type="button" data-mode="raft">Raft</button>
+      <button type="button" data-mode="swim">Swim</button>
       <button type="button" data-mode="ufo">UFO</button>
     </div>
     <button id="travelProbulator" type="button" aria-pressed="false" hidden>Probulator: OFF</button>
@@ -128,10 +133,19 @@
     <div id="characterList"></div>
     <form id="characterForm"><input id="characterName" minlength="3" maxlength="10" pattern="[A-Za-z0-9 -]{3,10}" placeholder="New character" required><button type="submit">Add</button></form>
   </section>
-  <section id="homeStoragePanel" class="panel home-storage" data-collapsible="Home storage" hidden>
-    <div class="window-header"><strong>Home storage</strong><span id="homeStorageCount">0 items</span></div>
+  <section id="homeStoragePanel" class="panel home-storage interaction-window" role="dialog" aria-label="Home storage" data-collapsible="Home storage" hidden>
+    <div class="window-header"><strong>Home storage</strong><span id="homeStorageCount">0 items</span><button id="closeHomeStorageButton" type="button">Close</button></div>
+      <nav class="home-storage-tabs" role="tablist" aria-label="Home storage item categories">
+        <button type="button" role="tab" data-home-storage-tab="vehicle" class="active">Vehicles</button>
+        <button type="button" role="tab" data-home-storage-tab="weapon">Weapons</button>
+        <button type="button" role="tab" data-home-storage-tab="ammo">Ammo</button>
+        <button type="button" role="tab" data-home-storage-tab="quest">Quest items</button>
+        <button type="button" role="tab" data-home-storage-tab="misc">Misc</button>
+        <button type="button" role="tab" data-home-storage-tab="furniture">Furniture</button>
+      </nav>
+    <section id="homeFurnitureSection" hidden>
     <small>Stored furniture is available only inside your Home. Choose an item, then drag it onto an open floor position.</small>
-    <div id="homeStorageItems" class="home-storage-items"></div>
+    <div id="homeStorageItems" class="home-storage-items"></div></section>
     <section id="homeItemStorageSection" class="home-item-storage" hidden>
       <div class="home-item-storage-header"><strong>Storage chest</strong><span>Unlimited capacity</span></div>
       <div class="home-money-storage">
@@ -139,16 +153,10 @@
         <input id="homeMoneyAmount" type="number" min="0.01" step="0.01" value="1.00" aria-label="Money amount">
         <button id="depositHomeMoney" type="button">Deposit</button><button id="withdrawHomeMoney" type="button">Withdraw</button>
       </div>
-      <nav class="home-storage-tabs" role="tablist" aria-label="Home storage item categories">
-        <button type="button" role="tab" data-home-storage-tab="vehicle" class="active">Vehicles</button>
-        <button type="button" role="tab" data-home-storage-tab="weapon">Weapons</button>
-        <button type="button" role="tab" data-home-storage-tab="ammo">Ammo</button>
-        <button type="button" role="tab" data-home-storage-tab="quest">Quest items</button>
-        <button type="button" role="tab" data-home-storage-tab="misc">Misc</button>
-      </nav>
+
       <div class="home-item-storage-columns">
         <div><strong>Backpack</strong><div id="backpackStorageItems" class="storage-transfer-items"></div></div>
-        <div><strong>Chest</strong><div id="chestStorageItems" class="storage-transfer-items"></div></div>
+        <div><strong>Home inventory</strong><div id="chestStorageItems" class="storage-transfer-items"></div></div>
       </div>
     </section>
   </section>
@@ -205,19 +213,18 @@
     <div id="homeShopInventory"></div>
     <div class="trade-actions"><button id="homeShopClose" type="button">Close</button></div>
   </section>
-  <section id="tradeWindow" class="panel trade-window" data-collapsible="Merchant inventory" hidden>
+  <section id="tradeWindow" class="panel trade-window interaction-window" role="dialog" aria-label="NPC trade" data-collapsible="Merchant inventory" hidden>
     <h2 id="tradeTitle">Merchant</h2>
     <div id="tradeFriend"></div>
     <div id="tradeOffers"></div>
     <div class="trade-actions"><button id="tradeCancel" type="button">Cancel</button><button id="tradeConfirm" type="button">Confirm trade</button></div>
   </section>
-  <section id="treasureWindow" class="panel treasure-window" role="dialog" aria-label="Treasure and backpack" data-collapsible="Treasure" hidden>
+  <section id="treasureWindow" class="panel treasure-window" role="dialog" aria-label="Treasure pickup" data-collapsible="Treasure" hidden>
     <h2>Treasure chest</h2>
     <div id="treasureCash" class="treasure-cash"></div>
     <p>Choose quantities to take. Unselected items stay here.</p>
     <div class="treasure-columns">
       <div><h3>Treasure</h3><div id="treasureItems" class="treasure-items"></div></div>
-      <div><h3>Your backpack</h3><p>Drop items at your feet to make room.</p><div id="treasureInventory" class="treasure-items"></div></div>
     </div>
     <div id="treasureWeight" class="treasure-weight"></div>
     <div id="treasureWarning" class="treasure-warning" hidden></div>
@@ -240,6 +247,7 @@
       <button type="button" role="tab" data-server-config-tab="misc">Misc</button>
       <button type="button" role="tab" data-server-config-tab="movement">Terrain &amp; Movement</button>
       <button type="button" role="tab" data-server-config-tab="events">Reality inversion</button>
+      <button type="button" role="tab" data-server-config-tab="rebuild">Reality rebuilding</button>
     </nav>
     <section class="server-config-page" data-server-config-page="vehicles">
       <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigVehicles"></div></div>
@@ -279,16 +287,30 @@
         <div class="server-event-row"><label>Building lights refresh (minutes)<input id="buildingLightsRefreshConfig" type="number" min="1" max="1440" step="1"></label></div>
         <div class="server-event-row"><label>Merchant inventory refresh (minutes)<input id="merchantRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
         <div class="server-event-row"><label>Dungeon door-lock refresh (minutes)<input id="doorLockRefreshConfig" type="number" min="1" max="10080" step="1"></label></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="ufoEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="trexEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="brontosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="stegosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="stegosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="stegosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="stegosaurus">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="raptorEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
-        <div class="server-event-row world-event-row"><label>Inversion name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="ufoEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="ufoIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="ufoDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="ufo">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="trexEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="trexIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="trexDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="trex">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="brontosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="brontosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="brontosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="brontosaurus">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="stegosaurusEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="stegosaurusIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="stegosaurusDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="stegosaurus">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="raptorEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="raptorIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="raptorDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="raptors">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
+        <div class="server-event-row world-event-row" hidden style="display:none"><strong>Retro battles<br>Jump Now, Regret Later!</strong><label>Frequency (hours)<input id="retroBattlesIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="retroBattlesDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="retroBattles">Trigger now</button></div>
+        <div class="server-event-row"><strong>Server Vote</strong><span>Hourly votes choose from Random and three inversions. Each vote lasts one minute.</span><button type="button" data-world-event="vote">Trigger Server Vote · 1 minute</button></div>
         <div class="server-event-row"><label>Wanted level for SWAT deployment<input id="wantedSwatThresholdConfig" type="number" min="1" max="100" step="1"></label></div>
       </div>
-      <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save Reality inversion settings</button><button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button></div>
+      <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save Reality inversion settings</button></div>
+    </section>
+    <section class="server-config-page" data-server-config-page="rebuild" hidden>
+      <h3>Reality rebuilding</h3>
+      <p>Manage the generated world and review this server’s map storage.</p>
+      <button id="refreshRealityInfo" type="button">Refresh information</button>
+      <p id="realityInfoStatus" role="status" aria-live="polite">Open this tab to load server information.</p>
+      <dl id="realityInfo" class="reality-info"></dl>
+      <h3>Rebuild options</h3>
+      <label>What to rebuild<select id="rebuildMode"><option value="cached">Reset world using saved map blocks</option><option value="fresh">Rebuild all map blocks from scratch</option></select></label>
+      <p id="rebuildDescription">Resets gameplay changes and reloads the starting block from its saved map. Saved geography remains available.</p>
+      <p>Both options reset dungeons, chests, quests, relationships, and player-created world changes for everyone. Accounts, characters, inventories, base ownership, and purchased maps are preserved. Players return Home, or to the server start if they have no Home.</p>
+      <button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button>
     </section>
   </section>
   </aside>
@@ -314,8 +336,8 @@
         <nav class="backpack-tabs" aria-label="Backpack categories">
           <button type="button" data-inventory-tab="weapon">Weapons <span id="weaponSlotCount">0/3</span></button>
           <button type="button" data-inventory-tab="ammo">Ammo</button>
-          <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount">0/3</span></button>
-          <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount">0/6</span></button>
+          <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount" title="Unlimited item slots">0</span></button>
+          <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount" title="Unlimited item slots">0</span></button>
         </nav>
         <div id="inventoryItems" class="inventory-items">Empty</div>
       </div>
@@ -361,11 +383,15 @@
   <div id="toast" role="status"></div>
   <section id="busRidePanel" class="bus-ride-panel" aria-live="polite" hidden><span id="busRideStatus"></span><button id="getOffBusButton" type="button" hidden>Get off bus now</button><button id="cancelBusWaitButton" type="button" hidden>Cancel waiting</button><button id="rideViewRouteButton" type="button">View route</button></section>
   <dialog id="busRouteDialog" aria-labelledby="busRouteTitle"><h2 id="busRouteTitle">Bus route</h2><button id="closeBusRouteButton" type="button">Close route</button><label>Service <select id="busRouteSelect"></select></label><p id="busRouteSummary"></p><canvas id="busRouteCanvas" width="800" height="480" aria-label="Bus route, direction arrows and numbered stops"></canvas><ol id="busRouteStops"></ol><button id="routeWaitForBusButton" type="button">Wait at selected stop</button></dialog>
-  <script src="transit.js?v=2"></script>
+  <script src="transit.js?v=5"></script>
   <script src="commands.js?v=5"></script>
   <script src="combat-effects.js?v=2"></script>
   <script src="map-markers.js?v=1"></script>
   <script src="quest-navigation.js?v=1"></script>
-  <script src="app.js?v=137"></script>
+  <script src="action-targets.js?v=1"></script>
+  <script src="retro-battles.js?v=1"></script>
+  <script src="northern-exposure.js"></script>
+  <script src="inversions.js?v=3"></script>
+  <script src="app.js?v=150"></script>
 </body>
 </html>

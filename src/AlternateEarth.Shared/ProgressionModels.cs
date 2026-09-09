@@ -1,24 +1,30 @@
 namespace AlternateEarth.Shared;
 
 public sealed record CharacterStats(int Strength = 1, int Perception = 1, int Endurance = 1,
-    int Charisma = 1, int Intelligence = 1, int Agility = 1, int Luck = 1)
+    int Charisma = 1, int Intelligence = 1, int Agility = 1, int Luck = 1,
+    int NutUp = 1, int Opportunistic = 1, int Timing = 1)
 {
-    public int Total => Strength + Perception + Endurance + Charisma + Intelligence + Agility + Luck;
-    public bool IsValid => new[] { Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck }.All(value => value is >= 0 and <= 10_000);
+    public int Total => NutUp + Opportunistic + Timing + Strength + Perception + Endurance + Charisma + Intelligence + Agility + Luck;
+    public bool IsValid => new[] { NutUp, Opportunistic, Timing, Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck }.All(value => value is >= 0 and <= 10_000);
 }
 
 public sealed record ProgressionProfile(double Experience, CharacterStats Stats, IReadOnlyList<string> Rewards,
-    double OnlineSeconds = 0, double EventSeconds = 0, double Alignment = 0);
+    double OnlineSeconds = 0, double EventSeconds = 0, double Alignment = 0, double MovingSeconds = 0);
 public sealed record ProgressionState(int Level, double Experience, double EarnedTowardNextLevel, long RequiredForNextLevel,
     int AvailablePoints, CharacterStats Stats, double DamageMultiplier, double CarryingCapacity, double AccuracyMultiplier,
     double VisionMultiplier, double MaximumStamina, double FirstEncounterBonus, double ExperienceMultiplier,
     double StaminaDrainMultiplier, double NpcSightMultiplier, double WitnessChance, double LockpickChance,
-    double Alignment = 0, double AlignmentFirstEncounterBonus = 0);
+    double Alignment = 0, double AlignmentFirstEncounterBonus = 0,
+    double FearResistance = 0, double ExtraAttackChance = 0, double ShootingIntervalMultiplier = 1);
 public sealed record AssignStatsRequest(CharacterStats Stats);
 public sealed record ProgressionNotice(string PlayerId, string Message, double Experience = 0, bool LevelGained = false);
 
 public static class ProgressionRules
 {
+    public const int StartingPoints = 10;
+    public static double FearResistance(CharacterStats stats) => Math.Clamp(.1 * stats.NutUp, 0, 1);
+    public static double ExtraAttackChance(CharacterStats stats) => Math.Clamp(.03 * (stats.Opportunistic - 1), 0, .75);
+    public static double ShootingInterval(CharacterStats stats) => Math.Max(.2, 1 / (1 + .08 * Math.Max(0, stats.Timing - 1)));
     public static long ExperienceForLevel(int level) => 100L + 75L * (level - 1) + 25L * (level - 1) * (level - 1);
     public static (int Level, double Progress, long Required) LevelAt(double experience)
     {

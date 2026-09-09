@@ -1,6 +1,6 @@
 /* Shared command state helpers, also exercised by the Node regression tests. */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.PlayerCommands=factory();})(globalThis,()=>{
-  const pending=['pendingDoor','pendingMerchant','pendingChest','pendingDungeonAction','pendingChop','pendingPet'];
+  const pending=['pendingDoor','pendingMerchant','pendingChest','pendingLoot','pendingDungeonAction','pendingChop','pendingPet'];
   function cancel(state){
     state.path=[];state.target=null;state.followCommand=null;state.autoFlee=false;state.defensiveThreats?.clear();
     for(const key of pending)state[key]=null;
@@ -42,5 +42,12 @@
       (avoid.get(target.id)||0)<=now&&(mode==='aggressive'?distance<=15:(attackers.get(target.id)||0)>now));
     return candidate?{kind:'attack',target:candidate.target}:null;
   }
-  return {cancel,attackPoint,defeated,nextMode,clickAttacks,automaticAction};
+  function fearDestination(position,attacker,dungeon){
+    let dx=position.x-attacker.x,dy=position.y-attacker.y;
+    if(Math.hypot(dx,dy)<.001)dx=1;
+    const distance=Math.hypot(dx,dy),point={x:position.x+dx/distance*8,y:position.y+dy/distance*8};
+    if(dungeon){point.x=Math.max(.6,Math.min(dungeon.width-.6,point.x));point.y=Math.max(.6,Math.min(dungeon.height-.6,point.y));}
+    return point;
+  }
+  return {cancel,attackPoint,defeated,nextMode,clickAttacks,automaticAction,fearDestination};
 });

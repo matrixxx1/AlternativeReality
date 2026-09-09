@@ -13,6 +13,13 @@ public sealed partial class RealityWorld
 
     public QuestInteraction RequestQuest(string playerId, string actorId)
     {
+        var interaction = RequestQuestCore(playerId, actorId);
+        BeginConversation(playerId, actorId);
+        return interaction;
+    }
+
+    private QuestInteraction RequestQuestCore(string playerId, string actorId)
+    {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
         var actor = FindActor(playerId, actorId) ?? throw new InvalidOperationException("That character is not here.");
         if (actor.Kind != EntityKind.Npc) throw new InvalidOperationException("Animals do not offer quests.");
@@ -28,7 +35,7 @@ public sealed partial class RealityWorld
 
         if (actor.OffersFoodDelivery) CheckDeliveryAvailability(playerId, actor);
         var sequence = _quests.Count(pair => pair.Key.Player == playerId && pair.Value.GiverId == actorId);
-        var offer = PrepareQuestOffer(actor.OffersFoodDelivery ? GenerateFoodDelivery(playerId, actor) : GenerateQuest(playerId, actor, sequence));
+        var offer = PrepareQuestOffer(actor.OffersFoodDelivery ? GenerateFoodDelivery(playerId, actor) : ((StableInt(actor.Id) & int.MaxValue) + sequence) % 2 == 0 ? GenerateAdventure(playerId, actor, sequence / 2) : GenerateQuest(playerId, actor, sequence));
         _questOffers[(playerId, offer.Id)] = offer;
         if (actor.OffersFoodDelivery)
             _questDialogue.Enqueue(new($"delivery-warning:{offer.Id}", actor.Id, actor.Name,
@@ -63,6 +70,7 @@ public sealed partial class RealityWorld
         }
         var accepted = offered with { Status = "active", DeadlineUtc = _probulatorClock.GetUtcNow().AddMinutes(offered.DeliveryMinutes ?? 60) };
         _quests[(playerId, accepted.Id)] = accepted;
+        if (accepted.Kind.StartsWith("adventure:")) { EnsureAdventureSubject(accepted); if(accepted.Kind is "adventure:roll" or "adventure:deliveries" or "adventure:ghost") {AddInventory(playerId,AdventureSupply(accepted),accepted.Kind=="adventure:deliveries"?3:1);await SaveInventoryAsync(playerId,cancellationToken);} }
         await _store.SaveQuestAsync(Configuration.Id, accepted, cancellationToken);
         return new QuestActionResult(GetPrivateState(playerId), _players[playerId], accepted, $"Quest accepted: {accepted.Title}");
     }
@@ -223,7 +231,8 @@ public sealed partial class RealityWorld
         var weapon = player.EquippedWeapon;
         if (!player.GodMode && !OwnsWeapon(playerId, weapon)) throw new InvalidOperationException("You no longer have that weapon.");
         var now = DateTimeOffset.UtcNow;
-        var interval = TimeSpan.FromSeconds(Math.Clamp(InventoryDefinition(weapon).AttackIntervalSeconds, .05, 10));
+        var interval = TimeSpan.FromSeconds(Math.Clamp(InventoryDefinition(weapon).AttackIntervalSeconds, .05, 10) *
+            (weapon is "fist" or "knife" or "sword" ? 1 : ProgressionRules.ShootingInterval(StatsFor(playerId))));
         if (_lastPlayerAttack.TryGetValue((playerId, weapon), out var priorAttack) && now - priorAttack < interval)
             throw new InvalidOperationException($"Your {DisplayItem(weapon)} is not ready yet.");
         var ammo = WeaponDefinition(weapon).Ammo;
@@ -249,6 +258,8 @@ public sealed partial class RealityWorld
         }
         var configuredDamage = InventoryDefinition(player.EquippedWeapon).Damage;
         var appliedDamage = WeaponDamageFor(playerId, player.EquippedWeapon, Math.Max(.25, configuredDamage));
+        var opportunityChance = ProgressionRules.ExtraAttackChance(StatsFor(playerId));
+        if (opportunityChance > 0 && ProgressionRoll() < opportunityChance) appliedDamage *= 2;
         var properties = new Dictionary<string, string>(entity.Properties);
         if (entity.Kind == EntityKind.Building)
         {
@@ -257,7 +268,13 @@ public sealed partial class RealityWorld
             properties["maximumHealthHearts"] = "5000"; properties["healthHearts"] = remaining.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             if (remaining <= 0) { properties["state"] = "rubble"; properties["destroyedUntilUtc"] = DateTimeOffset.UtcNow.AddMinutes(10).ToString("O"); }
         }
-        else properties["damage"] = (double.TryParse(entity.Properties.GetValueOrDefault("damage"), out var prior) ? prior + appliedDamage : appliedDamage).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        else
+        {
+            var remaining = Math.Max(0, (double.TryParse(entity.Properties.GetValueOrDefault("healthHearts"), out var prior) ? prior : 100) - appliedDamage);
+            properties["maximumHealthHearts"] = "100"; properties["healthHearts"] = remaining.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            if (remaining <= 0) properties["state"] = "rubble";
+            if (entity.Properties.GetValueOrDefault("occupied") == "true") ReactVehicleOccupants(playerId, entity.Id, entity.Position);
+        }
         var damaged = entity with { Properties = properties, Version = entity.Version + 1 }; _baseEntities[entity.Id] = damaged;
         if (entity.Kind == EntityKind.Building) await _store.SaveEntityAsync(Configuration.Id, damaged, cancellationToken);
         var witness = FindCrimeWitness(playerId, entity.Position);
@@ -465,6 +482,7 @@ public sealed partial class RealityWorld
     private bool QuestCanComplete(string playerId, QuestState quest, string actorId)
     {
         if (quest.Status is not ("active" or "ready") || quest.DeadlineUtc <= _probulatorClock.GetUtcNow()) return false;
+        if (quest.Kind.StartsWith("adventure:")) return quest.Status == "ready" && actorId == quest.GiverId;
         return quest.Kind switch
         {
             "foodDelivery" => actorId == quest.DestinationActorId && quest.DeadlineUtc > _probulatorClock.GetUtcNow() &&

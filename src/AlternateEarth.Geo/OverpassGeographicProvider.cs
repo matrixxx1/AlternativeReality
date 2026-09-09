@@ -22,12 +22,19 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
 
     public string Name => "OpenStreetMap/Overpass";
 
-    public async Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default)
+    public Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default) => ReadAreaAsync(area, false, cancellationToken);
+    public Task<GeographicDataset> GetFreshAreaAsync(GeographicArea area, CancellationToken cancellationToken = default) => ReadAreaAsync(area, true, cancellationToken);
+    public void ClearLegacyCache()
+    {
+        foreach (var pattern in new[] { "area-*.json", "overpass-*.json" })
+            foreach (var file in Directory.EnumerateFiles(_legacyCacheDirectory, pattern)) File.Delete(file);
+    }
+    private async Task<GeographicDataset> ReadAreaAsync(GeographicArea area, bool fresh, CancellationToken cancellationToken)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             FormattableString.Invariant($"v5:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_legacyCacheDirectory, $"area-{cacheKey}.json");
-        if (File.Exists(canonicalCachePath))
+        if (!fresh && File.Exists(canonicalCachePath))
         {
             var cachedJson = await File.ReadAllTextAsync(canonicalCachePath, cancellationToken);
             var cached = JsonSerializer.Deserialize<GeographicDataset>(cachedJson, SharedJson.Options);
@@ -40,7 +47,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
 
         var rawCachePath = Path.Combine(_legacyCacheDirectory, $"overpass-{cacheKey}.json");
         string rawJson;
-        if (File.Exists(rawCachePath))
+        if (!fresh && File.Exists(rawCachePath))
         {
             rawJson = await File.ReadAllTextAsync(rawCachePath, cancellationToken);
             TryDelete(rawCachePath);
@@ -272,7 +279,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         return tags;
     }
 
-    private static bool KeepProperty(string key) => key is "oneway" or "junction" or "lanes" or "maxspeed" or "ref" or "layer" or "bridge" or "tunnel" or "access" or "vehicle" or "motor_vehicle" or "bus" or "motorroad" or "area" or "cuisine" or "takeaway" or "delivery" or "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
+    private static bool KeepProperty(string key) => key is "service" or "office" or "building:use" or "oneway" or "junction" or "lanes" or "maxspeed" or "ref" or "layer" or "bridge" or "tunnel" or "access" or "vehicle" or "motor_vehicle" or "bus" or "motorroad" or "area" or "cuisine" or "takeaway" or "delivery" or "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
 
     private static void AddDerivedProperties(Dictionary<string, string> properties, IReadOnlyDictionary<string, string> tags)
     {

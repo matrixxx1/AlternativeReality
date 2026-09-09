@@ -22,6 +22,8 @@ internal static class CraftingCatalog
         new("arrow", "Arrows", "arrow", 4, [new("wood", 1), new("metal", 1), new("cloth", 1)]),
         new("ballBearing", "Ball bearings", "ballBearing", 10, [new("metal", 1)]),
         new("rocket", "Rocket", "rocket", 1, [new("metal", 2), new("weaponParts", 1), new("powerCore", 1)]),
+        new("hockeyStick", "Hockey stick", "hockeyStick", 1, [new("wood", 3)]),
+        new("mapleSyrup", "Maple syrup", "mapleSyrup", 1, [new("sugar", 2), new("water", 1)]),
         new("knife", "Knife", "knife", 1, [new("metal", 2), new("wood", 1)]),
         new("sword", "Sword", "sword", 1, [new("metal", 4), new("wood", 1), new("cloth", 1)]),
         new("slingshot", "Slingshot", "slingshot", 1, [new("wood", 1), new("rubber", 1), new("cloth", 1)]),
@@ -53,7 +55,7 @@ internal static class CraftingCatalog
         // Broad game difficulty and destructive potential; no real manufacturing details.
         var level = recipe.Id switch
         {
-            "molotovCocktail" or "salvageCloth" or "charcoal" or "food" or "candle" => 1,
+            "hockeyStick" or "mapleSyrup" or "molotovCocktail" or "salvageCloth" or "charcoal" or "food" or "candle" => 1,
             "hat" => 3,
             "gunpowder" or "tShirt" or "slingshot" or "ballBearing" => 5,
             "arrow" => 8,

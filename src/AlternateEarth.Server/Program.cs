@@ -64,6 +64,8 @@ builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<RealitySocketHub>();
 builder.Services.AddHostedService<WeatherRefreshService>();
 builder.Services.AddHostedService<ActorSimulationService>();
+builder.Services.AddHostedService<IdleMapService>();
+builder.Services.AddHostedService<RetroBattleSimulationService>();
 builder.Services.AddHostedService<BusSimulationService>();
 builder.Services.AddHostedService<BusAreaLoadingService>();
 builder.Services.AddHostedService<SmokeTestAccountCleanupService>();
@@ -137,13 +139,35 @@ app.MapGet("/api/diagnostics", async (HttpContext context, AccountService accoun
         realityEntities = state.RealityEntityCount,
         actors = state.ActorCount,
         elevationSamples = state.ElevationSampleCount,
+        actorRouteWorkers = state.ActorRouteWorkers,
+        timings = state.Timings.Snapshot(),
         workingSetMegabytes = process.WorkingSet64 / 1_048_576d,
         managedMegabytes = GC.GetTotalMemory(false) / 1_048_576d,
         uptimeSeconds = (DateTimeOffset.UtcNow - process.StartTime.ToUniversalTime()).TotalSeconds
     });
 });
+app.MapGet("/api/reality-maintenance", async (HttpContext context, AccountService accounts, RealityWorld state) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    if (!state.IsGodModeEnabled(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var storage = await Task.Run(() => RealityStorageInfo.Read(dataDirectory), context.RequestAborted);
+    return Results.Ok(new { storage, reality = state.Configuration, loadedBlocks = state.LoadedAreaCount,
+        baseEntities = state.BaseEntityCount, actors = state.ActorCount, players = state.PlayerCount,
+        source = state.GeographicProvider, operation = state.ActiveMapOperation, checkedAtUtc = DateTimeOffset.UtcNow });
+});
 app.MapGet("/api/world", (RealityWorld state) => Results.Ok(state.CreateSnapshot()));
 app.MapGet("/api/weather", (RealityWorld state) => Results.Ok(state.Weather));
+app.MapGet("/api/photographs/{id}", async (string id, HttpContext context, AccountService accounts, SqliteRealityStore store) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    if (!Guid.TryParseExact(id, "N", out _)) return Results.NotFound();
+    var image = await store.LoadPhotographImageAsync("photograph:" + id, context.RequestAborted);
+    if (image is null) return Results.NotFound();
+    context.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+    return Results.File(image, "image/png");
+});
 app.MapPost("/api/world/prefetch", async (HttpContext context, AccountService accounts, RealityWorld state, PrefetchAreaRequest request) =>
 {
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);

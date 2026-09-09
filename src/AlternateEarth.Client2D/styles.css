@@ -99,6 +99,9 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .inventory-items { margin-top: 8px; display: flex; flex-wrap: wrap; align-content:flex-start; gap: 5px; color: #e8e0bd; }
 .inventory-item { display:flex; flex-wrap:wrap; align-items:center; max-width:100%; gap:6px; overflow-wrap:anywhere; background:rgba(7,15,11,.62); border:1px solid #a47b43; padding:5px 7px; border-radius:3px; }
 .item-art { width:42px; height:42px; flex:0 0 42px; image-rendering:pixelated; border:1px solid rgba(238,205,108,.35); border-radius:3px; background:#18241e; }
+.photograph-print { object-fit:contain; background:#fff3d0; }
+.photograph-dialog { max-width:min(360px,90vw); color:#fff2cb; background:#203027; border:2px solid #d9c291; }
+.photograph-dialog img { display:block; max-width:100%; height:auto; margin:auto; image-rendering:pixelated; border:8px solid #fff3d0; box-sizing:border-box; }
 .inventory-item.weapon-item { cursor:grab; border-color:#d4b45c; color:#fff1a7; }
 .inventory-item.wearable-item { cursor:grab; border-color:#7fb89d; }
 .inventory-item.weapon-item:active { cursor:grabbing; }
@@ -431,3 +434,36 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 #busRouteStops { columns:2; }
 
 .quest-speakers{display:flex;align-items:center;gap:18px}.quest-speakers>div{display:flex;flex-direction:column;text-align:center;min-width:100px}.quest-speakers p{font-size:16px;color:#f4db94}.quest-window #questDescription{font-size:15px;line-height:1.5}.quest-window .trade-actions{margin-top:18px}.quest-window #questAccept{background:#356e43;font-weight:bold}.quest-window #questNavigation{color:#ffe36d}
+
+.reality-info { display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,2fr);gap:10px 20px;padding:16px;background:#101f1a; }
+.reality-info dt { color:#c3b99b; }
+.reality-info dd { margin:0;overflow-wrap:anywhere; }
+
+.action-menu.multi-choice > button:not(.panel-collapse-button),.action-menu.multi-choice > #noActions { display:none; }
+#actionChoices { max-height:65vh;overflow:auto; }
+.action-choice-group { display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid #6a6848; }
+.action-choice-group > strong { color:#f1d88f;font-size:13px; }
+.action-choice-group > button { min-height:36px;text-align:left;white-space:normal; }
+
+.interaction-window.floating-panel { max-height:calc(100vh - 80px);overflow:auto; }
+.home-storage.interaction-window .home-item-storage-columns { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px; }
+.home-storage.interaction-window .storage-transfer-items { max-height:50vh;overflow:auto; }
+.home-storage.interaction-window .home-storage-tabs { display:flex;flex-wrap:wrap;gap:6px;margin:12px 0; }
+.home-storage.interaction-window .home-item-storage-header { display:none; }
+.trade-item-icon { padding:2px;cursor:pointer;min-width:46px;min-height:46px; }
+.trade-item-icon .item-art { pointer-events:none; }
+.open-home-storage-button { position:fixed;left:16px;bottom:72px;z-index:8; }
+@media(max-width:600px){.home-storage.interaction-window .home-item-storage-columns{gap:8px}.home-storage.interaction-window .storage-transfer-row{display:flex;flex-wrap:wrap;}.home-storage.interaction-window .storage-transfer-row label{width:100%;}}
+
+.home-storage.interaction-window { font-size:14px; }
+.home-storage.interaction-window .window-header > strong { font-size:20px; }
+.home-storage.interaction-window .home-storage-tabs button { min-height:36px;padding:7px 12px;font-size:13px; }
+.home-storage.interaction-window .storage-transfer-row { font-size:13px;padding:10px;gap:8px; }
+.home-storage.interaction-window .storage-transfer-row button,.home-storage.interaction-window .storage-transfer-row input { min-height:32px;font-size:13px; }
+.home-storage.interaction-window .home-item-storage-columns > div > strong { display:block;font-size:15px;margin:8px 0; }
+
+#serverVotePanel { order:-10;border:2px solid #ff6258; }
+.vote-option { display:grid;grid-template-columns:1fr auto;gap:6px;padding:10px 0;border-bottom:1px solid #475148; }
+.vote-option small { grid-column:1/-1;overflow-wrap:anywhere; }
+#eventBattlePanel button,#adventurePanel button { margin:4px;min-height:34px; }
+#eventBattlePanel select { max-width:48%;margin:3px; }

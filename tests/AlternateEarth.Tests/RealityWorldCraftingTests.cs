@@ -201,7 +201,7 @@ public sealed partial class RealityWorldTests
     {
         var (world, pilot, _) = await CreateProbulatorTestWorld();
         var recipes = CraftingCatalog.Recipes.ToDictionary(item => item.Id);
-        Assert.Equal(39, recipes.Count);
+        Assert.Equal(41, recipes.Count);
         foreach (var (id, level) in new[] { ("molotovCocktail", 1), ("skateboard", 25), ("rocketLauncher", 50), ("motorcycle", 100), ("ufo", 5_000) })
             Assert.Equal(level, recipes[id].RequiredLevel);
         Assert.Contains(recipes["ufo"].Ingredients, item => item.ItemType == "kryptonite");
@@ -234,7 +234,7 @@ public sealed partial class RealityWorldTests
         Assert.Contains(hardware, item => item.Properties!.GetValueOrDefault("furnitureType") == "craftingTable");
         Assert.DoesNotContain(hardware, item => item.ItemType is "rifle" or "rocketLauncher" or "food");
         var general = world.BaseMerchantOffers(merchant with { MerchantCategory = "general" });
-        Assert.InRange(general.Length, 3, 8);
+        Assert.InRange(general.Length, 3, 10);
         Assert.True(general.Count(item => CraftingCatalog.ChemicalItems.Contains(item.ItemType)) >= 2);
     }
 

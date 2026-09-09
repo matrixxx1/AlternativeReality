@@ -836,6 +836,9 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         await store.CreateAccountAsync(new AccountRecord("storage-account", "Storage", "hash", "salt", "token", "storage-player"), "Storage");
         await store.SaveInventoryAsync(new InventoryState("storage-player", new[] { new ItemStack("rock", 50), new ItemStack("ballBearing", 25) }));
         await store.SaveInventoryAsync(new InventoryState("home-items:home-item-storage:storage-account", new[] { new ItemStack("quest:first", 1), new ItemStack("quest:second", 1), new ItemStack("quest:third", 1), new ItemStack("quest:fourth", 1), new ItemStack("eBike", 1, CarriedInBackpack: false) }));
+        var extraTypes = new[] { "bullet", "arrow", "food", "water", "cloth", "plastic", "rubber", "wax", "electronics", "battery" };
+        var homeInventory = await store.LoadInventoryAsync("home-items:home-item-storage:storage-account");
+        await store.SaveInventoryAsync(homeInventory with { Items = homeInventory.Items.Concat(extraTypes.Select(type => new ItemStack(type, 1))).ToArray() });
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(Building("storage-home", region, 20, 20))), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
         var player = await world.JoinAsync("storage-player", "Storage", "storage-account");
@@ -862,8 +865,13 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:first", 1, false));
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:second", 1, false));
         await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:third", 1, false));
-        var questLimit = await Assert.ThrowsAsync<InvalidOperationException>(() => world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:fourth", 1, false)));
-        Assert.Contains("quest-item slots", questLimit.Message);
+        var fourthQuest = await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, "quest:fourth", 1, false));
+        Assert.Equal(4, fourthQuest.PrivateState.Inventory.QuestSlotsUsed);
+        Assert.Null(fourthQuest.PrivateState.Inventory.MaximumQuestSlots);
+        Assert.Null(fourthQuest.PrivateState.Inventory.MaximumOtherSlots);
+        foreach (var type in extraTypes)
+            await world.TransferHomeItemAsync(player.Id, new TransferHomeStorageRequest(chest.Id, type, 1, false));
+        Assert.True(world.GetPrivateState(player.Id).Inventory.OtherSlotsUsed >= 10);
         await world.ExitDungeonAsync(player.Id);
         Assert.Equal(TravelMode.EBike, (await world.SetTravelModeAsync(player.Id, TravelMode.EBike)).TravelMode);
     }
@@ -885,9 +893,11 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         await world.InitializeAsync();
         var fallen = await world.JoinAsync("grave-player", "Fallen", "grave-account");
 
-        MovementOutcome? death = null;
-        for (var attempt = 0; attempt < 10 && death?.Died != true; attempt++) death = await world.MoveAsync(fallen.Id, new MoveRequest(1, 0, attempt));
-        Assert.True(death?.Died);
+        var players = (System.Collections.Concurrent.ConcurrentDictionary<string, PlayerState>)typeof(RealityWorld).GetField("_players", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(world)!;
+        players[fallen.Id] = fallen with { Position = new(region, 10, 10), Air = 10 };
+        await world.AdvanceVitalsAsync(TimeSpan.FromSeconds(1), default);
+        Assert.Equal(8, players[fallen.Id].Air); Assert.Equal(10, players[fallen.Id].HealthHearts);
+        for (var tick = 0; tick < 10 && players[fallen.Id].WalletCents != 0; tick++) await world.AdvanceVitalsAsync(TimeSpan.FromSeconds(1), default);
 
         var grave = Assert.Single(world.TakeDeathDropAnnouncements());
         Assert.Equal("tombstone", grave.DropKind);
@@ -904,7 +914,7 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
 
         var collector = await world.JoinAsync("grave-collector", "Collector");
         collector = await world.SetGodModeAsync(collector.Id, true);
-        await world.TeleportAsync(collector.Id, new TeleportRequest(grave.Position.X, grave.Position.Y, true));
+        players[collector.Id] = collector with { Position = grave.Position };
         var collected = await world.CollectLootAsync(collector.Id, grave.Id);
         Assert.Equal(12_345 + 50_000, collected.Player.WalletCents);
         Assert.Contains(collected.Inventory.Items, item => item.ItemType == "rock" && item.Quantity == 3);
@@ -1477,20 +1487,43 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ScheduledInversionsUsePortalsAndRepeatedManualTriggersPreserveExistingEntities()
+    public async Task RandomSchedulingIsRemovedAndLegacyManualFixturesPreserveExistingEntities()
     {
         var clock = new ProbulatorTestClock();
         var (world, pilot, _) = await CreateProbulatorTestWorld(clock: clock);
         clock.Advance(TimeSpan.FromDays(1).TotalSeconds);
         world.AdvanceActors(TimeSpan.FromSeconds(.5));
         var scheduled = world.CreateSnapshot().Actors!.Where(actor => actor.EventStartedAtUtc is not null).ToArray();
-        Assert.Equal(9, scheduled.Length);
+        Assert.Empty(scheduled);
         Assert.All(scheduled, actor => Assert.True(actor.IsPassingThroughPortal(clock.GetUtcNow())));
+        Assert.All(scheduled, actor => Assert.InRange(actor.Position.Distance2D(pilot.Position), 0, 50));
         var first = Assert.Single(world.TriggerWorldEvent(pilot.Id, "ufo"));
         var second = Assert.Single(world.TriggerWorldEvent(pilot.Id, "ufo"));
         Assert.NotEqual(first.Id, second.Id);
         Assert.Contains(world.CreateSnapshot().Actors!, actor => actor.Id == first.Id);
         Assert.Contains(world.CreateSnapshot().Actors!, actor => actor.Id == second.Id);
+    }
+
+    [Fact]
+    public async Task JoiningDoesNotStartUnvotedRandomEvents()
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, pilot, _) = await CreateProbulatorTestWorld(clock: clock);
+        world.PlaceTestCharacter(pilot.Id, new("player", 0, 0));
+        world.Leave(pilot.Id);
+        clock.Advance(TimeSpan.FromDays(2));
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        Assert.DoesNotContain(world.CreateSnapshot().Actors!, actor => actor.EventStartedAtUtc is not null);
+
+        await world.JoinAsync(pilot.Id, pilot.Name);
+        await world.SetGodModeAsync(pilot.Id, true);
+        pilot = await world.TeleportAsync(pilot.Id, new TeleportRequest(180, 180, true));
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        var scheduled = world.CreateSnapshot().Actors!.Where(actor => actor.EventStartedAtUtc is not null).ToArray();
+        Assert.Empty(scheduled);
+        Assert.All(scheduled, actor => Assert.InRange(actor.Position.Distance2D(pilot.Position), 0, 50));
+        world.AdvanceActors(TimeSpan.FromSeconds(.5));
+        Assert.DoesNotContain(world.CreateSnapshot().Actors!, actor => actor.EventStartedAtUtc is not null);
     }
 
     private sealed class ProbulatorTestClock : TimeProvider
@@ -1644,6 +1677,8 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
     [InlineData(18, true)]
     [InlineData(0, true)]
     [InlineData(0, false)]
+    [InlineData(double.NaN, true)]
+    [InlineData(1, true)]
     public async Task IdleRaftDriftsDownwindAndRemainsOnWater(double windSpeed, bool available)
     {
         var configuration = new RealityConfiguration("raft-drift", "Raft Drift", 334, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
@@ -1659,8 +1694,16 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         await world.InitializeAsync();
         var player = await world.JoinAsync("rafter", "Rafter");
         Assert.Equal(TerrainType.DeepWater, player.Terrain);
-        Assert.Equal(90, world.Weather.WindDirectionDegrees);
-        Assert.True(world.Weather.WindSpeedKilometersPerHour >= 8);
+        if (available && double.IsFinite(windSpeed) && windSpeed > 0)
+        {
+            Assert.Equal(90, world.Weather.WindDirectionDegrees);
+            Assert.Equal(windSpeed, world.Weather.WindSpeedKilometersPerHour);
+        }
+        else
+        {
+            Assert.InRange(world.Weather.WindDirectionDegrees, 0, 360);
+            Assert.InRange(world.Weather.WindSpeedKilometersPerHour, 2, 6);
+        }
         var swimmers = world.CreateSnapshot().Actors!.Where(a => a.Subtype is "fish" or "waterMonster").ToArray();
         Assert.Contains(swimmers, a => a.Subtype == "waterMonster");
         Assert.True(swimmers.Count(a => a.Subtype == "fish") >= 3);
@@ -1673,8 +1716,11 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         var changed = await world.AdvanceVitalsAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
         var drifted = Assert.Single(changed, item => item.Id == player.Id);
 
-        Assert.True(drifted.Position.X < player.Position.X, "An east wind should drift the raft westward.");
-        Assert.InRange(Math.Abs(drifted.Position.Y - player.Position.Y), 0, .02);
+        var downwind = (world.Weather.WindDirectionDegrees + 180) * Math.PI / 180;
+        var dx = drifted.Position.X - player.Position.X;
+        var dy = drifted.Position.Y - player.Position.Y;
+        Assert.True(dx * Math.Sin(downwind) + dy * Math.Cos(downwind) > 0, "The raft should drift downwind.");
+        Assert.InRange(Math.Abs(dx * Math.Cos(downwind) - dy * Math.Sin(downwind)), 0, .02);
         Assert.Contains(drifted.Terrain, new[] { TerrainType.ShallowWater, TerrainType.DeepWater });
         Assert.Equal(0, drifted.SpeedMetersPerSecond);
     }

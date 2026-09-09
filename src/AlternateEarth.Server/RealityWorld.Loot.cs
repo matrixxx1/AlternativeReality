@@ -7,9 +7,9 @@ public sealed partial class RealityWorld
     public LootDropState OpenLoot(string playerId, string lootId)
     {
         if (!_players.TryGetValue(playerId, out var player) || !_loot.TryGetValue(lootId, out var loot) ||
-            loot.LocationId != player.LocationId || loot.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+            (loot.DropKind == "eventReward" ? loot.OwnerId != playerId : loot.LocationId != player.LocationId) || loot.ExpiresAtUtc <= DateTimeOffset.UtcNow)
             throw new InvalidOperationException("Treasure is no longer available.");
-        if (player.Position.Distance2D(loot.Position) > 4)
+        if (loot.DropKind != "eventReward" && player.Position.Distance2D(loot.Position) > 4)
             throw new InvalidOperationException("Move closer to the treasure.");
         return loot with { Items = loot.Items.Select(item => InventoryStack(item.ItemType, item.Quantity, quality: item.Quality)).ToArray() };
     }
@@ -48,7 +48,7 @@ public sealed partial class RealityWorld
             else _loot[loot.Id] = remainder;
             await SaveInventoryAsync(playerId, cancellationToken);
             await SavePlayerAsync(updated, cancellationToken);
-            if (loot.DropKind == "tombstone")
+            if (loot.DropKind is "tombstone" or "eventReward")
             {
                 if (remainder is null) await _store.RemovePersistentLootAsync(loot.Id, cancellationToken);
                 else await _store.SavePersistentLootAsync(Configuration.Id, remainder, cancellationToken);

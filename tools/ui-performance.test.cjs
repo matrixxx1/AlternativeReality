@@ -1,6 +1,18 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
 const source=fs.readFileSync(require.resolve('../src/AlternateEarth.Client2D/app.js'),'utf8');
 function implementation(name){const start=source.indexOf(`  function ${name}(`);assert.ok(start>=0,name);return source.slice(start,source.indexOf('\n  function ',start+1));}
+
+test('server settings populate and save after the panel moves into its popup document',()=>{
+  const fields=new Map(),sent=[];
+  const node=()=>({value:'',replaceChildren(){},querySelector(selector){if(!fields.has(selector))fields.set(selector,node());return fields.get(selector);}});
+  const ui=new Proxy({}, {get(target,key){return target[key]??=node();}});
+  const dependencies={ui,document:{querySelector:()=>null},$:()=>null,renderModifierInputs(){},modifierValues:()=>({}),serverNowMs:()=>Date.now(),localDateTimeValue:()=>'',updateServerTimePreview(){},send:message=>sent.push(message),showToast:message=>assert.fail(message)};
+  const populate=new Function(...Object.keys(dependencies),implementation('populateServerConfiguration')+';return populateServerConfiguration;')(...Object.values(dependencies));
+  populate({items:[],movement:{baseSpeedMph:3,baseVisibilityMeters:50},events:{wantedSwatThreshold:7,retroBattlesIntervalHours:24,retroBattlesDurationMinutes:10}});
+  assert.equal(fields.get('#wantedSwatThresholdConfig').value,'7');
+  fields.get('#wantedSwatThresholdConfig').value='9';ui.saveServerEventsConfig.onclick();
+  assert.equal(sent[0].type,'updateServerEvents');assert.equal(sent[0].wantedSwatThreshold,9);
+});
 test('unchanged server configuration does not rebuild forms or discard edits on movement updates',()=>{
   const state={},populated=[],ui={serverConfigWindow:{hidden:true}};
   const render=new Function('state','ui','populateServerConfiguration',implementation('renderServerConfiguration')+';return renderServerConfiguration;')(state,ui,config=>populated.push(config));

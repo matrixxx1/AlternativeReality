@@ -75,7 +75,7 @@ public sealed partial class RealityWorld
     public long LastAreaLoadMilliseconds => Interlocked.Read(ref _lastAreaLoadMilliseconds);
     public long LastAreaPrefetchMilliseconds => Interlocked.Read(ref _lastAreaPrefetchMilliseconds);
     public string GeographicProvider => _geographic?.Provider ?? "not loaded";
-    public WeatherState Weather { get; private set; } = WeatherState.Unavailable with { WindSpeedKilometersPerHour = 8 };
+    public WeatherState Weather { get; private set; } = EnsureAmbientWind(WeatherState.Unavailable);
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -112,7 +112,7 @@ public sealed partial class RealityWorld
         foreach (var entityId in await _store.LoadRemovedEntityIdsAsync(Configuration.Id, cancellationToken))
             _removedBaseEntityIds[entityId] = 0;
         foreach (var loot in await _store.LoadPersistentLootAsync(Configuration.Id, cancellationToken))
-            if (loot.ExpiresAtUtc > DateTimeOffset.UtcNow) _loot[loot.Id] = loot;
+            if (loot.ExpiresAtUtc > DateTimeOffset.UtcNow) { _loot[loot.Id] = loot; RestorePhotographs(loot.Items); }
         await _store.ReleaseExpiredBaseClaimsAsync(Configuration.Id, DateTimeOffset.UtcNow, cancellationToken);
         foreach (var claim in await _store.LoadPublicBaseClaimsAsync(Configuration.Id, cancellationToken))
             _publicBaseClaims[claim.BuildingId] = claim;
@@ -142,16 +142,24 @@ public sealed partial class RealityWorld
         if (!_eventConfiguration.WeatherMode.Equals("live", StringComparison.OrdinalIgnoreCase))
         {
             Weather = CreateConfiguredWeather(_eventConfiguration.WeatherMode, _eventConfiguration.TemperatureCelsius);
-            Weather = Weather with { WindSpeedKilometersPerHour = Math.Max(8, Weather.WindSpeedKilometersPerHour) };
+            Weather = EnsureAmbientWind(Weather);
             return true;
         }
         try
         {
             Weather = await _weatherProvider.GetCurrentAsync(Configuration.Area.Center, cancellationToken);
-            Weather = Weather with { WindSpeedKilometersPerHour = Math.Max(8, Weather.WindSpeedKilometersPerHour) };
+            Weather = EnsureAmbientWind(Weather);
             return true;
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested) { return false; }
+    }
+
+    private static WeatherState EnsureAmbientWind(WeatherState weather)
+    {
+        if (!weather.IsAvailable || !double.IsFinite(weather.WindSpeedKilometersPerHour) || weather.WindSpeedKilometersPerHour <= 0)
+            return weather with { WindSpeedKilometersPerHour = 2 + Random.Shared.NextDouble() * 4, WindDirectionDegrees = Random.Shared.NextDouble() * 360 };
+        var direction = double.IsFinite(weather.WindDirectionDegrees) ? weather.WindDirectionDegrees : Random.Shared.NextDouble() * 360;
+        return weather with { WindDirectionDegrees = (direction % 360 + 360) % 360 };
     }
 
     private WeatherState CreateConfiguredWeather(string mode, double? temperatureCelsius)
@@ -251,6 +259,7 @@ public sealed partial class RealityWorld
             }
         }
         var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
+        RestorePhotographs(inventory.Items);
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(accountId)) await ParkCarriedVehiclesAsync(characterId, accountId, cancellationToken);
         foreach (var item in inventory.Items.Where(item => !string.IsNullOrWhiteSpace(item.Quality)))
@@ -434,13 +443,19 @@ public sealed partial class RealityWorld
     public async Task<MovementOutcome?> MoveAsync(string characterId, MoveRequest request, CancellationToken cancellationToken = default)
     {
         var outcome = await MoveCoreAsync(characterId, request, cancellationToken);
-        if (outcome is { Moved: true }) await RecordDeliveryHandlingAsync(characterId, outcome.Player.SpeedMetersPerSecond, false, cancellationToken);
+        if (outcome is { Moved: true }) { await RecordDeliveryHandlingAsync(characterId, outcome.Player.SpeedMetersPerSecond, false, cancellationToken); await ApplyInversionTransformationsAsync(cancellationToken); outcome = outcome with { Player = _players[characterId] }; }
         return outcome;
     }
 
     private async Task<MovementOutcome?> MoveCoreAsync(string characterId, MoveRequest request, CancellationToken cancellationToken)
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
+        if (player.TravelMode == TravelMode.Swim && !player.GodMode && (player.SwimExhausted || player.Stamina <= 0))
+        {
+            _swimAttempts[player.Id] = _probulatorClock.GetUtcNow();
+            return new(player, false, true, false, false, false, "Too exhausted to swim. Rest; struggling consumes Air.");
+        }
+        if (EventPaused(player)) return new(player, false, true, false, false, false, "Please hold. Your movement is very important to us.");
         if (player.RidingBusId is not null) return new(player, false, true, false, false, false, "Use Get off bus now before moving.");
         if (player.WaitingAtBusStopId is not null) return new(player, false, true, false, false, false, "Cancel waiting before moving.");
         if (IsGasAsleep(characterId)) return new(player, false, true, false, false, false, "You are asleep until the gas effect wears off.");
@@ -448,7 +463,7 @@ public sealed partial class RealityWorld
         var vehicle = player.TravelMode switch
         {
             TravelMode.Skateboard => "skateboard", TravelMode.Bike => "bike", TravelMode.EBike => "eBike",
-            TravelMode.DirtBike => "dirtBike", TravelMode.Motorcycle => "motorcycle", TravelMode.Raft => "inflatableRaft", TravelMode.Ufo => "ufo", _ => null
+            TravelMode.DirtBike => "dirtBike", TravelMode.Motorcycle => "motorcycle", TravelMode.Raft => "inflatableRaft", TravelMode.Ufo => "ufo", TravelMode.Swim => "swimmies", _ => null
         };
         if (vehicle is not null && (!player.GodMode || player.TravelMode == TravelMode.Ufo) && InventoryQuantity(characterId, vehicle) <= 0)
         {
@@ -460,7 +475,7 @@ public sealed partial class RealityWorld
         var now = DateTimeOffset.UtcNow;
         var previous = _lastMovement.AddOrUpdate(characterId, now, (_, old) => now);
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
-        var currentTerrain = Navigation.TerrainAt(player.Position.X, player.Position.Y);
+        var currentTerrain = TerrainFor(player);
         if (!player.GodMode && player.TravelMode == TravelMode.Ufo && TravelFuelRange(player) <= 0)
         {
             var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
@@ -488,7 +503,7 @@ public sealed partial class RealityWorld
             Y = player.Position.Y + (directionY * step)
         });
 
-        var requestedTerrain = Navigation.TerrainAt(requested.X, requested.Y);
+        var requestedTerrain = EventTerrainAt(requested, Navigation.TerrainAt(requested.X, requested.Y));
         if (player.TravelMode == TravelMode.Raft && !RaftTerrainOnly(requestedTerrain))
         {
             var stopped = player with { SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
@@ -510,26 +525,22 @@ public sealed partial class RealityWorld
 
         var next = requested;
         var raftTerrain = player.TravelMode == TravelMode.Raft
-            ? RaftTerrainOnly
+            ? (_activeInversion?.Type == "flood" && InsideInversion(player) ? (Func<TerrainType,bool>)(_ => true) : RaftTerrainOnly)
             : null;
         var blocked = player.TravelMode == TravelMode.Ufo ? false : raftTerrain is null
-            ? !Navigation.CanTraverse(player.Position, requested)
-            : !Navigation.CanTraverse(player.Position, requested, raftTerrain);
+            ? !Navigation.CanTraverse(player.Position, requested) || BusBlocksMovement(player.Position, requested)
+            : !Navigation.CanTraverse(player.Position, requested, raftTerrain) || BusBlocksMovement(player.Position, requested);
         if (blocked)
         {
             var slideX = requested with { Y = player.Position.Y };
             var slideY = requested with { X = player.Position.X };
-            if (raftTerrain is null ? Navigation.CanTraverse(player.Position, slideX) : Navigation.CanTraverse(player.Position, slideX, raftTerrain)) next = slideX;
-            else if (raftTerrain is null ? Navigation.CanTraverse(player.Position, slideY) : Navigation.CanTraverse(player.Position, slideY, raftTerrain)) next = slideY;
+            if (!BusBlocksMovement(player.Position, slideX) && (raftTerrain is null ? Navigation.CanTraverse(player.Position, slideX) : Navigation.CanTraverse(player.Position, slideX, raftTerrain))) next = slideX;
+            else if (!BusBlocksMovement(player.Position, slideY) && (raftTerrain is null ? Navigation.CanTraverse(player.Position, slideY) : Navigation.CanTraverse(player.Position, slideY, raftTerrain))) next = slideY;
             else next = player.Position;
         }
-        var nextTerrain = Navigation.TerrainAt(next.X, next.Y);
-        if (nextTerrain == TerrainType.DeepWater && player.TravelMode is not (TravelMode.Raft or TravelMode.Ufo) && !player.GodMode)
-        {
-            var reset = await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, cancellationToken);
-            await SavePlayerAsync(reset, cancellationToken);
-            return new(reset, true, false, true, false, true, "You drowned, lost all hearts, and returned to the starting point.");
-        }
+        var nextTerrain = EventTerrainAt(next, Navigation.TerrainAt(next.X, next.Y));
+        if (player.TravelMode == TravelMode.Swim && !IsWater(nextTerrain)) player = player with { TravelMode = TravelMode.Walk };
+        // Deep water consumes Air in the vitals tick, never instant death.
 
         var distance = player.Position.Distance2D(next);
         var dirtBikeGas = player.DirtBikeGasGallons;
@@ -607,13 +618,12 @@ public sealed partial class RealityWorld
         if (mode == TravelMode.Raft)
         {
             if (!player.GodMode && InventoryQuantity(characterId, "inflatableRaft") <= 0) throw new InvalidOperationException("You need an inflatable raft.");
-            if (player.LocationId == "outdoor" && player.Terrain != TerrainType.ShallowWater && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed from shallow water.");
+            if (player.LocationId == "outdoor" && TerrainFor(player) != TerrainType.ShallowWater && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed from shallow water.");
         }
-        if (player.TravelMode == TravelMode.Raft && mode != TravelMode.Raft && player.Terrain == TerrainType.DeepWater && !player.GodMode)
+        if (mode == TravelMode.Swim)
         {
-            var drowned = await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, cancellationToken);
-            await SavePlayerAsync(drowned, cancellationToken);
-            return drowned;
+            if (InventoryQuantity(characterId, "swimmies") <= 0) throw new InvalidOperationException("Find Swimmies before swimming.");
+            if (!IsWater(TerrainFor(player))) throw new InvalidOperationException("Swimmies can only be used in water.");
         }
         var landing = player.Position;
         if (player.TravelMode == TravelMode.Ufo && mode != TravelMode.Ufo)
@@ -729,6 +739,7 @@ public sealed partial class RealityWorld
         }
         if (player.TravelMode == TravelMode.Raft)
         {
+            if (_activeInversion?.Type == "flood" && InsideInversion(player) && IsWater(EventTerrainAt(player.Position with { X=request.X,Y=request.Y },Navigation.TerrainAt(request.X,request.Y)))) return (Navigation.FindPath(player.Position,request.X,request.Y,terrain=>ConfiguredSpeedMetersPerSecond(player,terrain),cancellationToken:cancellationToken),expanded);
             if (!RaftTerrainOnly(Navigation.TerrainAt(request.X, request.Y)))
                 return (new(false, Array.Empty<WorldPosition>(), "A raft cannot leave the water. Switch to another travel mode before going ashore."), expanded);
             var waterRoute = Navigation.FindPath(player.Position, request.X, request.Y,
@@ -748,6 +759,7 @@ public sealed partial class RealityWorld
         var anchor = player.LocationId == "outdoor" ? player.Position : _returnPositions.GetValueOrDefault(characterId, new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         var now = _probulatorClock.GetUtcNow();
         var actors = new List<ActorState>();
+        if (key is "retrobattles" or "retro") { StartRetroBattles(); return actors; }
         lock (_actorRandom)
         {
             if (key == "ufo")
@@ -800,14 +812,60 @@ public sealed partial class RealityWorld
 
     private WorldPosition CreateEventPosition(WorldPosition anchor, double distance)
     {
+        if (TryCreateEventPosition(anchor, distance, out var position)) return position;
+        throw new InvalidOperationException("No safe portal location within 50 meters. Move to a nearby open shoreline or street.");
+    }
+
+    private bool TryCreateEventPosition(WorldPosition anchor, double distance, out WorldPosition position)
+    {
         var angle = _actorRandom.NextDouble() * Math.PI * 2;
         for (var attempt = 0; attempt < 24; attempt++)
         {
             var bearing = angle + attempt * Math.PI / 12;
             var candidate = Navigation.FindNearestWalkable(anchor with { X = anchor.X + Math.Cos(bearing) * distance, Y = anchor.Y + Math.Sin(bearing) * distance });
-            if (candidate.Distance2D(anchor) <= 50 && !Navigation.IsBlocked(candidate.X, candidate.Y) && Navigation.TerrainAt(candidate.X, candidate.Y) != TerrainType.DeepWater) return candidate;
+            if (candidate.Distance2D(anchor) <= 50 && !Navigation.IsBlocked(candidate.X, candidate.Y) && Navigation.TerrainAt(candidate.X, candidate.Y) != TerrainType.DeepWater)
+            {
+                position = candidate;
+                return true;
+            }
         }
-        throw new InvalidOperationException("No safe portal location within 50 meters. Move to a nearby open shoreline or street.");
+        position = default;
+        return false;
+    }
+
+    private void SpawnScheduledEvent(ref long? lastCycle, string scheduleKey, string idPrefix, EntityKind kind,
+        string subtype, string name, double health, int intervalHours, int durationMinutes, string eventName,
+        DateTimeOffset now, PlayerState[] players, List<ActorState> changed, int count = 1)
+    {
+        var cycle = ScheduledEventCycle(now, scheduleKey, intervalHours);
+        if (lastCycle == cycle || players.Length == 0) return;
+        var first = _actorRandom.Next(players.Length);
+        for (var attempt = 0; attempt < players.Length; attempt++)
+        {
+            var anchor = players[(first + attempt) % players.Length].Position;
+            WorldPosition position;
+            if (subtype == "ufo") position = anchor with { X = anchor.X - 35, Z = 100 };
+            else if (!TryCreateEventPosition(anchor, 20, out position)) continue;
+
+            // Build the whole pack before publishing; every member stays near the same player.
+            var arrivals = new List<ActorState>();
+            for (var index = 0; index < count; index++)
+            {
+                var memberPosition = position;
+                if (index > 0 && TryCreateEventPosition(position, 2.5, out var nearby) &&
+                    nearby.Distance2D(anchor) <= 50 && nearby.Distance2D(position) <= 5)
+                    memberPosition = nearby;
+                var id = count == 1 ? $"{idPrefix}:{cycle}" : $"{idPrefix}:{cycle}:{index + 1}";
+                var memberName = count == 1 ? name : index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}";
+                arrivals.Add(new ActorState(id, kind, subtype, memberName, memberPosition, Facing: subtype == "ufo" ? "east" : "south",
+                    MaximumHealthHearts: health, HealthHearts: health, EventStartedAtUtc: now,
+                    EventEndsAtUtc: now.AddMinutes(durationMinutes), EventName: eventName));
+            }
+            foreach (var actor in arrivals) { _actors[actor.Id] = actor; changed.Add(actor); }
+            lastCycle = cycle;
+            return;
+        }
+        // Keep the event due until an outdoor player has a safe nearby portal location.
     }
 
     private ActorState CreateEventDinosaur(string id, string subtype, string name, WorldPosition anchor, double distance, double health, DateTimeOffset endsAt, DateTimeOffset startsAt, string eventName)
@@ -818,71 +876,29 @@ public sealed partial class RealityWorld
 
     public IReadOnlyList<ActorState> AdvanceActors(TimeSpan elapsed)
     {
+        using var timing = Timings.Measure("actors.advance");
         var changed = new List<ActorState>();
         lock (_actorRandom)
         {
             var now = _probulatorClock.GetUtcNow();
-            var ufoCycle = ScheduledEventCycle(now, "ufo", _eventConfiguration.UfoIntervalHours);
-            if (_lastUfoCycle != ufoCycle && _loadedBounds is { } ufoBounds)
-            {
-                _lastUfoCycle = ufoCycle; var random = new Random(StableInt($"ufo-route:{Configuration.Seed}:{ufoCycle}"));
-                var y = ufoBounds.MinimumY + random.NextDouble() * Math.Max(1, ufoBounds.MaximumY - ufoBounds.MinimumY);
-                var ufo = new ActorState($"ufo:{ufoCycle}", EntityKind.Npc, "ufo", "UFO", new WorldPosition(Configuration.Area.Region, ufoBounds.MinimumX - 25, y, 100), "east", true,
-                    EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.UfoDurationMinutes), EventName: _eventConfiguration.UfoEventName);
-                _actors[ufo.Id] = ufo; changed.Add(ufo);
-            }
-            if (_loadedBounds is { } eventBounds)
-            {
-                var trexCycle = ScheduledEventCycle(now, "trex", _eventConfiguration.TrexIntervalHours);
-                if (_lastTrexCycle != trexCycle)
-                {
-                    _lastTrexCycle = trexCycle; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
-                    var trex = new ActorState($"trex:{trexCycle}", EntityKind.Animal, "tRex", "Rex", position, MaximumHealthHearts: 50, HealthHearts: 50, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.TrexDurationMinutes), EventName: _eventConfiguration.TrexEventName); _actors[trex.Id] = trex; changed.Add(trex);
-                }
-                var brontosaurusCycle = ScheduledEventCycle(now, "brontosaurus", _eventConfiguration.BrontosaurusIntervalHours);
-                if (_lastBrontosaurusCycle != brontosaurusCycle)
-                {
-                    _lastBrontosaurusCycle = brontosaurusCycle;
-                    var brontosaurus = CreateEventDinosaur($"brontosaurus:{brontosaurusCycle}", "brontosaurus", "Bronto", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 80, now.AddMinutes(_eventConfiguration.BrontosaurusDurationMinutes), now, _eventConfiguration.BrontosaurusEventName);
-                    _actors[brontosaurus.Id] = brontosaurus; changed.Add(brontosaurus);
-                }
-                var stegosaurusCycle = ScheduledEventCycle(now, "stegosaurus", _eventConfiguration.StegosaurusIntervalHours);
-                if (_lastStegosaurusCycle != stegosaurusCycle)
-                {
-                    _lastStegosaurusCycle = stegosaurusCycle;
-                    var stegosaurus = CreateEventDinosaur($"stegosaurus:{stegosaurusCycle}", "stegosaurus", "Steggy", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 45, now.AddMinutes(_eventConfiguration.StegosaurusDurationMinutes), now, _eventConfiguration.StegosaurusEventName);
-                    _actors[stegosaurus.Id] = stegosaurus; changed.Add(stegosaurus);
-                }
-                var raptorCycle = ScheduledEventCycle(now, "raptors", _eventConfiguration.RaptorIntervalHours);
-                if (_lastRaptorCycle != raptorCycle)
-                {
-                    _lastRaptorCycle = raptorCycle;
-                    var packCenter = new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY));
-                    for (var index = 0; index < 3; index++)
-                    {
-                        var raptor = CreateEventDinosaur($"raptor:{raptorCycle}:{index + 1}", "raptor", index == 0 ? "Raptor Alpha" : $"Raptor {index + 1}", packCenter, index == 0 ? 0 : 2.5, 12, now.AddMinutes(_eventConfiguration.RaptorDurationMinutes), now, _eventConfiguration.RaptorEventName);
-                        _actors[raptor.Id] = raptor; changed.Add(raptor);
-                    }
-                }
-                var landOfGiantsCycle = ScheduledEventCycle(now, "land-of-the-giants", _eventConfiguration.LandOfGiantsIntervalHours);
-                if (_lastLandOfGiantsCycle != landOfGiantsCycle)
-                {
-                    _lastLandOfGiantsCycle = landOfGiantsCycle;
-                    var giant = CreateEventDinosaur($"giant:{landOfGiantsCycle}", "giant", "The Giant", new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)), 0, 100, now.AddMinutes(_eventConfiguration.LandOfGiantsDurationMinutes), now, _eventConfiguration.LandOfGiantsEventName);
-                    _actors[giant.Id] = giant; changed.Add(giant);
-                }
-                var bearCycle = ScheduledEventCycle(now, "event-bear", _eventConfiguration.BearIntervalHours);
-                if (_lastEventBearCycle != bearCycle)
-                {
-                    _lastEventBearCycle = bearCycle; var position = Navigation.FindNearestWalkable(new WorldPosition(Configuration.Area.Region, eventBounds.MinimumX + _actorRandom.NextDouble() * (eventBounds.MaximumX - eventBounds.MinimumX), eventBounds.MinimumY + _actorRandom.NextDouble() * (eventBounds.MaximumY - eventBounds.MinimumY)));
-                    var bear = new ActorState($"event-bear:{bearCycle}", EntityKind.Animal, "eventBear", "The Great Bear", position, MaximumHealthHearts: 20, HealthHearts: 20, EventStartedAtUtc: now, EventEndsAtUtc: now.AddMinutes(_eventConfiguration.BearDurationMinutes), EventName: _eventConfiguration.BearEventName); _actors[bear.Id] = bear; changed.Add(bear);
-                }
-            }
+            var eventPlayers = _players.Values.Where(player => player.LocationId == "outdoor" && !player.IsTestCharacter).ToArray();
+            ApplyCompletedActorRoutes(now);
+            var conversationActors = ActiveConversationActors(now);
             var waitingRecipients = _quests.Values.Where(q => q.Kind == "foodDelivery" && q.Status == "active" && q.DeliveryRecipient is not null)
                 .Select(q => q.DeliveryRecipient!).ToDictionary(a => a.Id);
-            foreach (var pair in _actors)
+            var actorBatch = _actors.ToArray();
+            var routeStart = (int)((uint)_actorRouteCursor % (uint)Math.Max(1, actorBatch.Length));
+            _actorRouteCursor = (routeStart + _routePlanner.Capacity) % Math.Max(1, actorBatch.Length);
+            for (var actorIndex = 0; actorIndex < actorBatch.Length; actorIndex++)
             {
+                var pair = actorBatch[(routeStart + actorIndex) % actorBatch.Length];
                 var actor = pair.Value;
+                if (actor.Subtype == "haney" || ManagedEventActor(actor) || _transformedActors.ContainsKey(actor.Id) || IsDrivingNpc(actor.Id) || actor.Subtype.StartsWith("adventure:")) continue;
+                if (actor.IsQuestGiver || conversationActors.Contains(actor.Id))
+                {
+                    if (actor.IsMoving) { actor = actor with { IsMoving = false, Version = actor.Version + 1 }; _actors[actor.Id] = actor; changed.Add(actor); }
+                    continue;
+                }
                 if (waitingRecipients.TryGetValue(actor.Id, out var waiting) && !IsProbulatorAbducted(actor.Id))
                 {
                     if (actor.Position != waiting.Position || actor.IsMoving)
@@ -918,8 +934,14 @@ public sealed partial class RealityWorld
                 }
                 if (!_actorRoutes.TryGetValue(actor.Id, out var route) || route.Count == 0)
                 {
-                    route = CreateActorRoute(actor);
-                    _actorRoutes[actor.Id] = route;
+                    if (actor.IsMoving)
+                    {
+                        actor = actor with { IsMoving = false, Version = actor.Version + 1 };
+                        _actors[actor.Id] = actor; changed.Add(actor);
+                    }
+                    if (!_actorRouteRetry.ContainsKey(actor.Id))
+                        _routePlanner.TrySchedule(actor, Navigation, _actorRandom.Next(), Timings);
+                    continue;
                 }
                 if (route.Count == 0) { _actors[actor.Id] = actor with { IsMoving = false }; continue; }
                 var waypoint = route.Peek();
@@ -943,6 +965,11 @@ public sealed partial class RealityWorld
                 foreach (var original in dungeon.Actors.Where(actor => actor.Subtype == "storeEmployee").ToArray())
                 {
                     var actor = original;
+                    if (conversationActors.Contains(actor.Id))
+                    {
+                        if (actor.IsMoving) { actor = actor with { IsMoving = false, Version = actor.Version + 1 }; SetActor(dungeonPair.Key, actor); changed.Add(actor); }
+                        continue;
+                    }
                     if (IsGasAsleep(actor.Id)) continue;
                     if (!_actorRoutes.TryGetValue(actor.Id, out var route) || route.Count == 0)
                     {
@@ -980,6 +1007,7 @@ public sealed partial class RealityWorld
 
     private void ResetScheduledEventCycles(DateTimeOffset now)
     {
+        _lastRetroCycle = ScheduledEventCycle(now, "retro-battles", _eventConfiguration.RetroBattlesIntervalHours);
         _lastUfoCycle = ScheduledEventCycle(now, "ufo", _eventConfiguration.UfoIntervalHours);
         _lastTrexCycle = ScheduledEventCycle(now, "trex", _eventConfiguration.TrexIntervalHours);
         _lastEventBearCycle = ScheduledEventCycle(now, "event-bear", _eventConfiguration.BearIntervalHours);
@@ -996,7 +1024,7 @@ public sealed partial class RealityWorld
         {
             foreach (var actor in _actors.Values)
             {
-                if (IsProbulatorAbducted(actor.Id) || IsGasAsleep(actor.Id)) continue;
+                if (IsCanadian(actor) || actor.Subtype == "haney" || IsProbulatorAbducted(actor.Id) || IsGasAsleep(actor.Id)) continue;
                 if (!_nextActorSpeech.TryGetValue(actor.Id, out var next))
                 {
                     _nextActorSpeech[actor.Id] = now.AddSeconds(_actorRandom.Next(10, 61));
@@ -1011,12 +1039,21 @@ public sealed partial class RealityWorld
         return messages;
     }
 
-    public async Task<WorldSnapshot> RebuildAsync(string characterId, bool godMode, CancellationToken cancellationToken = default)
+    public async Task<WorldSnapshot> RebuildAsync(string characterId, bool godMode, CancellationToken cancellationToken = default, bool fromScratch = false)
     {
         if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this reality.");
         await _rebuildLock.WaitAsync(cancellationToken);
         try
         {
+            await _areaLoadLock.WaitAsync(cancellationToken);
+            try
+            {
+            await _areaPrefetchLock.WaitAsync(cancellationToken);
+            try
+            {
+            _activeMapOperations["rebuild"] = fromScratch ? "Rebuilding reality from fresh geography" : "Resetting reality from saved blocks";
+            var generated = fromScratch ? await _generator.RebuildFromScratchAsync(Configuration, cancellationToken)
+                : await _generator.GenerateAsync(Configuration, cancellationToken);
             await _transitLock.WaitAsync(cancellationToken);
             try
             {
@@ -1027,7 +1064,8 @@ public sealed partial class RealityWorld
             _transitBuiltRevision = -1;
             _realityEntities.Clear();
             _baseEntities.Clear(); _removedBaseEntityIds.Clear(); _elevationSamples.Clear(); _loadedAreas.Clear(); _actors.Clear(); _actorRoutes.Clear(); _nextActorSpeech.Clear(); _outdoorChests.Clear(); _chestContents.Clear(); _loot.Clear(); _dungeons.Clear(); _returnPositions.Clear(); _relationships.Clear(); _quests.Clear(); _questOffers.Clear(); _tradeQuotes.Clear(); _loadedBounds = null; _geographic = null;
-            ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
+            ApplyGeneratedWorld(generated);
+            Interlocked.Exchange(ref _preparedAreaCount, 0);
             _loadedAreas["0:0"] = Configuration.Area.Bounds;
             _baseBuildings.Clear();
             foreach (var pair in _players.ToArray())
@@ -1040,6 +1078,10 @@ public sealed partial class RealityWorld
             return CreateSnapshot();
             }
             finally { _transitLock.Release(); }
+            }
+            finally { _activeMapOperations.TryRemove("rebuild", out _); _areaPrefetchLock.Release(); }
+            }
+            finally { _areaLoadLock.Release(); }
         }
         finally { _rebuildLock.Release(); }
     }
@@ -1407,18 +1449,6 @@ public sealed partial class RealityWorld
         return Configuration with { Area = new GeographicArea(center, Configuration.Area.SizeMeters) };
     }
 
-    private Queue<WorldPosition> CreateActorRoute(ActorState actor)
-    {
-        for (var attempt = 0; attempt < 6; attempt++)
-        {
-            var distance = 6 + (_actorRandom.NextDouble() * 24);
-            var angle = _actorRandom.NextDouble() * Math.PI * 2;
-            var path = Navigation.FindPath(actor.Position, actor.Position.X + (Math.Cos(angle) * distance), actor.Position.Y + (Math.Sin(angle) * distance));
-            if (path.Success) return new Queue<WorldPosition>(path.Waypoints);
-        }
-        return new Queue<WorldPosition>();
-    }
-
     private Queue<WorldPosition> CreateInteriorActorRoute(ActorState actor, DungeonState dungeon)
     {
         for (var attempt = 0; attempt < 30; attempt++)
@@ -1502,9 +1532,11 @@ public sealed partial class RealityWorld
     };
     private double StaminaAfterTravel(PlayerState player, double distance, double elapsed, DateTimeOffset now, bool magicShoes)
     {
-        if (player.GodMode || distance <= .001 || player.FoodProtectedUntilUtc > now) return player.Stamina;
+        if (player.GodMode || distance <= .001) return player.Stamina;
+        if (player.TravelMode == TravelMode.Swim) return Math.Max(0, player.Stamina - elapsed * 2 * (1 + 2 * (1 - player.Air / Math.Max(1, player.MaximumAir))));
+        if (player.FoodProtectedUntilUtc > now) return player.Stamina;
         var effort = player.TravelMode switch { TravelMode.Run => 1, TravelMode.Bike => .5, TravelMode.Skateboard => .75, _ => 0 };
-        return Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, magicShoes && player.TravelMode == TravelMode.Run) * effort * ProgressionRules.Drain(StatsFor(player.Id)));
+        return Math.Max(0, player.Stamina - WorldNavigation.RunningStaminaDrain(elapsed, magicShoes && player.TravelMode == TravelMode.Run) * effort * ProgressionRules.Drain(StatsFor(player.Id)) * (1 + 2 * (1 - player.Air / Math.Max(1, player.MaximumAir))));
     }
     private static bool IsMotorized(TravelMode mode) => mode is TravelMode.DirtBike or TravelMode.Motorcycle;
     private static double FuelGallons(PlayerState player) => player.TravelMode == TravelMode.DirtBike ? player.DirtBikeGasGallons : player.MotorcycleGasGallons;
@@ -1513,7 +1545,7 @@ public sealed partial class RealityWorld
 
     private PlayerState ResetPlayer(PlayerState player)
     {
-        player = player with { RidingBusId = null, WaitingAtBusStopId = null };
+        player = player with { RidingBusId = null, WaitingAtBusStopId = null, Air = player.MaximumAir, SwimExhausted = false };
         var home = HomeForPlayer(player.Id);
         if (home is not null)
         {

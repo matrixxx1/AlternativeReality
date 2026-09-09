@@ -24,6 +24,7 @@ public sealed partial class RealityWorld
     {
         var access = ValidateHomeShop(playerId, furnitureId);
         var stored = await _store.LoadHomeShopListingsAsync(access.OwnerAccountId, Configuration.Id, cancellationToken);
+        RestorePhotographs(stored.Select(i => new ItemStack(i.ItemType, i.Quantity, Photograph: i.Photograph)));
         var listings = stored.Select(item =>
         {
             var definition = InventoryDefinition(item.ItemType);
@@ -47,6 +48,7 @@ public sealed partial class RealityWorld
         try
         {
             var current = (await _store.LoadHomeShopListingsAsync(access.OwnerAccountId, Configuration.Id, cancellationToken)).FirstOrDefault(item => item.ItemType.Equals(itemType, StringComparison.OrdinalIgnoreCase));
+            if (current?.Photograph is { } photo) _photographs[itemType] = photo;
             var priorQuantity = current?.Quantity ?? 0;
             var difference = request.Quantity - priorQuantity;
             var quality = current?.Quality ?? _weaponQualities.GetValueOrDefault((playerId, itemType));
@@ -57,7 +59,7 @@ public sealed partial class RealityWorld
                 if (!CanAddToBackpack(playerId, new[] { returned }, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
                 AddInventory(playerId, itemType, -difference, quality);
             }
-            await _store.SaveHomeShopListingAsync(access.OwnerAccountId, Configuration.Id, new HomeShopListingRecord(itemType, request.Quantity, request.UnitPriceCents, quality), cancellationToken);
+            await _store.SaveHomeShopListingAsync(access.OwnerAccountId, Configuration.Id, new HomeShopListingRecord(itemType, request.Quantity, request.UnitPriceCents, quality, _photographs.GetValueOrDefault(itemType)), cancellationToken);
             await SaveInventoryAsync(playerId, cancellationToken);
             var shop = await RequestHomeShopAsync(playerId, request.FurnitureId, cancellationToken);
             return new HomeShopResult(access.Player, GetPrivateState(playerId), shop, request.Quantity == 0 ? $"Removed {definition.DisplayName} from the shop." : $"Listed {request.Quantity} {definition.DisplayName} at {request.UnitPriceCents / 100d:C} each.");
@@ -75,6 +77,7 @@ public sealed partial class RealityWorld
         {
             var listing = (await _store.LoadHomeShopListingsAsync(access.OwnerAccountId, Configuration.Id, cancellationToken)).FirstOrDefault(item => item.ItemType.Equals(request.ItemType, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException("That item is no longer for sale.");
+            if (listing.Photograph is { } photo) _photographs[listing.ItemType] = photo;
             if (listing.Quantity < request.Quantity) throw new InvalidOperationException("The shop no longer has that many available.");
             var total = checked(listing.UnitPriceCents * request.Quantity);
             var buyer = _players[playerId];

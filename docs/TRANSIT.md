@@ -10,8 +10,27 @@ Click a blue **B** bus stop to choose **Wait for bus** or **View route**. Waitin
 
 The server simulates buses every 100 ms and checks oriented nine-by-2.5-meter footprints at sub-meter steps, including curved junction turns. Dead-end reversals follow a slow curve at 1.2 m/s. A bus hitting a player or NPC applies five hearts of damage and pushes them forward and sideways out of its path; God Mode retains its existing survival protection. Building/car/bus impacts stop the bus and damage both objects once per contact. Existing claimed-Home and building-destruction protections apply. Disabled buses release passengers when the right exit is clear. Persistent wrecks remain obstacles.
 
-Map loading runs separately from movement. Buses wait before entering geography whose obstacles are not loaded; nearby, occupied or requested services request blocks ahead. Idle distant services sleep until needed. Existing itineraries and stops are retained as neighboring blocks load. On disconnect/restart, a passenger's saved position is the safe boarding position rather than a dangling bus attachment.
+Click a bus itself for **Attack bus**, **Board bus / resume service**, or **View route**.
+Attacks use the equipped weapon, its normal range measured to the bus hull,
+ammo, accuracy, and cooldown. Disabled buses are not valid attack/boarding targets.
+Direct boarding requires a stopped, serviceable bus and an outdoor player within
+three meters of its right-hand door side. Boarding resumes that bus's service;
+it does not repair damage. Bus damage is independent of the player-versus-player setting.
+
+When nobody is riding or waiting for its route, a bus pulls onto a clear right
+shoulder at 1.2 m/s instead of freezing in a traffic lane. A bus disabled by damage
+also pulls over. The maneuver checks the whole body, loaded ground, water,
+obstacles, people and other buses, and the final body must clear road rectangles.
+If no safe space exists, it reports **waiting for safe pull-over** and retries;
+it never teleports through obstacles just to clear traffic. Waiting passengers or
+direct boarding make a healthy parked bus retrace its approach and safely rejoin
+its saved route. Disabled buses never resume service automatically.
+
+Map loading runs separately from movement. Buses wait before entering geography whose obstacles are not loaded; nearby, occupied or requested services request blocks ahead. Existing itineraries and stops are retained as neighboring blocks load. On disconnect/restart, a passenger's saved position is the safe boarding position rather than a dangling bus attachment.
 
 Current limits: transit operates within the world's existing projection region. OSM quality and missing ways still limit real-world fidelity; the importer does not invent connections. Multi-way/conditional turn restrictions and traffic signals are not a complete traffic-law simulation. An obstructed route waits rather than phasing through obstacles. Vehicles and service positions reset on a server restart.
 
 Validation: `dotnet test AlternateEarth.sln --no-restore`, `node --test tools/*.test.cjs`, and `node tools/transit-smoke.mjs` (isolated port 5081 fixture, WebSocket boarding/drop-off). Add `--keep-running` for manual browser checks; the launcher remains active until the test server is stopped. The active game on port 5080 is not touched by that check.
+
+`SERVER_DLL=<built-server> node tools/bus-service-smoke.mjs` exercises parking,
+direct boarding, resumed service and bus combat against an isolated fixture.

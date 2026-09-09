@@ -66,6 +66,8 @@ public sealed class RealitySocketHub
     private async Task ReceiveLoopAsync(string characterId, ClientConnection connection, CancellationToken cancellationToken)
     {
         await using var routeWorker = new LatestCommandWorker();
+        await using var areaWorker = new LatestCommandWorker();
+        await using var mapWorker = new LatestCommandWorker();
         var buffer = new byte[16 * 1024];
         while (connection.Socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
         {
@@ -83,6 +85,9 @@ public sealed class RealitySocketHub
             using var document = JsonDocument.Parse(stream.ToArray());
             var root = document.RootElement;
             var type = root.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+            // Only known command names become metric keys; untrusted input cannot grow the metrics table.
+            using var commandTiming = _world.Timings.Measure(type is "ping" or "moveRequest" or "requestArea" or "requestMapWindow" or "requestChunk"
+                ? "command." + type : "command.other");
             try
             {
                 if ((_world.IsProbulatorAbducted(characterId) || _world.IsGasAsleep(characterId)) && type is not ("ping" or "say" or "requestPrivateState" or "requestArea" or "requestMapWindow" or "prefetchArea" or "requestChunk" or "cancelCommand" or "setActionMode"))
@@ -122,6 +127,10 @@ public sealed class RealitySocketHub
                     case "cancelBusWait":
                         await BroadcastPlayersAsync(new[] { await _world.CancelBusWaitAsync(characterId, cancellationToken) }, cancellationToken);
                         break;
+                    case "boardBus":
+                        await BroadcastPlayersAsync(new[] { await _world.BoardBusAsync(characterId, root.GetProperty("busId").GetString()!, cancellationToken) }, cancellationToken);
+                        await BroadcastAsync(new { type = "busesMoved", buses = _world.GetTransitSnapshot().Buses }, null, cancellationToken);
+                        break;
                     case "getOffBus":
                         await BroadcastPlayersAsync(new[] { await _world.GetOffBusAsync(characterId, cancellationToken) }, cancellationToken);
                         await BroadcastAsync(new { type = "busesMoved", buses = _world.GetTransitSnapshot().Buses }, null, cancellationToken);
@@ -131,7 +140,11 @@ public sealed class RealitySocketHub
                         var routeSnapshot = _world.GetTransitSnapshot();
                         var requestedRoute = routeSnapshot.Routes.FirstOrDefault(r => r.Id == routeId) ?? throw new InvalidOperationException("This bus route is no longer available.");
                         var requestedStops = requestedRoute.StopIds.ToHashSet();
-                        await connection.SendAsync(new { type = "busRoute", route = requestedRoute, stops = routeSnapshot.Stops.Where(s => requestedStops.Contains(s.Id)).ToArray() }, cancellationToken);
+                        var routeBuses = routeSnapshot.Buses.Where(b => b.RouteId == requestedRoute.Id).ToArray();
+                        if (root.TryGetProperty("positionsOnly", out var positionsOnly) && positionsOnly.ValueKind == JsonValueKind.True)
+                            await connection.SendAsync(new { type = "busRoutePositions", routeId = requestedRoute.Id, buses = routeBuses }, cancellationToken);
+                        else
+                            await connection.SendAsync(new { type = "busRoute", route = requestedRoute, stops = routeSnapshot.Stops.Where(s => requestedStops.Contains(s.Id)).ToArray(), buses = routeBuses }, cancellationToken);
                         break;
                     case "setTravelMode":
                         var travelRequest = root.Deserialize<SetTravelModeRequest>(SharedJson.Options)!;
@@ -160,9 +173,47 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "testCharactersCleared", ids = clearedTests, ownerId = characterId }, null, cancellationToken);
                         break;
                     case "triggerWorldEvent":
-                        var eventRequest = root.Deserialize<TriggerWorldEventRequest>(SharedJson.Options)!;
-                        var eventActors = _world.TriggerWorldEvent(characterId, eventRequest.EventType);
-                        await BroadcastAsync(new { type = "worldEventTriggered", actor = eventActors[0], actors = eventActors, message = $"Reality inversion: {eventActors[0].EventName} is arriving through a portal." }, null, cancellationToken);
+                    case "startServerVote":
+                        _world.StartServerVote(characterId);
+                        await BroadcastInversionsAsync(cancellationToken);
+                        break;
+                    case "castServerVote":
+                        _world.CastServerVote(characterId, root.GetProperty("option").GetString()!);
+                        await BroadcastInversionsAsync(cancellationToken);
+                        break;
+                    case "reflectEventMissile":
+                        _world.ReflectEventMissile(characterId, root.GetProperty("missileId").GetString()!);
+                        break;
+                    case "setAchievementTitle":
+                        await _world.SetAchievementTitleAsync(characterId, root.GetProperty("title").GetString()!, cancellationToken);
+                        break;
+                    case "photograph":
+                        await _world.PhotographAsync(characterId, root.TryGetProperty("subjectId", out var photoSubject) ? photoSubject.GetString() : null, cancellationToken,
+                            root.TryGetProperty("thumbnailDataUrl", out var photoThumbnail) ? photoThumbnail.GetString() : null);
+                        await connection.SendAsync(new { type = "questUpdated", privateState = _world.GetPrivateState(characterId), message = "Photograph taken." }, cancellationToken);
+                        break;
+                    case "adventureAction":
+                        var adventureResult = await _world.AdventureActionAsync(characterId, root.GetProperty("questId").GetString()!, root.GetProperty("choice").GetString()!, cancellationToken);
+                        await connection.SendAsync(new { type = "questUpdated", player = adventureResult.Player, privateState = adventureResult.PrivateState, message = adventureResult.Message }, cancellationToken);
+                        break;
+                    case "enterEventDungeon":
+                        await _world.EnterEventDungeonAsync(characterId, cancellationToken);
+                        await connection.SendAsync(new { type = "dungeonEntered", player = _world.GetRetroBattleUpdate(characterId).Player, privateState = _world.GetPrivateState(characterId), dungeon = _world.GetPrivateState(characterId).Dungeon }, cancellationToken);
+                        break;
+                    case "eventBattleAction":
+                        var eventBattleDungeon = await _world.PlayEventBattleAsync(characterId, root.GetProperty("action").GetString()!, cancellationToken);
+                        await connection.SendAsync(new { type = "eventBattleUpdated", player = _world.GetRetroBattleUpdate(characterId).Player, dungeon = eventBattleDungeon, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "configureEventDeck":
+                        _world.ConfigureEventDeck(characterId, root.GetProperty("cards").Deserialize<string[]>(SharedJson.Options)!);
+                        await connection.SendAsync(new { type = "eventBattleUpdated", dungeon = _world.GetPrivateState(characterId).Dungeon, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "attackDungeonBarrier":
+                        var barrierDungeon = await _world.AttackDungeonBarrierAsync(characterId, root.GetProperty("barrierId").GetString()!, cancellationToken);
+                        await connection.SendAsync(new { type = "eventBattleUpdated", player = _world.GetRetroBattleUpdate(characterId).Player, dungeon = barrierDungeon, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "retroJump":
+                        _world.JumpRetroBattle(characterId);
                         break;
                     case "setLights":
                         var lightRequest=root.Deserialize<SetLightsRequest>(SharedJson.Options)!;var litPlayer=await _world.SetLightsAsync(characterId,lightRequest.FlashlightOn,lightRequest.LanternOn,lightRequest.LaserOn,cancellationToken);await BroadcastAsync(new{type="playerUpdated",player=litPlayer},null,cancellationToken);break;
@@ -283,6 +334,9 @@ public sealed class RealitySocketHub
                         await BroadcastDoorLocksAsync(_world.GetDoorLockSchedule(), cancellationToken);
                         await connection.SendAsync(new { type = "basePurchased", player = basePurchase.Player, priceCents = basePurchase.PriceCents, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "conversationStatus":
+                        _world.UpdateConversation(characterId, root.GetProperty("actorId").GetString() ?? string.Empty, root.GetProperty("active").GetBoolean());
+                        break;
                     case "requestTrade":
                         var tradeRequest = root.Deserialize<RequestTradeRequest>(SharedJson.Options)!;
                         await connection.SendAsync(new { type = "tradeQuote", quote = _world.RequestTrade(characterId, tradeRequest.MerchantId) }, cancellationToken);
@@ -358,8 +412,8 @@ public sealed class RealitySocketHub
                         break;
                     case "attack":
                         var attack = await _world.AttackAsync(characterId, root.Deserialize<CombatRequest>(SharedJson.Options)!, cancellationToken);
-                        await BroadcastAsync(new { type = "combatEvent", combat = attack.Event }, null, cancellationToken);
-                        if (attack.Consequences is not null) foreach (var consequence in attack.Consequences) await BroadcastAsync(new { type = "combatEvent", combat = consequence }, null, cancellationToken);
+                        await BroadcastCombatAsync(new[] { attack.Event }, cancellationToken);
+                        if (attack.Consequences is not null) await BroadcastCombatAsync(attack.Consequences, cancellationToken);
                         await BroadcastAsync(new { type = "playerUpdated", player = attack.Attacker }, null, cancellationToken);
                         if (attack.TargetPlayer is not null)
                         {
@@ -419,7 +473,7 @@ public sealed class RealitySocketHub
                         break;
                     case "rebuildArea":
                         var rebuildRequest = root.Deserialize<RebuildAreaRequest>(SharedJson.Options)!;
-                        var rebuilt = await _world.RebuildAsync(characterId, rebuildRequest.GodMode, cancellationToken);
+                        var rebuilt = await _world.RebuildAsync(characterId, rebuildRequest.GodMode, cancellationToken, rebuildRequest.FromScratch);
                         await BroadcastWorldRebuiltAsync(rebuilt, cancellationToken);
                         break;
                     case "teleport":
@@ -482,15 +536,40 @@ public sealed class RealitySocketHub
                     case "requestMapWindow":
                         var mapRequest = root.Deserialize<RequestMapWindowRequest>(SharedJson.Options)!;
                         var mapView = new WorldBounds(mapRequest.MinimumX, mapRequest.MinimumY, mapRequest.MaximumX, mapRequest.MaximumY);
-                        var mapWindow = _world.CreateMapWindow(characterId, mapView);
+                        RealityWorld.ValidateMapView(mapView);
                         connection.MapView = mapView;
-                        await connection.SendAsync(new { type = "mapWindow", sequence = mapRequest.Sequence, map = mapWindow }, cancellationToken);
+                        mapWorker.Replace(async token =>
+                        {
+                            using var timing = _world.Timings.Measure("map.window");
+                            try
+                            {
+                                var mapWindow = _world.CreateMapWindow(characterId, mapView);
+                                token.ThrowIfCancellationRequested();
+                                await connection.SendAsync(new { type = "mapWindow", sequence = mapRequest.Sequence, map = mapWindow }, cancellationToken);
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException && connection.Socket.State == WebSocketState.Open)
+                            { await connection.SendAsync(new { type = "error", message = ex.Message }, token); }
+                        }, cancellationToken);
                         break;
                     case "requestChunk":
                         await connection.SendAsync(new { type = "chunkSnapshot", snapshot = _world.CreateClientSnapshot(characterId, connection.MapView) }, cancellationToken);
                         break;
                     case "requestArea":
-                        var requestedArea=root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;await connection.SendAsync(new{type="taskStatus",task="Loading and generating visible area…"},cancellationToken);var areaExpanded=await _world.LoadAreaAsync(requestedArea.X,requestedArea.Y,cancellationToken);await connection.SendAsync(new{type="worldExpanded",expanded=areaExpanded,snapshot=_world.CreateClientSnapshot(characterId, connection.MapView)},cancellationToken);break;
+                        var requestedArea = root.Deserialize<RequestAreaRequest>(SharedJson.Options)!;
+                        await connection.SendAsync(new { type = "taskStatus", task = "Loading and generating visible area…", blocksMovement = false }, cancellationToken);
+                        areaWorker.Replace(async token =>
+                        {
+                            using var timing = _world.Timings.Measure("map.area");
+                            try
+                            {
+                                var expanded = await _world.LoadAreaAsync(requestedArea.X, requestedArea.Y, token);
+                                token.ThrowIfCancellationRequested();
+                                await connection.SendAsync(new { type = "worldExpanded", expanded, snapshot = _world.CreateClientSnapshot(characterId, connection.MapView) }, cancellationToken);
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException && connection.Socket.State == WebSocketState.Open)
+                            { await connection.SendAsync(new { type = "error", message = ex.Message }, token); }
+                        }, cancellationToken);
+                        break;
                     case "requestPrivateState":
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
@@ -529,6 +608,32 @@ public sealed class RealitySocketHub
             catch (Exception exception) when (exception is WebSocketException or OperationCanceledException) { }
         });
         await Task.WhenAll(sends);
+    }
+
+    public async Task SendRetroBattlesAsync(IReadOnlyList<string> playerIds, CancellationToken token = default)
+    {
+        foreach (var id in playerIds)
+        {
+            if (!_clients.TryGetValue(id, out var connection)) continue;
+            var (player, dungeon) = _world.GetRetroBattleUpdate(id);
+            if (player is null) continue;
+            try
+            {
+                if (dungeon?.RetroBattle is null)
+                    await connection.SendAsync(new { type = "dungeonExited", player, snapshot = _world.CreateClientSnapshot(id, connection.MapView), privateState = _world.GetPrivateState(id) }, token);
+                else
+                {
+                    await connection.SendAsync(new { type = "retroBattleUpdated", player, dungeon }, token);
+                    if (dungeon.IsCompleted && dungeon.RetroBattle.RewardChestId is { } chestId)
+                    {
+                        var reward = await _world.OpenChestAsync(id, chestId, token);
+                        await connection.SendAsync(new { type = "chestOpened", player = reward.Player, contents = reward.Contents, message = reward.Message, privateState = _world.GetPrivateState(id) }, token);
+                    }
+                }
+            }
+            catch (WebSocketException) { }
+            catch (InvalidOperationException) { /* The player may have left while this update was being sent. */ }
+        }
     }
 
     public async Task SendProgressionNoticesAsync(IReadOnlyList<ProgressionNotice> notices, CancellationToken token = default)
@@ -611,13 +716,30 @@ public sealed class RealitySocketHub
 
     public async Task BroadcastCombatAsync(IReadOnlyList<CombatEvent> combat, CancellationToken cancellationToken = default)
     {
-        foreach (var item in combat) await BroadcastAsync(new { type = "combatEvent", combat = item }, null, cancellationToken);
+        foreach (var item in combat) await BroadcastAsync(new { type = "combatEvent", combat = _world.ResolveCombatFear(item) }, null, cancellationToken);
     }
 
     public async Task BroadcastChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
     {
         foreach (var chat in messages)
             await BroadcastAsync(new { type = "chatSaid", chat }, null, cancellationToken);
+    }
+
+    private readonly ConcurrentDictionary<string,long> _inversionPlayerVersions = new();
+    public async Task BroadcastInversionsAsync(CancellationToken token = default)
+    {
+        foreach (var id in _world.TakeInversionDungeonExits())
+            if (_clients.TryGetValue(id, out var connection) && _world.GetRetroBattleUpdate(id).Player is { } player)
+                await connection.SendAsync(new { type = "dungeonExited", player, snapshot = _world.CreateClientSnapshot(id, connection.MapView), privateState = _world.GetPrivateState(id) }, token);
+        foreach (var pair in _clients)
+            await pair.Value.SendAsync(new { type = "inversionsUpdated", inversions = _world.GetInversionView(pair.Key), progression = _world.GetProgression(pair.Key) }, token);
+        await BroadcastPlayersAsync(_world.InversionPlayers().Where(p => !_inversionPlayerVersions.TryGetValue(p.Id, out var version) || version != p.Version).Select(p => { _inversionPlayerVersions[p.Id] = p.Version; return p; }).ToArray(), token);
+        await BroadcastActorsAsync(_world.InversionActors().Concat(_world.TakeInversionActorUpdates()).ToArray(), token);
+        await BroadcastRemovedActorsAsync(_world.TakeInversionRemovals(), token);
+        await BroadcastRemovedWorldObjectsAsync(_world.TakeHaneyTruckRemovals(), token);
+        foreach (var car in _world.TakeNpcCarUpdates()) await BroadcastAsync(new { type = "worldObjectUpdated", entity = car }, null, token);
+        await BroadcastCombatAsync(_world.TakeInversionCombat(), token);
+        await BroadcastChatAsync(_world.TakeInversionChat(), token);
     }
 
     public async Task BroadcastLootAsync(IReadOnlyList<LootDropState> drops, CancellationToken cancellationToken = default)

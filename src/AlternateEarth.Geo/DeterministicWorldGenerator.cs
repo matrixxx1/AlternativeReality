@@ -35,7 +35,7 @@ public sealed class DeterministicWorldGenerator
 
     public async Task<GeographicDataset> GenerateAsync(
         RealityConfiguration reality,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool fresh = false)
     {
         var cachePath = GeneratedCachePath(reality);
         SemaphoreSlim? cacheLock = null;
@@ -46,7 +46,7 @@ public sealed class DeterministicWorldGenerator
         }
         try
         {
-            if (cachePath is not null && File.Exists(cachePath))
+            if (!fresh && cachePath is not null && File.Exists(cachePath))
             {
                 try
                 {
@@ -60,21 +60,24 @@ public sealed class DeterministicWorldGenerator
                 }
             }
 
-            var geographic = await _geographicProvider.GetAreaAsync(reality.Area, cancellationToken);
+            var geographic = fresh ? await _geographicProvider.GetFreshAreaAsync(reality.Area, cancellationToken)
+                : await _geographicProvider.GetAreaAsync(reality.Area, cancellationToken);
             var sidewalks = GenerateSidewalks(geographic.Features);
             var withSidewalks = geographic.Features.Concat(sidewalks).ToArray();
             var doors = GenerateDoors(withSidewalks);
             var propertyFences = GeneratePropertyFences(withSidewalks);
-            var trees = GenerateResourceNodes(reality, 220, withSidewalks);
-            var bushes = GenerateBushes(reality, 360, withSidewalks);
-            var vehicles = GenerateVehicles(reality, withSidewalks, 20);
-            var streetLights = GenerateStreetLights(reality, withSidewalks);
-            var obstacles = withSidewalks.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
+            var driveways = DrivewayGenerator.Generate(withSidewalks.Concat(doors).Concat(propertyFences).ToArray(), reality.Area.Bounds);
+            var withDriveways = withSidewalks.Concat(driveways).ToArray();
+            var trees = GenerateResourceNodes(reality, 220, withDriveways);
+            var bushes = GenerateBushes(reality, 360, withDriveways);
+            var vehicles = GenerateVehicles(reality, withDriveways, 20);
+            var streetLights = GenerateStreetLights(reality, withDriveways);
+            var obstacles = withDriveways.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
             var actors = GenerateActors(reality, obstacles).Concat(GeneratePoiMerchants(reality, withSidewalks)).ToArray();
             var generated = geographic with
             {
                 Provider = $"Generated canonical world ({geographic.Provider})",
-                Features = withSidewalks.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray(),
+                Features = withDriveways.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray(),
                 CachedAtUtc = DateTimeOffset.UtcNow
             };
             if (cachePath is not null)
@@ -96,6 +99,18 @@ public sealed class DeterministicWorldGenerator
         {
             cacheLock?.Release();
         }
+    }
+
+    // Caller holds the world's load and prefetch locks. Fetch first so source failure preserves saved blocks.
+    public async Task<GeographicDataset> RebuildFromScratchAsync(RealityConfiguration reality, CancellationToken cancellationToken = default)
+    {
+        var generated = await GenerateAsync(reality, cancellationToken, fresh: true);
+        var keep = GeneratedCachePath(reality);
+        if (_generatedCacheDirectory is not null)
+            foreach (var file in Directory.EnumerateFiles(_generatedCacheDirectory, "world-*.json"))
+                if (!string.Equals(file, keep, StringComparison.OrdinalIgnoreCase)) File.Delete(file);
+        _geographicProvider.ClearLegacyCache();
+        return generated;
     }
 
     public bool IsGeneratedWorldCached(RealityConfiguration reality)
@@ -184,6 +199,7 @@ public sealed class DeterministicWorldGenerator
                 attempts++;
             } while (attempts < 80 && obstacles is not null &&
                      (!IsOpenGrass(obstacles.Concat(result).ToArray(), x, y) || obstacles.Concat(result).Any(entity => BlocksGeneratedPoint(entity, x, y, 1.2))));
+            if (obstacles is not null && obstacles.Any(e => IsDriveway(e) && BlocksGeneratedPoint(e, x, y, 1.2))) continue;
             var subtype = random.Next(0, 3) switch { 0 => "pine", 1 => "fir", _ => "oak" };
             result.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:{AreaKey(reality)}:tree:{i}",
@@ -272,7 +288,7 @@ public sealed class DeterministicWorldGenerator
     public static IReadOnlyList<CanonicalEntity> GenerateVehicles(RealityConfiguration reality, IReadOnlyList<CanonicalEntity> features, int count)
     {
         var roads = features.Where(entity => entity.Kind == EntityKind.Road && entity.Geometry.Count >= 2).ToArray();
-        var parkingLots = features.Where(entity => entity.Kind == EntityKind.Terrain && entity.Geometry.Count >= 3 && entity.Properties.GetValueOrDefault("terrain") == "pavement").ToArray();
+        var parkingLots = features.Where(entity => entity.Kind == EntityKind.Terrain && entity.Geometry.Count >= 3 && entity.Properties.GetValueOrDefault("terrain") == "pavement" && !IsDriveway(entity)).ToArray();
         if (roads.Length == 0 && parkingLots.Length == 0) return Array.Empty<CanonicalEntity>();
         var random = new Random(StableSeed(reality.Seed + 7919, reality));
         var vehicles = new List<CanonicalEntity>();
@@ -308,7 +324,7 @@ public sealed class DeterministicWorldGenerator
                 var offset = roadWidth / 2 + 1.2;
                 x += -Math.Sin(rotation) * offset; y += Math.Cos(rotation) * offset;
             }
-            if (!reality.Area.Bounds.Contains(x, y) || features.Any(e => e.Kind == EntityKind.Building && PointInPolygon(x, y, e.Geometry))) continue;
+            if (!reality.Area.Bounds.Contains(x, y) || features.Any(e => (e.Kind == EntityKind.Building && PointInPolygon(x, y, e.Geometry)) || (IsDriveway(e) && BlocksGeneratedPoint(e, x, y, 2.5)))) continue;
             vehicles.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:{AreaKey(reality)}:vehicle:{index}",
                 EntityKind.Vehicle,
@@ -417,7 +433,7 @@ public sealed class DeterministicWorldGenerator
                     var amount = light / (double)(count + 1); var side = (light + segment) % 2 == 0 ? 1 : -1;
                     var x = start.X + dx * amount - dy / length * (width / 2 + 1.7) * side;
                     var y = start.Y + dy * amount + dx / length * (width / 2 + 1.7) * side;
-                    if (!reality.Area.Bounds.Contains(x, y)) continue;
+                    if (!reality.Area.Bounds.Contains(x, y) || features.Any(e => IsDriveway(e) && BlocksGeneratedPoint(e, x, y, .5))) continue;
                     result.Add(new CanonicalEntity($"generated:{reality.Id}:{AreaKey(reality)}:streetlight:{index++}", EntityKind.StreetLight,
                         new WorldPosition(reality.Area.Region, x, y), Array.Empty<GeometryPoint>(), new Dictionary<string, string> { ["schedule"] = "19:00-07:00" }));
                 }
@@ -438,8 +454,11 @@ public sealed class DeterministicWorldGenerator
         return terrain == "grass";
     }
 
+    private static bool IsDriveway(CanonicalEntity entity) => entity.Kind == EntityKind.Terrain && entity.Properties.GetValueOrDefault("subtype") == "driveway";
+
     private static bool BlocksGeneratedPoint(CanonicalEntity entity, double x, double y, double padding)
     {
+        if (IsDriveway(entity)) return PointInPolygon(x, y, entity.Geometry) || DistanceToGeometry(x, y, entity.Geometry) <= padding;
         if (entity.Kind == EntityKind.Building && entity.Geometry.Count >= 3) return PointInPolygon(x, y, entity.Geometry);
         if (entity.Kind is EntityKind.Tree or EntityKind.Bush or EntityKind.Vehicle)
             return Distance(new GeometryPoint(x, y), new GeometryPoint(entity.Position.X, entity.Position.Y)) <= padding + ParseDouble(entity.Properties.GetValueOrDefault("collisionRadius"), 1);

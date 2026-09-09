@@ -5,6 +5,8 @@ namespace AlternateEarth.Geo;
 public interface IGeographicProvider
 {
     string Name { get; }
+    Task<GeographicDataset> GetFreshAreaAsync(GeographicArea area, CancellationToken cancellationToken = default) => GetAreaAsync(area, cancellationToken);
+    void ClearLegacyCache() { }
     Task<GeographicDataset> GetAreaAsync(GeographicArea area, CancellationToken cancellationToken = default);
 }
 

@@ -34,7 +34,8 @@ public static class RoadClassification
         tags.GetValueOrDefault("tunnel") is not ("yes" or "building_passage") && tags.GetValueOrDefault("bridge") != "yes";
 }
 
-public sealed record BusStopState(string Id, string Name, WorldPosition Position, string EdgeId, double DistanceMeters, string Direction);
+public sealed record BusStopState(string Id, string Name, WorldPosition Position, string EdgeId, double DistanceMeters, string Direction,
+    WorldPosition? BenchPosition = null, double HeadingRadians = 0);
 public sealed record BusState(string Id, string RouteId, string RouteName, WorldPosition Position, double HeadingRadians,
     double SpeedMetersPerSecond = 0, double HealthHearts = 100, string Status = "driving", long Version = 1);
 public sealed record BusRouteState(string Id, string Name, IReadOnlyList<WorldPosition> Path, IReadOnlyList<string> StopIds);

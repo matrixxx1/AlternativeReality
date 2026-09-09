@@ -39,18 +39,22 @@ public sealed partial class RealityWorld
         public double Distance = Math.Min(10, route[0].Length / 2);
         public BusState State = new(id, routeId, route[0].Name, route[0].At(Math.Min(10, route[0].Length / 2)), route[0].Heading);
         public double Dwell;
-        public Queue<(WorldPosition Position, double Heading)> Turn = new();
+        public BusTurnQueue Turn = new();
+        public List<BusBreadcrumb> History = new();
+        public double ReverseMeters;
         public double TurnExitDistance;
         public bool TurningAround;
         public HashSet<string> ServedStops = [];
         public HashSet<string> HitPeople = [];
         public string? LastObstacle;
+        public WorldPosition? ServiceOrigin;
+        public WorldPosition? ServiceTarget;
+        public double ServiceRetry;
         public RoadEdge Edge => Route[EdgeIndex];
     }
 
     private double _fleetRefreshSeconds;
     private int _fleetPopulation;
-    private HashSet<string> _runningBusRoutes = [];
 
     private bool RefreshTransitNetwork()
     {
@@ -59,18 +63,40 @@ public sealed partial class RealityWorld
         {
             if (_transitNavigation != _navigation)
             {
-                _transitObstacles = new(_baseEntities.Values.Concat(_realityEntities.Values));
+                _transitObstacles = new(_baseEntities.Values.Concat(_realityEntities.Values).Where(e => e.Properties.GetValueOrDefault("subtype") != "haneyPickup"));
                 _transitNavigation = _navigation;
             }
             return false;
         }
         var entities = _baseEntities.Values.Concat(_realityEntities.Values).ToArray();
         _transitNetwork = new(entities);
-        _transitObstacles = new(entities);
+        _transitObstacles = new(entities.Where(e => e.Properties.GetValueOrDefault("subtype") != "haneyPickup"));
         _transitNavigation = _navigation;
+        // Keep seats out of nearby buildings/water, and retain an occupied bench on expansion.
+        var oldStops = _transitSnapshot.Stops.ToDictionary(s => s.Id);
+        for (var index = 0; index < _transitNetwork.Stops.Count; index++)
+        {
+            var stop = _transitNetwork.Stops[index];
+            var edge = _transitNetwork.Edges[stop.EdgeId];
+            var bench = oldStops.GetValueOrDefault(stop.Id)?.BenchPosition ?? stop.BenchPosition ?? stop.Position;
+            if (Navigation.IsBlocked(bench.X, bench.Y) || Navigation.TerrainAt(bench.X, bench.Y) == TerrainType.DeepWater)
+            {
+                foreach (var along in new[] { -1.6, 1.6, -1.2, 1.2 })
+                {
+                    var candidate = stop.Position with { X = stop.Position.X + edge.Dx * along, Y = stop.Position.Y + edge.Dy * along };
+                    if (Navigation.IsBlocked(candidate.X, candidate.Y) || Navigation.TerrainAt(candidate.X, candidate.Y) == TerrainType.DeepWater) continue;
+                    bench = candidate; break;
+                }
+            }
+            var updated = stop with { BenchPosition = bench with { Z = Navigation.ElevationAt(bench.X, bench.Y) } };
+            _transitNetwork.Stops[index] = updated;
+            var edgeStops = _transitNetwork.EdgeStops[stop.EdgeId];
+            edgeStops[edgeStops.FindIndex(s => s.Id == stop.Id)] = updated;
+        }
         // Do not move an existing stop out from under somebody waiting when a way is extended.
         foreach (var stop in _transitSnapshot.Stops)
         {
+            if (!_players.Values.Any(p => p.WaitingAtBusStopId == stop.Id)) continue;
             if (!_transitNetwork.Edges.ContainsKey(stop.EdgeId) || _transitNetwork.Stops.Any(s => s.Id == stop.Id)) continue;
             _transitNetwork.Stops.Add(stop);
             if (!_transitNetwork.EdgeStops.TryGetValue(stop.EdgeId,out var list)) _transitNetwork.EdgeStops[stop.EdgeId]=list=[];
@@ -112,8 +138,11 @@ public sealed partial class RealityWorld
                 throw new InvalidOperationException("Move within 3 meters of this bus stop, on its side of the road.");
             var edge = _transitNetwork!.Edges[stop.EdgeId];
             if (RightSideDistance(player.Position, edge) <= 0) throw new InvalidOperationException("Cross to this stop's side of the road before waiting.");
-            var updated = player with { WaitingAtBusStopId = stopId, TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
+            var seat = stop.BenchPosition ?? stop.Position;
+            if (!Navigation.CanTraverse(player.Position, seat, true)) throw new InvalidOperationException("Move closer to the bench on this side of the road.");
+            var updated = player with { Position = seat, WaitingAtBusStopId = stopId, TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
             await SavePlayerAsync(updated, cancellationToken);
+            _fleetRefreshSeconds = 0;
             return _players[playerId];
         }
         finally { _transitLock.Release(); }
@@ -188,21 +217,22 @@ public sealed partial class RealityWorld
             var anyoneWaiting = people.Any(p => p.WaitingAtBusStopId is not null);
             foreach (var bus in _buses.Values.OrderBy(b => b.State.Id, StringComparer.Ordinal))
             {
-                if (!_runningBusRoutes.Contains(bus.RouteId))
+                var serviceNeeded=people.Any(p => p.RidingBusId == bus.State.Id || WaitingForRoute(p,bus.RouteId));
+                if (!serviceNeeded || bus.State.HealthHearts<=0 || bus.ServiceOrigin is not null)
+                    MoveBusIntoServicePosition(bus,serviceNeeded && bus.State.HealthHearts>0,dt,people,outdoorActors);
+                else
                 {
-                    if (bus.State.Status != "paused") bus.State = bus.State with { Status = "paused", SpeedMetersPerSecond = 0, Version = bus.State.Version + 1 };
-                    continue;
-                }
                 bus.HitPeople.RemoveWhere(id =>
                 {
                     WorldPosition? p = _players.TryGetValue(id, out var player) ? player.Position : _actors.TryGetValue(id, out var actor) ? actor.Position : null;
                     return p is null || p.Value.Region != bus.State.Position.Region || p.Value.Distance2D(bus.State.Position) > 18;
                 });
-                if (bus.Dwell > 0) { bus.Dwell -= dt; bus.State = bus.State with { SpeedMetersPerSecond = 0 }; }
+                if (bus.ReverseMeters > 0) ReverseBusToYield(bus, dt, people, outdoorActors);
+                else if (bus.Dwell > 0) { bus.Dwell -= dt; bus.State = bus.State with { SpeedMetersPerSecond = 0 }; }
                 else if (bus.State.HealthHearts <= 0) bus.State = bus.State with { Status = "disabled", SpeedMetersPerSecond = 0 };
                 else
                 {
-                    var speed = bus.Turn.Count > 0 ? bus.TurningAround ? 1.2 : 3 : BusRoadSpeed(bus.Edge);
+                    var speed = bus.Turn.Count > 0 ? bus.TurningAround ? 1.2 : 3 : BusRoadSpeed(bus.Edge) * (_fleeingVehicles.GetValueOrDefault(bus.State.Id) > DateTimeOffset.UtcNow ? 1.35 : 1);
                     var budget = speed * dt;
                     while (budget > .001)
                     {
@@ -213,17 +243,28 @@ public sealed partial class RealityWorld
                         // Do not enter unactivated geography: buildings/cars there have not loaded yet.
                         if (!footprint.All(p => loadedAreas.Any(a => a.Contains(p.X, p.Y))))
                         { bus.State = bus.State with { Status = "waiting for map", SpeedMetersPerSecond = 0 }; break; }
+                        if (HaneyBlocks(footprint)) { bus.Dwell = .25; bus.State = bus.State with { Status = "yielding to merchant", SpeedMetersPerSecond = 0 }; break; }
                         var obstacle = _transitObstacles!.Hit(footprint);
-                        var other = _buses.Values.FirstOrDefault(b => b != bus && b.State.Position.Distance2D(candidate.Position) < 12 && TransitGeometry.Overlaps(footprint, TransitGeometry.Footprint(b.State.Position, b.State.HeadingRadians)));
-                        if (obstacle is not null || other is not null)
+                        var trafficFootprint = TransitGeometry.Footprint(candidate.Position, candidate.Heading, 10, 3);
+                        var other = _buses.Values.FirstOrDefault(b => b != bus && b.State.Position.Distance2D(candidate.Position) < 14 && TransitGeometry.Overlaps(trafficFootprint, TransitGeometry.Footprint(b.State.Position, b.State.HeadingRadians)));
+                        if (other is not null)
                         {
-                            var id = obstacle?.Id ?? other!.State.Id;
+                            // Traffic waits rather than repeatedly damaging and disabling both buses.
+                            bus.LastObstacle = other.State.Id; bus.Dwell = .25;
+                            bus.State = bus.State with { Status = "yielding", SpeedMetersPerSecond = 0, Version = bus.State.Version + 1 };
+                            if (other.LastObstacle == bus.State.Id && bus.History.Count > 0 && other.ReverseMeters <= 0 &&
+                                (StringComparer.Ordinal.Compare(bus.State.Id, other.State.Id) > 0 || other.History.Count == 0))
+                            { bus.ReverseMeters = 12; bus.Dwell = 0; }
+                            break;
+                        }
+                        if (obstacle is not null)
+                        {
+                            var id = obstacle.Id;
                             if (bus.LastObstacle != id)
                             {
                                 var damage = Math.Clamp(speed * 2, 1, 25);
                                 bus.State = bus.State with { HealthHearts = Math.Max(0, bus.State.HealthHearts - damage) };
-                                if (other is not null) other.State = other.State with { HealthHearts = Math.Max(0, other.State.HealthHearts - damage), SpeedMetersPerSecond = 0, Version = other.State.Version + 1 };
-                                else if (obstacle is not null) objects[id] = await DamageBusObstacleAsync(obstacle, damage, cancellationToken);
+                                objects[id] = await DamageBusObstacleAsync(obstacle, damage, cancellationToken);
                                 combat.Add(new(bus.State.Id, id, "busCollision", bus.State.Position, candidate.Position, true, damage, false, "Bus collision."));
                             }
                             bus.LastObstacle = id; bus.Dwell = 2;
@@ -232,6 +273,7 @@ public sealed partial class RealityWorld
                         }
                         bus.LastObstacle = null;
                         var travelled = bus.State.Position.Distance2D(candidate.Position);
+                        RememberBusStep(bus);
                         bus.State = bus.State with { Position = candidate.Position, HeadingRadians = candidate.Heading, SpeedMetersPerSecond = speed,
                             Status = bus.Turn.Count > 0 ? bus.TurningAround ? "turning around" : "turning" : "driving", Version = bus.State.Version + 1 };
                         CommitBusStep(bus, travelled, wasTurning);
@@ -239,6 +281,7 @@ public sealed partial class RealityWorld
                         await HitBusPeopleAsync(bus, footprint, people, outdoorActors, players, actors, removed, combat, cancellationToken);
                         if (anyoneWaiting && await BoardWaitingPassengersAsync(bus, players, cancellationToken)) break;
                     }
+                }
                 }
                 foreach (var passenger in people.Where(p => p.RidingBusId == bus.State.Id))
                 {
@@ -248,7 +291,7 @@ public sealed partial class RealityWorld
                         await SavePlayerAsync(released, cancellationToken); players[released.Id] = _players[released.Id]; continue;
                     }
                     var updated = passenger with { Position = bus.State.Position, SpeedMetersPerSecond = bus.State.SpeedMetersPerSecond, Version = passenger.Version + 1 };
-                    if (bus.State.HealthHearts <= 0 && FindBusExit(bus) is { } exit) updated = updated with { Position = exit, RidingBusId = null, SpeedMetersPerSecond = 0 };
+                    if (bus.State.HealthHearts <= 0 && bus.State.SpeedMetersPerSecond==0 && FindBusExit(bus) is { } exit) updated = updated with { Position = exit, RidingBusId = null, SpeedMetersPerSecond = 0 };
                     // Passenger movement is authoritative in memory; persist a safe curb position at boarding/drop-off,
                     // not a database transaction for every 100 ms vehicle tick.
                     if (updated.RidingBusId is null) await SavePlayerAsync(updated, cancellationToken);

@@ -65,6 +65,7 @@ public sealed partial class SqliteRealityStore
                 EntityId TEXT PRIMARY KEY, Capacity INTEGER NOT NULL, InventoryOwnerId TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS ServerSettings (Key TEXT PRIMARY KEY, Value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS PhotographImages (ItemType TEXT PRIMARY KEY, Image BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS CharacterProgression (
                 RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL, ProfileJson TEXT NOT NULL,
                 PRIMARY KEY (RealityId, PlayerId)
@@ -148,6 +149,7 @@ public sealed partial class SqliteRealityStore
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureColumnAsync(connection, "HomeShopListings", "PhotographJson", "TEXT", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Stamina", "REAL NOT NULL DEFAULT 10", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Water", "REAL NOT NULL DEFAULT 10", cancellationToken);
@@ -510,12 +512,18 @@ public sealed partial class SqliteRealityStore
         while (await reader.ReadAsync(cancellationToken))
         {
             string? quality = null;
+            PhotographState? photograph = null;
             if (!reader.IsDBNull(2))
             {
-                try { quality = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2), SharedJson.Options)?.GetValueOrDefault("quality"); }
+                try
+                {
+                    using var metadata = JsonDocument.Parse(reader.GetString(2));
+                    if (metadata.RootElement.TryGetProperty("quality", out var q) && q.ValueKind == JsonValueKind.String) quality = q.GetString();
+                    if (metadata.RootElement.TryGetProperty("photograph", out var p)) photograph = p.Deserialize<PhotographState>(SharedJson.Options);
+                }
                 catch (JsonException) { }
             }
-            items.Add(new ItemStack(reader.GetString(0), reader.GetInt32(1), Quality: quality));
+            items.Add(new ItemStack(reader.GetString(0), reader.GetInt32(1), Quality: quality, Photograph: photograph));
         }
         return new InventoryState(playerId, items);
     }
@@ -569,7 +577,7 @@ public sealed partial class SqliteRealityStore
             insert.CommandText = "INSERT INTO Inventories (OwnerId, Slot, ItemType, Quantity, MetadataJson) VALUES ($owner,$slot,$type,$quantity,$metadata)";
             insert.Parameters.AddWithValue("$owner", inventory.PlayerId); insert.Parameters.AddWithValue("$slot", slot);
             insert.Parameters.AddWithValue("$type", item.ItemType); insert.Parameters.AddWithValue("$quantity", item.Quantity);
-            insert.Parameters.AddWithValue("$metadata", item.Quality is null ? "{}" : JsonSerializer.Serialize(new Dictionary<string, string> { ["quality"] = item.Quality }, SharedJson.Options));
+            insert.Parameters.AddWithValue("$metadata", JsonSerializer.Serialize(new { item.Quality, item.Photograph }, SharedJson.Options));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -731,14 +739,21 @@ public sealed partial class SqliteRealityStore
         return result;
     }
 
-    public async Task SaveQuestAsync(string realityId, QuestState quest, CancellationToken cancellationToken = default)
+    public async Task SaveQuestAsync(string realityId, QuestState quest, CancellationToken cancellationToken = default, InventoryState? inventory = null)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = inventory is null ? null : (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "INSERT INTO PlayerQuests (RealityId,PlayerId,QuestId,QuestJson,UpdatedUtc) VALUES ($r,$p,$q,$j,$u) ON CONFLICT(RealityId,PlayerId,QuestId) DO UPDATE SET QuestJson=excluded.QuestJson,UpdatedUtc=excluded.UpdatedUtc";
         command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", quest.PlayerId); command.Parameters.AddWithValue("$q", quest.Id);
         command.Parameters.AddWithValue("$j", JsonSerializer.Serialize(quest, SharedJson.Options)); command.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
+        if (inventory is not null)
+        {
+            await WriteInventoryAsync(connection, transaction!, inventory, cancellationToken);
+            await transaction!.CommitAsync(cancellationToken);
+        }
     }
 
     public async Task<HashSet<string>> LoadDiscoveryAsync(string realityId, string playerId, string dungeonId, CancellationToken cancellationToken = default)
@@ -940,10 +955,10 @@ public sealed partial class SqliteRealityStore
     { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT EXISTS(SELECT 1 FROM AccountCharacters WHERE Name=$n COLLATE NOCASE)";command.Parameters.AddWithValue("$n",name);return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken))!=0; }
 
     public async Task<IReadOnlyList<HomeShopListingRecord>> LoadHomeShopListingsAsync(string accountId,string realityId,CancellationToken cancellationToken=default)
-    { var result=new List<HomeShopListingRecord>();await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT ItemType,Quantity,UnitPriceCents,Quality FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND Quantity>0 ORDER BY ItemType";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);while(await reader.ReadAsync(cancellationToken))result.Add(new(reader.GetString(0),reader.GetInt32(1),reader.GetInt64(2),reader.IsDBNull(3)?null:reader.GetString(3)));return result; }
+    { var result=new List<HomeShopListingRecord>();await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="SELECT ItemType,Quantity,UnitPriceCents,Quality,PhotographJson FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND Quantity>0 ORDER BY ItemType";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);await using var reader=await command.ExecuteReaderAsync(cancellationToken);while(await reader.ReadAsync(cancellationToken))result.Add(new(reader.GetString(0),reader.GetInt32(1),reader.GetInt64(2),reader.IsDBNull(3)?null:reader.GetString(3),reader.IsDBNull(4)?null:JsonSerializer.Deserialize<PhotographState>(reader.GetString(4), SharedJson.Options)));return result; }
 
     public async Task SaveHomeShopListingAsync(string accountId,string realityId,HomeShopListingRecord listing,CancellationToken cancellationToken=default)
-    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$i",listing.ItemType);if(listing.Quantity<=0)command.CommandText="DELETE FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND ItemType=$i";else{command.CommandText="INSERT INTO HomeShopListings(AccountId,RealityId,ItemType,Quantity,UnitPriceCents,Quality,UpdatedUtc) VALUES($a,$r,$i,$q,$p,$quality,$now) ON CONFLICT(AccountId,RealityId,ItemType) DO UPDATE SET Quantity=excluded.Quantity,UnitPriceCents=excluded.UnitPriceCents,Quality=excluded.Quality,UpdatedUtc=excluded.UpdatedUtc";command.Parameters.AddWithValue("$q",listing.Quantity);command.Parameters.AddWithValue("$p",listing.UnitPriceCents);command.Parameters.AddWithValue("$quality",(object?)listing.Quality??DBNull.Value);command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));}await command.ExecuteNonQueryAsync(cancellationToken); }
+    { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$i",listing.ItemType);if(listing.Quantity<=0)command.CommandText="DELETE FROM HomeShopListings WHERE AccountId=$a AND RealityId=$r AND ItemType=$i";else{command.CommandText="INSERT INTO HomeShopListings(AccountId,RealityId,ItemType,Quantity,UnitPriceCents,Quality,PhotographJson,UpdatedUtc) VALUES($a,$r,$i,$q,$p,$quality,$photo,$now) ON CONFLICT(AccountId,RealityId,ItemType) DO UPDATE SET Quantity=excluded.Quantity,UnitPriceCents=excluded.UnitPriceCents,Quality=excluded.Quality,PhotographJson=excluded.PhotographJson,UpdatedUtc=excluded.UpdatedUtc";command.Parameters.AddWithValue("$q",listing.Quantity);command.Parameters.AddWithValue("$p",listing.UnitPriceCents);command.Parameters.AddWithValue("$quality",(object?)listing.Quality??DBNull.Value);command.Parameters.AddWithValue("$photo",listing.Photograph is null ? DBNull.Value : JsonSerializer.Serialize(listing.Photograph,SharedJson.Options));command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));}await command.ExecuteNonQueryAsync(cancellationToken); }
 
     public async Task AddAccountNoticeAsync(string accountId,string realityId,string message,CancellationToken cancellationToken=default)
     { await using var connection=await OpenAsync(cancellationToken);var command=connection.CreateCommand();command.CommandText="INSERT INTO AccountNotices(AccountId,RealityId,Message,CreatedUtc) VALUES($a,$r,$m,$now)";command.Parameters.AddWithValue("$a",accountId);command.Parameters.AddWithValue("$r",realityId);command.Parameters.AddWithValue("$m",message);command.Parameters.AddWithValue("$now",DateTimeOffset.UtcNow.ToString("O"));await command.ExecuteNonQueryAsync(cancellationToken); }
@@ -985,4 +1000,4 @@ public sealed record AccountCharacter(string Id,string Name);
 public sealed record BaseAssignment(string BuildingId,WorldPosition? Position);
 public sealed record AccountRosterEntry(string AccountId,string Username,DateTimeOffset? LastSeenUtc,IReadOnlyList<AccountCharacter> Characters);
 public sealed record ExpiredTestAccount(string AccountId,string Username,IReadOnlyList<string> CharacterIds);
-public sealed record HomeShopListingRecord(string ItemType,int Quantity,long UnitPriceCents,string? Quality);
+public sealed record HomeShopListingRecord(string ItemType,int Quantity,long UnitPriceCents,string? Quality,PhotographState? Photograph = null);

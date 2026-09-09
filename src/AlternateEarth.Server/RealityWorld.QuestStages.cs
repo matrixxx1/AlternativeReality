@@ -77,7 +77,7 @@ public sealed partial class RealityWorld
     {
         var now = _probulatorClock.GetUtcNow();
         var player = _players[playerId];
-        foreach (var actor in _actors.Values.Where(a => a.EventEndsAtUtc > now && a.Position.Distance2D(player.Position) <= 500 && player.LocationId == "outdoor"))
+        foreach (var actor in _actors.Values.Where(a => !ManagedEventActor(a) && a.EventEndsAtUtc > now && a.Position.Distance2D(player.Position) <= 500 && player.LocationId == "outdoor"))
         {
             var id = InversionQuestId(actor);
             if (_quests.ContainsKey((playerId, id))) continue;

@@ -13,18 +13,39 @@ public sealed partial class RealityWorld
     private readonly ConcurrentQueue<ProgressionNotice> _progressionNotices = new();
     internal Func<double> ProgressionRoll { get; set; } = Random.Shared.NextDouble;
     private static ProgressionProfile NewProgression => new(0, new CharacterStats(), Array.Empty<string>());
-    private CharacterStats StatsFor(string playerId) => _progression.GetValueOrDefault(playerId)?.Stats ?? new CharacterStats();
+    private CharacterStats StatsFor(string playerId) { var stats = _progression.GetValueOrDefault(playerId)?.Stats ?? new CharacterStats(); return MapleBoostActive(playerId) ? stats with { Perception = stats.Perception + 5 } : stats; }
+    private readonly ConcurrentDictionary<(string Player, string Attacker), DateTimeOffset> _fearChecks = new();
+
+    internal CombatEvent ResolveCombatFear(CombatEvent combat)
+    {
+        if (combat.TargetDied || !combat.Hit || combat.Damage <= 0 || combat.AttackerId == combat.TargetId ||
+            !_players.TryGetValue(combat.TargetId, out var player) || player.GodMode || player.HealthHearts <= 0)
+            return combat;
+        var actor = FindActor(player.Id, combat.AttackerId);
+        var opponent = _players.GetValueOrDefault(combat.AttackerId);
+        // Maximum hearts provide a stable strength comparison unaffected by damage from this hit.
+        var strength = actor?.MaximumHealthHearts ?? opponent?.MaximumHealthHearts ?? 0;
+        if (strength <= player.MaximumHealthHearts) return combat;
+        var now = _probulatorClock.GetUtcNow();
+        var key = (player.Id, combat.AttackerId);
+        if (_fearChecks.TryGetValue(key, out var last) && now - last < TimeSpan.FromSeconds(5)) return combat;
+        _fearChecks[key] = now;
+        var chance = Math.Clamp(1 - player.MaximumHealthHearts / strength, 0, .8) *
+            (1 - ProgressionRules.FearResistance(StatsFor(player.Id)));
+        return combat with { FleeInFear = ProgressionRoll() < chance };
+    }
 
     public ProgressionState GetProgression(string playerId)
     {
         var profile = _progression.GetValueOrDefault(playerId) ?? NewProgression;
         var (level, earned, required) = ProgressionRules.LevelAt(profile.Experience);
         var stats = profile.Stats;
-        return new(level, profile.Experience, earned, required, 7 + level - 1 - stats.Total, stats,
+        return new(level, profile.Experience, earned, required, ProgressionRules.StartingPoints + level - 1 - stats.Total, stats,
             ProgressionRules.Damage(stats), ProgressionRules.Capacity(stats), ProgressionRules.Accuracy(stats),
-            ProgressionRules.Vision(stats), ProgressionRules.Stamina(stats), ProgressionRules.Charisma(stats),
+            ProgressionRules.Vision(StatsFor(playerId)), ProgressionRules.Stamina(stats), ProgressionRules.Charisma(stats),
             ProgressionRules.Experience(stats), ProgressionRules.Drain(stats), ProgressionRules.NpcSight(stats),
-            ProgressionRules.Witness(stats), ProgressionRules.Lockpick(stats), profile.Alignment, profile.Alignment * .003);
+            ProgressionRules.Witness(stats), ProgressionRules.Lockpick(stats), profile.Alignment, profile.Alignment * .003,
+            ProgressionRules.FearResistance(stats), ProgressionRules.ExtraAttackChance(stats), ProgressionRules.ShootingInterval(stats));
     }
 
     internal async Task AdjustAlignmentAsync(string playerId, double amount, CancellationToken token = default)
@@ -62,7 +83,7 @@ public sealed partial class RealityWorld
             var level = ProgressionRules.LevelAt(next.Experience).Level;
             var message = $"+{awarded:0.##} XP · {reason}";
             if (level > previousLevel) message += $" · Level {level}! {level - previousLevel} new stat point(s).";
-            _progressionNotices.Enqueue(new(playerId, message, awarded, level > previousLevel));
+            if (reason != "Passive presence") _progressionNotices.Enqueue(new(playerId, message, awarded, level > previousLevel));
             return awarded;
         }
         finally { _progressionLock.Release(); }
@@ -76,7 +97,7 @@ public sealed partial class RealityWorld
         try
         {
             var current = _progression[playerId];
-            var budget = 7 + ProgressionRules.LevelAt(current.Experience).Level - 1;
+            var budget = ProgressionRules.StartingPoints + ProgressionRules.LevelAt(current.Experience).Level - 1;
             if (request.Stats.Total > budget) throw new InvalidOperationException($"You have {budget} total stat points. Remove a point from another stat or gain a level.");
             var next = current with { Stats = request.Stats };
             await _store.SaveProgressionAsync(Configuration.Id, playerId, next, cancellationToken);
@@ -104,18 +125,20 @@ public sealed partial class RealityWorld
             if (!_progression.TryGetValue(player.Id, out var profile)) continue;
             var inEvent = player.LocationId == "outdoor" && _actors.Values.Any(actor => actor.EventStartedAtUtc <= now && actor.EventEndsAtUtc > now &&
                 actor.HealthHearts > 0 && actor.Position.Distance2D(player.Position) <= 100);
-            int minutes, eventMinutes;
+            int minutes, eventMinutes; double movementCredit;
             await _progressionLock.WaitAsync(cancellationToken);
             try
             {
                 profile = _progression[player.Id];
                 var onlineSeconds = profile.OnlineSeconds + seconds;
                 var eventSeconds = profile.EventSeconds + (inEvent ? seconds : 0);
+                var movingSeconds=profile.MovingSeconds+(_lastMovement.TryGetValue(player.Id,out var moved)&&now-moved<TimeSpan.FromSeconds(2)?seconds:0);
                 minutes = (int)(onlineSeconds / 60); eventMinutes = (int)(eventSeconds / 60);
-                _progression[player.Id] = profile with { OnlineSeconds = onlineSeconds % 60, EventSeconds = eventSeconds % 60 };
+                movementCredit=minutes>0?Math.Min(minutes*60,movingSeconds):0;
+                _progression[player.Id] = profile with { OnlineSeconds = onlineSeconds % 60, EventSeconds = eventSeconds % 60, MovingSeconds = movingSeconds-movementCredit };
             }
             finally { _progressionLock.Release(); }
-            if (minutes > 0) await AwardExperienceAsync(player.Id, minutes, "Time online", randomize: false, cancellationToken: cancellationToken);
+            if (minutes > 0) await AwardExperienceAsync(player.Id, minutes*.05+movementCredit*.05/60, "Passive presence", randomize: false, cancellationToken: cancellationToken);
             if (eventMinutes > 0) await AwardExperienceAsync(player.Id, 3 * eventMinutes, "Time in a server event area", cancellationToken: cancellationToken);
             if (player.LocationId == "outdoor")
                 await AwardExperienceAsync(player.Id, 75, "New map area explored", $"explore:{AreaKeyFor(player.Position.X, player.Position.Y)}", cancellationToken: cancellationToken);

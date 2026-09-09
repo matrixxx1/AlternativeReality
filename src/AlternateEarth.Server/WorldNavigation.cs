@@ -30,7 +30,8 @@ public sealed class WorldNavigation
             {
                 case EntityKind.Terrain when entity.Geometry.Count >= 3 && PointInPolygon(x, y, entity.Geometry):
                     var surface = ParseTerrain(entity.Properties.GetValueOrDefault("terrain"));
-                    if (priority < 1) { terrain = surface; priority = 1; }
+                    var surfacePriority = entity.Properties.GetValueOrDefault("subtype") == "driveway" ? 2 : 1;
+                    if (priority < surfacePriority) { terrain = surface; priority = surfacePriority; }
                     break;
                 case EntityKind.Sidewalk when DistanceToGeometry(x, y, entity.Geometry) <= Width(entity, 3) / 2:
                     if (priority < 3) { terrain = TerrainType.Sidewalk; priority = 3; }
@@ -45,6 +46,19 @@ public sealed class WorldNavigation
             }
         }
         return terrain;
+    }
+
+    public bool HasStreetLightNear(WorldPosition target, double radius = 24)
+    {
+        for (var x = Cell(target.X - radius); x <= Cell(target.X + radius); x++)
+        for (var y = Cell(target.Y - radius); y <= Cell(target.Y + radius); y++)
+        {
+            if (!_spatial.TryGetValue((x, y), out var entities)) continue;
+            foreach (var entity in entities)
+                if (entity.Kind == EntityKind.StreetLight && entity.Position.Region == target.Region &&
+                    entity.Position.Distance2D(target) <= radius) return true;
+        }
+        return false;
     }
 
     public double SpeedFor(TerrainType terrain) => terrain switch
@@ -194,12 +208,13 @@ public sealed class WorldNavigation
     public bool CanTraverse(WorldPosition start, WorldPosition end, bool avoidDeepWater = false)
         => CanTraverse(start, end, terrain => !avoidDeepWater || terrain != TerrainType.DeepWater);
 
-    public bool CanTraverse(WorldPosition start, WorldPosition end, Func<TerrainType, bool> terrainAllowed)
+    public bool CanTraverse(WorldPosition start, WorldPosition end, Func<TerrainType, bool> terrainAllowed, CancellationToken cancellationToken = default)
     {
         var distance = start.Distance2D(end);
         var steps = Math.Max(1, (int)Math.Ceiling(distance / .25));
         for (var step = 1; step <= steps; step++)
         {
+            if (step % 16 == 1) cancellationToken.ThrowIfCancellationRequested();
             var amount = step / (double)steps;
             var x = start.X + ((end.X - start.X) * amount);
             var y = start.Y + ((end.Y - start.Y) * amount);
@@ -216,7 +231,7 @@ public sealed class WorldNavigation
         if (!_bounds.Contains(targetX, targetY)) return new(false, Array.Empty<WorldPosition>(), "That destination is outside this reality.");
         if (IsBlocked(targetX, targetY) || !terrainAllowed(TerrainAt(targetX, targetY))) return new(false, Array.Empty<WorldPosition>(), "That destination is blocked or has impassable terrain.");
         var target = start with { X = targetX, Y = targetY, Z = ElevationAt(targetX, targetY) };
-        if (CanTraverse(start, target, terrainAllowed)) return new(true, new[] { target });
+        if (CanTraverse(start, target, terrainAllowed, cancellationToken)) return new(true, new[] { target });
         if (start.Distance2D(target) > 1500) return new(false, Array.Empty<WorldPosition>(), "That destination is too far away. Choose a closer point.");
 
         const double cell = 1.5;
@@ -256,7 +271,7 @@ public sealed class WorldNavigation
                 var nextPosition = Position(next);
                 if (IsBlocked(nextPosition.X, nextPosition.Y) || !terrainAllowed(TerrainAt(nextPosition.X, nextPosition.Y))) continue;
                 var currentPosition = Position(current);
-                if (!CanTraverse(currentPosition, nextPosition, terrainAllowed)) continue;
+                if (!CanTraverse(currentPosition, nextPosition, terrainAllowed, cancellationToken)) continue;
                 var terrainSpeed = (speedForTerrain ?? SpeedFor)(TerrainAt(nextPosition.X, nextPosition.Y));
                 if (terrainSpeed <= 0) continue;
                 var stepDistance = direction.Item1 != 0 && direction.Item2 != 0 ? cell * Math.Sqrt(2) : cell;
@@ -309,7 +324,7 @@ public sealed class WorldNavigation
             for (var candidate = path.Count - 1; candidate > anchor + 1; candidate--)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!CanTraverse(path[anchor], path[candidate], terrainAllowed)) continue;
+                if (!CanTraverse(path[anchor], path[candidate], terrainAllowed, cancellationToken)) continue;
                 furthest = candidate;
                 break;
             }

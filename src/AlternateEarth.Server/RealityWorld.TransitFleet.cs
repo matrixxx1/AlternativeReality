@@ -12,9 +12,9 @@ public sealed partial class RealityWorld
         var selected = new HashSet<string>();
         // A passenger always retains their bus, including when riding beyond the nearby population.
         foreach (var bus in _buses.Values)
-            if (people.Any(p => p.RidingBusId == bus.State.Id)) selected.Add(bus.RouteId);
+            if (people.Any(p => p.RidingBusId == bus.State.Id || WaitingForRoute(p, bus.RouteId))) selected.Add(bus.RouteId);
         var choices = new Dictionary<string, (RoadEdge[] Route, int Index, double Distance, double Along)>();
-        foreach (var person in people)
+        foreach (var person in people.OrderByDescending(p => p.WaitingAtBusStopId is not null))
         {
             var nearest = new List<(string Id, RoadEdge[] Route, int Index, double Distance, double Along)>();
             foreach (var (id, route) in _transitNetwork!.Routes)
@@ -58,7 +58,7 @@ public sealed partial class RealityWorld
                 var minimum = Math.Min(10, ordered[0].Length / 2);
                 var along = Math.Clamp(choice.Along + offset, minimum, Math.Max(minimum, ordered[0].Length - 5));
                 var position = ordered[0].At(along);
-                var footprint = TransitGeometry.Footprint(position, ordered[0].Heading);
+                var footprint = TransitGeometry.Footprint(position, ordered[0].Heading, 10, 3);
                 if (!footprint.All(p => _loadedAreas.Values.Any(a => a.Contains(p.X, p.Y))) ||
                     people.Any(p => p.Position.Region == position.Region && p.Position.Distance2D(position) < 7) || _transitObstacles!.Hit(footprint) is not null ||
                     _buses.Values.Any(b => b.State.Position.Region == position.Region && b.State.Position.Distance2D(position) < 12 && TransitGeometry.Overlaps(footprint, TransitGeometry.Footprint(b.State.Position, b.State.HeadingRadians)))) continue;
@@ -66,7 +66,6 @@ public sealed partial class RealityWorld
                 _buses[id] = bus; changed = true; break;
             }
         }
-        _runningBusRoutes = selected;
         return changed;
     }
 }

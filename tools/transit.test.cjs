@@ -2,6 +2,47 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const transit=require('../src/AlternateEarth.Client2D/transit.js');
 const markers=require('../src/AlternateEarth.Client2D/map-markers.js');
+
+test('bus hull targeting and stopped door-side boarding work at every heading',()=>{
+  for(let h=0;h<Math.PI*2;h+=Math.PI/4){
+    const bus={position:{x:20,y:30},headingRadians:h,healthHearts:100,speedMetersPerSecond:0};
+    const player={locationId:'outdoor',healthHearts:10,position:{x:20+Math.sin(h)*2,y:30-Math.cos(h)*2}};
+    assert.ok(transit.canBoard(player,bus));
+    const p=transit.attackPoint(bus,player.position);assert.ok(Math.abs(Math.hypot(p.x-player.position.x,p.y-player.position.y)-.75)<1e-8);
+    assert.ok(!transit.canBoard(player,{...bus,speedMetersPerSecond:2}));
+    assert.ok(!transit.canBoard(player,{...bus,healthHearts:0}));
+    assert.ok(!transit.canBoard({...player,ridingBusId:'other'},bus));
+    assert.ok(!transit.canBoard({...player,position:{x:20-Math.sin(h)*2,y:30+Math.cos(h)*2}},bus));
+  }
+});
+
+test('route preview shows only selected-route buses, including distant buses',()=>{
+  const route={id:'r1',path:[{x:0,y:0},{x:20000,y:10000}]};
+  const buses=[{id:'far',routeId:'r1',position:{x:19000,y:9000},headingRadians:1},
+    {id:'other',routeId:'r2',position:{x:0,y:0}},
+    {id:'invalid',routeId:'r1',position:{x:NaN,y:0}}];
+  assert.deepEqual(transit.routeBuses(route,buses).map(b=>b.id),['far']);
+  const labels=[];
+  const context=new Proxy({}, {get:(_,name)=>(...args)=>{if(name==='fillText')labels.push(args);for(const n of args)if(typeof n==='number')assert.ok(Number.isFinite(n),name);},set:()=>true});
+  const canvas={width:800,height:480,getContext:()=>context};
+  transit.drawRoute(canvas,route,[],null,buses);
+  const label=labels.find(l=>l[0]==='BUS');assert.ok(label);assert.ok(label[1]>400);
+  labels.length=0;transit.drawRoute(canvas,route,[],null,[{...buses[0],position:{x:500,y:100}}]);
+  assert.ok(labels.find(l=>l[0]==='BUS')[1]<400,'refreshed bus position moves the marker');
+  labels.length=0;transit.drawRoute(canvas,route,[],null,[]);
+  assert.ok(!labels.some(l=>l[0]==='BUS'),'empty fleet removes old marker');
+});
+
+test('benches and seated players share a seat and project finite geometry at all headings',()=>{
+  const context=new Proxy({}, {get:(_,name)=>(...args)=>{for(const n of args)if(typeof n==='number')assert.ok(Number.isFinite(n),name);},set:()=>true});
+  for(const scale of [1,6,26,96])for(let heading=0;heading<Math.PI*2;heading+=Math.PI/4){
+    const stop={position:{x:10,y:5},benchPosition:{x:11.6,y:4.5},headingRadians:heading};
+    const project=p=>({x:(p.x+p.y*.25)*scale,y:-p.y*scale*.69});
+    assert.deepEqual(transit.benchProjection(stop,project,scale)(0,0),project(stop.benchPosition));
+    transit.drawStop(context,stop,project,scale);
+    transit.drawWaitingPlayer(context,{position:stop.benchPosition,name:'Rider'},stop,project,scale,true);
+  }
+});
 test('crowded minimap markers keep the nearest, space neighbors and cap ordinary places',()=>{
   const places=Array.from({length:1000},(_,i)=>({id:String(i),position:{x:i%40*20,y:Math.floor(i/40)*20}}));
   const selected=markers.nearby(places,{x:0,y:0},4,100);

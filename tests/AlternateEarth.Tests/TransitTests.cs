@@ -6,6 +6,33 @@ namespace AlternateEarth.Tests;
 
 public sealed class TransitNetworkTests
 {
+    [Fact]
+    public void DenseShortStreetsShareSparsePairedStopLocations()
+    {
+        var roads = Enumerable.Range(0, 20).Select(i => Road($"street:{i:D2}", [new(0, i * 30), new(200, i * 30)], $"{i*2},{i*2+1}", name:$"Street {i}"));
+        var network = new RoadTransitNetwork(roads);
+        Assert.InRange(network.Stops.Count, 2, 4);
+        foreach (var stop in network.Stops)
+            Assert.Contains(network.Stops, other => other.Id != stop.Id && other.Direction != stop.Direction && other.Position.Distance2D(stop.Position) < 20);
+        var locations = network.Stops.Where(s => s.Direction == "eastbound").ToArray();
+        for (var i = 0; i < locations.Length; i++) for (var j = i + 1; j < locations.Length; j++)
+            Assert.True(locations[i].Position.Distance2D(locations[j].Position) >= 400);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.7853981633974483)]
+    [InlineData(1.5707963267948966)]
+    public void BusCollisionChecksTheEntireMovementSegmentIncludingPlayerRadius(double heading)
+    {
+        var center = new WorldPosition(new(45,-123),0,0);
+        var bus = new BusState("bus", "route", "Route", center, heading);
+        WorldPosition Point(double along, double side) => center with { X = Math.Cos(heading)*along-Math.Sin(heading)*side, Y = Math.Sin(heading)*along+Math.Cos(heading)*side };
+        Assert.True(TransitGeometry.SegmentHitsBus(Point(-20,0),Point(20,0),bus,.35));
+        Assert.True(TransitGeometry.SegmentHitsBus(Point(0,2),Point(0,1.4),bus,.35));
+        Assert.False(TransitGeometry.SegmentHitsBus(Point(-20,3),Point(20,3),bus,.35));
+        Assert.False(TransitGeometry.SegmentHitsBus(center,Point(0,3),bus,.35));
+    }
     internal static CanonicalEntity Road(string id, GeometryPoint[] points, string nodes, string highway = "secondary", string? oneWay = null, string name = "Main Street") =>
         new(id, EntityKind.Road, new(new(45, -123), points[0].X, points[0].Y), points,
             new Dictionary<string, string> { ["highway"] = highway, ["name"] = name, ["widthMeters"] = "8", ["osmNodeIds"] = nodes, ["oneway"] = oneWay ?? "no" });
@@ -90,6 +117,47 @@ public sealed class TransitNetworkTests
 
 public sealed partial class RealityWorldTests
 {
+    [Fact]
+    public async Task GodModeWalkingCannotPassThroughAStationaryBus()
+    {
+        var (world, player) = await TransitWorld();
+        var bus = world.GetTransitSnapshot().Buses.First();
+        var side = new WorldPosition(bus.Position.Region,bus.Position.X+Math.Sin(bus.HeadingRadians)*1.7,bus.Position.Y-Math.Cos(bus.HeadingRadians)*1.7);
+        player = await world.TeleportAsync(player.Id,new(side.X,side.Y,true));
+        Assert.True(player.GodMode);
+        for (var i=0;i<10;i++) await world.MoveAsync(player.Id,new(-Math.Sin(bus.HeadingRadians),Math.Cos(bus.HeadingRadians),i+1));
+        var final = world.CreateSnapshot().Players.Single(p=>p.Id==player.Id);
+        Assert.False(TransitGeometry.Contains(TransitGeometry.Footprint(bus.Position,bus.HeadingRadians,9.65,3.15),final.Position));
+    }
+
+    [Fact]
+    public async Task AYieldingBusCanBackAlongItsHistoryWithoutOverlappingOrDamagingTraffic()
+    {
+        var (world, _) = await TransitWorld();
+        await RequestTransitService(world);
+        for(var i=0;i<6;i++)await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
+        var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic;
+        var buses=(System.Collections.IDictionary)typeof(RealityWorld).GetField("_buses",flags)!.GetValue(world)!;
+        var first=buses.Values.Cast<object>().First();var type=first.GetType();
+        object Get(object bus,string name)=>type.GetField(name,flags)!.GetValue(bus)!;
+        void Set(object bus,string name,object value)=>type.GetField(name,flags)!.SetValue(bus,value);
+        var initial=(BusState)Get(first,"State");
+        var second=Activator.CreateInstance(type,flags,null,new[]{"bus:000-yield", "test-yield-route",Get(first,"Route")},null)!;
+        var position=initial.Position with{X=initial.Position.X+Math.Cos(initial.HeadingRadians)*9.7,Y=initial.Position.Y+Math.Sin(initial.HeadingRadians)*9.7};
+        Set(second,"State",initial with{Id="bus:000-yield",RouteId="test-yield-route",Position=position});
+        Set(second,"Dwell",100d);Set(second,"LastObstacle",initial.Id);buses.Add("test-yield-route",second);
+        var reversed=false;
+        for(var i=0;i<30;i++)
+        {
+            var tick=await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
+            var a=tick.Transit.Buses.Single(b=>b.Id==initial.Id);var b=tick.Transit.Buses.Single(b=>b.Id=="bus:000-yield");
+            reversed|=a.Status=="reversing to yield";
+            Assert.False(TransitGeometry.Overlaps(TransitGeometry.Footprint(a.Position,a.HeadingRadians),TransitGeometry.Footprint(b.Position,b.HeadingRadians)));
+            Assert.Equal(100,a.HealthHearts);Assert.Equal(100,b.HealthHearts);
+        }
+        Assert.True(reversed);
+        Assert.True(((BusState)Get(first,"State")).Position.Distance2D(initial.Position)>1);
+    }
     private async Task<(RealityWorld World, PlayerState Player)> TransitWorld(params CanonicalEntity[] extra)
     {
         var config = new RealityConfiguration("transit", "Transit test", 123, new(new(45.5,-122.5),1000));
@@ -106,8 +174,17 @@ public sealed partial class RealityWorldTests
         return(world,player);
     }
 
+    private static async Task<PlayerState> RequestTransitService(RealityWorld world)
+    {
+        var player = await world.JoinAsync("service-rider", "Service rider");
+        await world.SetGodModeAsync(player.Id, true);
+        var stop = world.GetTransitSnapshot().Stops.Where(s => s.Direction == "eastbound").MaxBy(s => s.Position.X)!;
+        await world.TeleportAsync(player.Id, new(stop.Position.X, stop.Position.Y, true));
+        return await world.WaitForBusAsync(player.Id, stop.Id);
+    }
+
     [Fact]
-    public async Task NearbyServiceIsLimitedAndPausesWhenTheLastObserverLeaves()
+    public async Task NearbyServiceIsLimitedAndRunsOnlyWhileRequested()
     {
         var roads = Enumerable.Range(1, 20).Select(i => TransitNetworkTests.Road("extra-" + i,
             [new(-200,i*10),new(200,i*10)], $"{i*2+10},{i*2+11}", name: "Street " + i)).ToArray();
@@ -120,15 +197,33 @@ public sealed partial class RealityWorldTests
         await world.TeleportAsync(player.Id, new(0,-400,true));
         await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1.1));
         var paused = world.GetTransitSnapshot().Buses.ToArray();
-        Assert.All(paused, bus => Assert.Equal("paused", bus.Status));
+        Assert.All(paused, bus => Assert.Contains(bus.Status,new[]{"out of service","pulling over","waiting for safe pull-over"}));
         await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1));
-        Assert.Equal(paused, world.GetTransitSnapshot().Buses);
+        Assert.All(world.GetTransitSnapshot().Buses, bus => Assert.Contains(bus.Status,new[]{"out of service","pulling over","waiting for safe pull-over"}));
         await world.TeleportAsync(player.Id, new(-180,-5.5,true));
         await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1.1));
-        Assert.Contains(world.GetTransitSnapshot().Buses, bus => bus.Status == "driving");
+        Assert.All(world.GetTransitSnapshot().Buses, bus => Assert.Contains(bus.Status,new[]{"out of service","pulling over","waiting for safe pull-over"}));
+        var stop = world.GetTransitSnapshot().Stops.First(s => s.Direction == "eastbound" && s.Position.X < 0);
+        await world.TeleportAsync(player.Id, new(stop.Position.X, stop.Position.Y, true));
+        await world.WaitForBusAsync(player.Id, stop.Id);
+        await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
+        Assert.Contains(world.GetTransitSnapshot().Buses, bus => bus.Status is not ("out of service" or "pulling over" or "waiting for safe pull-over"));
+        var second = await world.JoinAsync("second-waiter", "Second waiter");
+        await world.SetGodModeAsync(second.Id, true);
+        await world.TeleportAsync(second.Id, new(stop.Position.X, stop.Position.Y, true));
+        await world.WaitForBusAsync(second.Id, stop.Id);
+        await world.CancelBusWaitAsync(player.Id);
+        await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
+        Assert.Contains(world.GetTransitSnapshot().Buses, bus => bus.Status is not ("out of service" or "pulling over" or "waiting for safe pull-over"));
+        await world.CancelBusWaitAsync(second.Id);
+        await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
+        Assert.All(world.GetTransitSnapshot().Buses, bus => Assert.Contains(bus.Status,new[]{"out of service","pulling over","waiting for safe pull-over"}));
+        await world.WaitForBusAsync(player.Id, stop.Id);
+        await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
+        Assert.Contains(world.GetTransitSnapshot().Buses, bus => bus.Status is not ("out of service" or "pulling over" or "waiting for safe pull-over"));
         await world.LeaveAsync(player.Id);
         await world.AdvanceTransitAsync(TimeSpan.FromSeconds(1));
-        Assert.All(world.GetTransitSnapshot().Buses, bus => Assert.Equal("paused", bus.Status));
+        Assert.All(world.GetTransitSnapshot().Buses, bus => Assert.Contains(bus.Status,new[]{"out of service","pulling over","waiting for safe pull-over"}));
     }
 
     [Fact]
@@ -137,7 +232,11 @@ public sealed partial class RealityWorldTests
         var (world,player)=await TransitWorld();
         var stop=world.GetTransitSnapshot().Stops.First(s=>s.Direction=="eastbound"&&s.Position.X<0);
         player=await world.TeleportAsync(player.Id,new(stop.Position.X,stop.Position.Y,true));
-        await world.WaitForBusAsync(player.Id,stop.Id);
+        var seated = await world.WaitForBusAsync(player.Id,stop.Id);
+        Assert.NotNull(stop.BenchPosition);
+        Assert.Equal(stop.BenchPosition.Value, seated.Position);
+        Assert.Equal(stop.Id, seated.WaitingAtBusStopId);
+        Assert.InRange(seated.Position.Distance2D(stop.Position), .1, 3);
         var moved=await world.MoveAsync(player.Id,new(1,0,1));Assert.False(moved!.Moved);
         for(var i=0;i<60&&world.CreateSnapshot().Players.Single(p=>p.Id==player.Id).RidingBusId is null;i++)await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
         var rider=world.CreateSnapshot().Players.Single(p=>p.Id==player.Id);
@@ -151,7 +250,8 @@ public sealed partial class RealityWorldTests
         Assert.Null(exit.RidingBusId);Assert.True(exit.Position.Y<rider.Position.Y);
         var bus=world.GetTransitSnapshot().Buses.Single(b=>b.Id==rider.RidingBusId);Assert.Equal(0,bus.SpeedMetersPerSecond);
         for(var i=0;i<40;i++)await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
-        Assert.True(world.GetTransitSnapshot().Buses.Single(b=>b.Id==bus.Id).Position.X>bus.Position.X);
+        Assert.True(world.GetTransitSnapshot().Buses.Single(b=>b.Id==bus.Id).Position.Y < bus.Position.Y);
+        Assert.Contains(world.GetTransitSnapshot().Buses.Single(b=>b.Id==bus.Id).Status,new[]{"out of service","pulling over","waiting for safe pull-over"});
         await world.TeleportAsync(player.Id,new(stop.Position.X,-stop.Position.Y,true));
         await Assert.ThrowsAsync<InvalidOperationException>(()=>world.WaitForBusAsync(player.Id,stop.Id));
         Assert.Contains(world.GetTransitSnapshot().Routes,r=>r.StopIds.Contains(stop.Id)&&r.Path.Count>1);
@@ -161,6 +261,7 @@ public sealed partial class RealityWorldTests
     public async Task BusHitsPlayersAndNpcsOnceForFiveHeartsAndFlingsThemClear()
     {
         var (world,player)=await TransitWorld();
+        await RequestTransitService(world);
         var npc=world.PlaceTestCharacter(player.Id,new("npc",-175,-2)).Actor!;
         var target=world.PlaceTestCharacter(player.Id,new("player",-160,-2)).Player!;
         var events=new List<CombatEvent>();
@@ -180,6 +281,7 @@ public sealed partial class RealityWorldTests
             car?[]:[new(-152,-5),new(-148,-5),new(-148,1),new(-152,1),new(-152,-5)],
             new Dictionary<string,string>{["lengthMeters"]="4.5",["widthMeters"]="1.9"});
         var (world,_)=await TransitWorld(obstacle);
+        await RequestTransitService(world);
         for(var i=0;i<80;i++)await world.AdvanceTransitAsync(TimeSpan.FromMilliseconds(100));
         var bus=world.GetTransitSnapshot().Buses.First(b=>b.HeadingRadians==0);
         Assert.True(bus.Position.X < -156);Assert.True(bus.HealthHearts<100);Assert.Equal(0,bus.SpeedMetersPerSecond);
@@ -191,6 +293,7 @@ public sealed partial class RealityWorldTests
     public async Task DeadEndUsesSlowContinuousTurnInsteadOfInstantReversal()
     {
         var (world,_)=await TransitWorld();
+        await RequestTransitService(world);
         BusState? last=null;var turning=false;var reversed=false;
         for(var i=0;i<1000;i++)
         {

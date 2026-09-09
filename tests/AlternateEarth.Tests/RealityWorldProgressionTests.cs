@@ -9,6 +9,71 @@ namespace AlternateEarth.Tests;
 public sealed partial class RealityWorldTests
 {
     [Fact]
+    public async Task NotSpecialDefaultsMigrateAndNewAllocationsPersist()
+    {
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<CharacterStats>(
+            """{"strength":2,"perception":1,"endurance":1,"charisma":1,"intelligence":1,"agility":1,"luck":0}""", SharedJson.Options)!;
+        Assert.Equal(10, legacy.Total);
+        Assert.Equal(1, legacy.NutUp); Assert.Equal(1, legacy.Opportunistic); Assert.Equal(1, legacy.Timing);
+        var (world, store, _) = await CreateSelectiveLootWorld();
+        var stats = new CharacterStats(Strength: 0, Perception: 0, Luck: 0, NutUp: 2, Opportunistic: 2, Timing: 2);
+        await world.AssignStatsAsync("collector", new(stats));
+        Assert.Equal(0, world.GetProgression("collector").AvailablePoints);
+        await world.LeaveAsync("collector"); await world.JoinAsync("collector", "Collector");
+        Assert.Equal(stats, world.GetProgression("collector").Stats);
+        Assert.Equal(stats, (await store.LoadProgressionAsync(world.Configuration.Id, "collector"))!.Stats);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.AssignStatsAsync("collector", new(stats with { Timing = 3 })));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.AssignStatsAsync("collector", new(stats with { NutUp = -1 })));
+        Assert.True(ProgressionRules.ExtraAttackChance(stats) > ProgressionRules.ExtraAttackChance(new()));
+        Assert.True(ProgressionRules.ShootingInterval(stats) < ProgressionRules.ShootingInterval(new()));
+    }
+
+    [Fact]
+    public async Task NutUpResistsStrongerAttackersAndFearIsNotRepeatedForBurstRounds()
+    {
+        var clock = new ProbulatorTestClock();
+        var (world, _, npc) = await ImpressionWorld(clock);
+        await world.SetGodModeAsync("pilot", false);
+        var player = world.CreateSnapshot().Players.Single(p => p.Id == "pilot");
+        ImpressionActors(world)[npc.Id] = npc with { MaximumHealthHearts = player.MaximumHealthHearts * 2 };
+        world.ProgressionRoll = () => 0;
+        var hit = new CombatEvent(npc.Id, player.Id, "fist", npc.Position, player.Position, true, 1, false, "Hit");
+        Assert.True(world.ResolveCombatFear(hit).FleeInFear);
+        Assert.False(world.ResolveCombatFear(hit).FleeInFear);
+        await world.AwardExperienceAsync(player.Id, 10000, "test", randomize: false);
+        await world.AssignStatsAsync(player.Id, new(new(NutUp: 10)));
+        clock.Advance(TimeSpan.FromSeconds(6));
+        Assert.False(world.ResolveCombatFear(hit).FleeInFear);
+        Assert.False(world.ResolveCombatFear(hit with { Hit = false }).FleeInFear);
+    }
+
+    [Fact]
+    public async Task OpportunisticAddsAFreeHitAndTimingReducesServerCooldown()
+    {
+        var (world, store, npc) = await ImpressionWorld(new ProbulatorTestClock());
+        await world.UpdateItemConfigurationAsync("pilot", new("rifle", 7, 200, 300000, 600000, Accuracy: 1, AttackIntervalSeconds: 1));
+        await world.LeaveAsync("pilot");
+        await store.SaveInventoryAsync(new("pilot", new[] { new ItemStack("rifle", 1), new ItemStack("bullet", 5) }));
+        var player = await world.JoinAsync("pilot", "Pilot");
+        await world.SetGodModeAsync("pilot", false);
+        await world.SetEquipmentAsync("pilot", "weapon", "rifle");
+        await world.AwardExperienceAsync("pilot", 20000, "test", randomize: false);
+        await world.AssignStatsAsync("pilot", new(new(Opportunistic: 2, Timing: 10)));
+        ImpressionActors(world)[npc.Id] = npc with { Position = player.Position, HealthHearts = 100, MaximumHealthHearts = 100 };
+        world.ProgressionRoll = () => 0;
+        var result = await world.AttackAsync("pilot", new(npc.Id, "rifle"));
+        Assert.Equal(14, result.Event.Damage);
+        Assert.Single(result.Consequences!);
+        Assert.Equal(4, result.Inventory.Items.Single(i => i.ItemType == "bullet").Quantity);
+        var attacks = (ConcurrentDictionary<(string, string), DateTimeOffset>)typeof(RealityWorld)
+            .GetField("_lastPlayerAttack", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(world)!;
+        attacks[("pilot", "rifle")] = DateTimeOffset.UtcNow.AddSeconds(-.8);
+        await world.AttackAsync("pilot", new(npc.Id, "rifle"));
+        await world.AssignStatsAsync("pilot", new(new(Opportunistic: 2, Timing: 1)));
+        attacks[("pilot", "rifle")] = DateTimeOffset.UtcNow.AddSeconds(-.8);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.AttackAsync("pilot", new(npc.Id, "rifle")));
+    }
+    [Fact]
     public async Task UnwitnessedCrimeAddsLessEvilThanWitnessedCrimeAndLuckCanPreventWitnessing()
     {
         var (world, store, npc) = await ImpressionWorld(new ProbulatorTestClock());
@@ -69,11 +134,11 @@ public sealed partial class RealityWorldTests
         await world.LeaveAsync("collector");
         await world.JoinAsync("collector", "Collector");
         await world.AdvanceProgressionAsync(DateTimeOffset.UtcNow.AddSeconds(31));
-        Assert.Equal(76, world.GetProgression("collector").Experience);
+        Assert.Equal(75.05, world.GetProgression("collector").Experience);
         Assert.Single(world.TakeProgressionNotices(), item => item.Message.Contains("New map area"));
         await world.LeaveAsync("collector");
         await world.AdvanceProgressionAsync(now.AddDays(10));
-        Assert.Equal(76, world.GetProgression("collector").Experience);
+        Assert.Equal(75.05, world.GetProgression("collector").Experience);
     }
 
     [Fact]
@@ -92,11 +157,11 @@ public sealed partial class RealityWorldTests
         await world.AdvanceProgressionAsync(now);
         var before = world.GetProgression(player.Id).Experience;
         await world.AdvanceProgressionAsync(now.AddSeconds(60));
-        Assert.Equal(4 * 1.08, world.GetProgression(player.Id).Experience - before, 5);
+        Assert.Equal(3.29, world.GetProgression(player.Id).Experience - before, 5);
         ImpressionActors(world)[actor.Id] = actor with { Position = actor.Position with { X = actor.Position.X + 101 } };
         before = world.GetProgression(player.Id).Experience;
         await world.AdvanceProgressionAsync(now.AddSeconds(120));
-        Assert.Equal(1.08, world.GetProgression(player.Id).Experience - before, 5);
+        Assert.Equal(.05, world.GetProgression(player.Id).Experience - before, 5);
     }
 
     [Fact]
