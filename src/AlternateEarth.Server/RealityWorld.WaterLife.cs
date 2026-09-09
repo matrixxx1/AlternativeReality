@@ -14,8 +14,9 @@ public sealed partial class RealityWorld
             var area = Math.Abs(points.Zip(points.Skip(1), (a, b) => a.X * b.Y - b.X * a.Y).Sum()) / 2;
             if (area < 900) continue;
             var random = new Random(StableInt("water-life:" + water.Id));
-            var minX = points.Min(p => p.X); var maxX = points.Max(p => p.X);
-            var minY = points.Min(p => p.Y); var maxY = points.Max(p => p.Y);
+            var minX = Math.Max(generated.Area.Bounds.MinimumX, points.Min(p => p.X)); var maxX = Math.Min(generated.Area.Bounds.MaximumX, points.Max(p => p.X));
+            var minY = Math.Max(generated.Area.Bounds.MinimumY, points.Min(p => p.Y)); var maxY = Math.Min(generated.Area.Bounds.MaximumY, points.Max(p => p.Y));
+            if (maxX <= minX || maxY <= minY) continue;
             for (var index = 0; index < Math.Clamp((int)(area / 900), 4, 12); index++)
             {
                 for (var attempt = 0; attempt < 100; attempt++)

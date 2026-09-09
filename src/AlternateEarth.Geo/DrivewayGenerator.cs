@@ -100,7 +100,18 @@ public static class DrivewayGenerator
             var polygon=new[]{(-1,-1),(1,-1),(1,1),(-1,1)}.Select(p=>new GeometryPoint(e.Position.X+dx*p.Item1*l-dy*p.Item2*w,e.Position.Y+dy*p.Item1*l+dx*p.Item2*w)).ToArray();
             return PolygonsOverlap(driveway,polygon);
         }
-        if (e.Kind is EntityKind.Building or EntityKind.Water || IsDriveway(e))
+        if (e.Kind == EntityKind.Water && WaterGeometry.IsPolygon(e))
+        {
+            if (driveway.Any(p => WaterGeometry.Contains(e, p.X, p.Y))) return true;
+            foreach (var ring in new[] { e.Geometry }.Concat(e.InteriorRings ?? []))
+            {
+                if (ring.Any(p => Inside(p, driveway))) return true;
+                foreach (var (a,b) in Edges(ring,true))
+                    foreach (var (c,d) in Edges(driveway,true)) if (Intersects(a,b,c,d)) return true;
+            }
+            return false;
+        }
+        if (e.Kind == EntityKind.Building || IsDriveway(e))
             if (e.Geometry.Count >= 3 && PolygonsOverlap(driveway,e.Geometry)) return true;
         if (e.Kind is EntityKind.Tree or EntityKind.Bush or EntityKind.StreetLight)
         {

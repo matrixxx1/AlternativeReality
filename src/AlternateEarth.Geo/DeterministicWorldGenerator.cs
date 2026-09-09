@@ -8,7 +8,7 @@ namespace AlternateEarth.Geo;
 
 public sealed class DeterministicWorldGenerator
 {
-    private const int GeneratedWorldCacheVersion = 2;
+    private const int GeneratedWorldCacheVersion = 3;
     private static readonly string[] HumanNames =
     [
         "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
@@ -199,7 +199,7 @@ public sealed class DeterministicWorldGenerator
                 attempts++;
             } while (attempts < 80 && obstacles is not null &&
                      (!IsOpenGrass(obstacles.Concat(result).ToArray(), x, y) || obstacles.Concat(result).Any(entity => BlocksGeneratedPoint(entity, x, y, 1.2))));
-            if (obstacles is not null && obstacles.Any(e => IsDriveway(e) && BlocksGeneratedPoint(e, x, y, 1.2))) continue;
+            if (obstacles is not null && (!IsOpenGrass(obstacles.Concat(result).ToArray(), x, y) || obstacles.Concat(result).Any(entity => BlocksGeneratedPoint(entity, x, y, 1.2)))) continue;
             var subtype = random.Next(0, 3) switch { 0 => "pine", 1 => "fir", _ => "oak" };
             result.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:{AreaKey(reality)}:tree:{i}",
@@ -227,7 +227,8 @@ public sealed class DeterministicWorldGenerator
                 {
                     ["terrain"] = "sidewalk",
                     ["widthMeters"] = (roadWidth + 3).ToString("F1", System.Globalization.CultureInfo.InvariantCulture),
-                    ["roadId"] = entity.Id
+                    ["roadId"] = entity.Id,
+                    ["bridge"] = entity.Properties.GetValueOrDefault("bridge") ?? "no"
                 });
         }).ToArray();
 
@@ -324,7 +325,7 @@ public sealed class DeterministicWorldGenerator
                 var offset = roadWidth / 2 + 1.2;
                 x += -Math.Sin(rotation) * offset; y += Math.Cos(rotation) * offset;
             }
-            if (!reality.Area.Bounds.Contains(x, y) || features.Any(e => (e.Kind == EntityKind.Building && PointInPolygon(x, y, e.Geometry)) || (IsDriveway(e) && BlocksGeneratedPoint(e, x, y, 2.5)))) continue;
+            if (!reality.Area.Bounds.Contains(x, y) || features.Any(e => (e.Kind == EntityKind.Building && PointInPolygon(x, y, e.Geometry)) || (e.Kind == EntityKind.Water && BlocksGeneratedPoint(e, x, y, 2.5)) || (IsDriveway(e) && BlocksGeneratedPoint(e, x, y, 2.5)))) continue;
             vehicles.Add(new CanonicalEntity(
                 $"generated:{reality.Id}:{AreaKey(reality)}:vehicle:{index}",
                 EntityKind.Vehicle,
@@ -394,6 +395,7 @@ public sealed class DeterministicWorldGenerator
                     y = bounds.MinimumY + (random.NextDouble() * (bounds.MaximumY - bounds.MinimumY));
                     attempts++;
                 } while (attempts < 80 && obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, .5)));
+                if (obstacles.Any(entity => BlocksGeneratedPoint(entity, x, y, .5))) continue;
                 var name = definition.Subtype == "zombie" ? $"Zombie {HumanNames[index % HumanNames.Length]}"
                     : definition.Kind == EntityKind.Npc ? HumanNames[index % HumanNames.Length]
                     : definition.Subtype == "dog" ? DogNames[index % DogNames.Length]
@@ -462,9 +464,11 @@ public sealed class DeterministicWorldGenerator
         if (entity.Kind == EntityKind.Building && entity.Geometry.Count >= 3) return PointInPolygon(x, y, entity.Geometry);
         if (entity.Kind is EntityKind.Tree or EntityKind.Bush or EntityKind.Vehicle)
             return Distance(new GeometryPoint(x, y), new GeometryPoint(entity.Position.X, entity.Position.Y)) <= padding + ParseDouble(entity.Properties.GetValueOrDefault("collisionRadius"), 1);
-        if (entity.Kind is EntityKind.Road or EntityKind.Sidewalk or EntityKind.Water)
+        if (entity.Kind == EntityKind.Water)
+            return WaterGeometry.Contains(entity, x, y) || WaterGeometry.ShoreDistance(entity, x, y) <= padding;
+        if (entity.Kind is EntityKind.Road or EntityKind.Sidewalk)
         {
-            var width = entity.Kind == EntityKind.Water ? 3 : ParseDouble(entity.Properties.GetValueOrDefault("widthMeters"), 4);
+            var width = ParseDouble(entity.Properties.GetValueOrDefault("widthMeters"), 4);
             return DistanceToGeometry(x, y, entity.Geometry) <= (width / 2) + padding;
         }
         return false;

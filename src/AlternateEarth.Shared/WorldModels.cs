@@ -66,7 +66,8 @@ public sealed record CanonicalEntity(
     IReadOnlyList<GeometryPoint> Geometry,
     IReadOnlyDictionary<string, string> Properties,
     long Version = 1,
-    bool IsBaseEntity = true);
+    bool IsBaseEntity = true,
+    IReadOnlyList<IReadOnlyList<GeometryPoint>>? InteriorRings = null);
 
 public sealed record PlayerState(
     string Id,

@@ -6,7 +6,7 @@ using AlternateEarth.Shared;
 
 namespace AlternateEarth.Geo;
 
-public sealed class OverpassGeographicProvider : IGeographicProvider
+public sealed partial class OverpassGeographicProvider : IGeographicProvider
 {
     private readonly HttpClient _httpClient;
     private readonly string _legacyCacheDirectory;
@@ -32,7 +32,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
     private async Task<GeographicDataset> ReadAreaAsync(GeographicArea area, bool fresh, CancellationToken cancellationToken)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            FormattableString.Invariant($"v5:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
+            FormattableString.Invariant($"v6:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_legacyCacheDirectory, $"area-{cacheKey}.json");
         if (!fresh && File.Exists(canonicalCachePath))
         {
@@ -125,6 +125,8 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
                $"way[\"barrier\"=\"fence\"]({bbox});" +
                $"way[\"natural\"~\"water|wood|sand|beach|mud|wetland|grassland\"]({bbox});" +
                $"way[\"waterway\"]({bbox});" +
+               $"rel[\"type\"=\"multipolygon\"][\"natural\"=\"water\"]({bbox});" +
+               $"rel[\"type\"=\"multipolygon\"][\"waterway\"=\"riverbank\"]({bbox});" +
                $"way[\"landuse\"]({bbox});" +
                $"way[\"leisure\"~\"park|garden|recreation_ground\"]({bbox});" +
                $"way[\"amenity\"=\"parking\"]({bbox});" +
@@ -195,21 +197,22 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
 
         var projection = new LocalTangentProjection(area.Region);
         var result = new List<CanonicalEntity>();
+        var waterMembers = AddWaterRelations(document, waysById.ToDictionary(pair => pair.Key, pair => pair.Value.Nodes), nodes, area, projection, result);
         foreach (var way in waysById.Values)
         {
             var kind = Classify(way.Tags);
-            if (kind is null)
+            if (kind is null || kind == EntityKind.Water && waterMembers.Contains(way.Id))
             {
                 continue;
             }
 
             var geometry = way.Nodes
-                .Where(nodeId => nodes.ContainsKey(nodeId) && RegionId.FromGeo(nodes[nodeId]) == area.Region)
-                .Select(nodeId => projection.Project(nodes[nodeId]))
-                .Where(position => kind is EntityKind.Road or EntityKind.Sidewalk || area.Bounds.Contains(position.X, position.Y))
+                .Where(nodeId => nodes.ContainsKey(nodeId) && (kind == EntityKind.Water || RegionId.FromGeo(nodes[nodeId]) == area.Region))
+                .Select(nodeId => kind == EntityKind.Water ? projection.ProjectGeometry(nodes[nodeId]) : projection.Project(nodes[nodeId]))
+                .Where(position => kind is EntityKind.Road or EntityKind.Sidewalk or EntityKind.Water || area.Bounds.Contains(position.X, position.Y))
                 .Select(position => new GeometryPoint(position.X, position.Y, position.Z))
                 .ToArray();
-            if (geometry.Length < 2)
+            if (geometry.Length < 2 || kind == EntityKind.Water && (!OverlapsArea(geometry, area.Bounds) || way.Nodes.Any(id => !nodes.ContainsKey(id))))
             {
                 continue;
             }
@@ -279,7 +282,7 @@ public sealed class OverpassGeographicProvider : IGeographicProvider
         return tags;
     }
 
-    private static bool KeepProperty(string key) => key is "service" or "office" or "building:use" or "oneway" or "junction" or "lanes" or "maxspeed" or "ref" or "layer" or "bridge" or "tunnel" or "access" or "vehicle" or "motor_vehicle" or "bus" or "motorroad" or "area" or "cuisine" or "takeaway" or "delivery" or "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
+    private static bool KeepProperty(string key) => key is "service" or "office" or "building:use" or "oneway" or "junction" or "lanes" or "maxspeed" or "ref" or "layer" or "bridge" or "tunnel" or "access" or "vehicle" or "motor_vehicle" or "bus" or "motorroad" or "area" or "cuisine" or "takeaway" or "delivery" or "name" or "brand" or "highway" or "building" or "building:levels" or "natural" or "waterway" or "waterway:name" or "water" or "surface" or "levels" or "landuse" or "leisure" or "amenity" or "barrier" or "footway" or "sidewalk" or "width" or "shop" or "aeroway" or "iata" or "icao" or "boundary" or "admin_level" || key.StartsWith("addr:", StringComparison.OrdinalIgnoreCase);
 
     private static void AddDerivedProperties(Dictionary<string, string> properties, IReadOnlyDictionary<string, string> tags)
     {

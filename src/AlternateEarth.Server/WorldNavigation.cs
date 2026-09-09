@@ -12,6 +12,7 @@ public sealed class WorldNavigation
     private readonly WorldBounds _bounds;
     private readonly IReadOnlyList<ElevationSample> _elevation;
     private readonly Dictionary<(int X, int Y), List<CanonicalEntity>> _spatial = new();
+    private readonly List<CanonicalEntity> _largeWater = new();
 
     public WorldNavigation(WorldBounds bounds, IReadOnlyList<CanonicalEntity> entities, IReadOnlyList<ElevationSample> elevation)
     {
@@ -34,12 +35,14 @@ public sealed class WorldNavigation
                     if (priority < surfacePriority) { terrain = surface; priority = surfacePriority; }
                     break;
                 case EntityKind.Sidewalk when DistanceToGeometry(x, y, entity.Geometry) <= Width(entity, 3) / 2:
-                    if (priority < 3) { terrain = TerrainType.Sidewalk; priority = 3; }
+                    var sidewalkPriority = entity.Properties.GetValueOrDefault("bridge") is not (null or "no") ? 11 : 3;
+                    if (priority < sidewalkPriority) { terrain = TerrainType.Sidewalk; priority = sidewalkPriority; }
                     break;
                 case EntityKind.Road when DistanceToGeometry(x, y, entity.Geometry) <= Width(entity, 5) / 2:
-                    if (priority < 4) { terrain = RoadTerrain(entity); priority = 4; }
+                    var roadPriority = entity.Properties.GetValueOrDefault("bridge") is not (null or "no") ? 12 : 4;
+                    if (priority < roadPriority) { terrain = RoadTerrain(entity); priority = roadPriority; }
                     break;
-                case EntityKind.Water when IsOnWater(entity, x, y):
+                case EntityKind.Water when priority < 11 && WaterGeometry.Contains(entity, x, y):
                     terrain = WaterTerrain(entity, x, y);
                     priority = 10;
                     break;
@@ -343,7 +346,7 @@ public sealed class WorldNavigation
         var padding = entity.Kind switch
         {
             EntityKind.Road or EntityKind.Sidewalk => Width(entity, 5) / 2,
-            EntityKind.Water => 1.5,
+            EntityKind.Water => WaterGeometry.Width(entity) / 2,
             EntityKind.Tree => Width(entity, .85) + PlayerRadiusMeters,
             EntityKind.Vehicle => 3,
             _ => PlayerRadiusMeters
@@ -352,6 +355,11 @@ public sealed class WorldNavigation
         var maximumX = points.Max(point => point.X) + padding;
         var minimumY = points.Min(point => point.Y) - padding;
         var maximumY = points.Max(point => point.Y) + padding;
+        if (entity.Kind == EntityKind.Water && (long)(Cell(maximumX) - Cell(minimumX) + 1) * (Cell(maximumY) - Cell(minimumY) + 1) > 4096)
+        {
+            _largeWater.Add(entity);
+            return;
+        }
         for (var x = Cell(minimumX); x <= Cell(maximumX); x++)
         {
             for (var y = Cell(minimumY); y <= Cell(maximumY); y++)
@@ -363,7 +371,7 @@ public sealed class WorldNavigation
     }
 
     private IEnumerable<CanonicalEntity> Candidates(double x, double y) =>
-        _spatial.TryGetValue((Cell(x), Cell(y)), out var entities) ? entities : Array.Empty<CanonicalEntity>();
+        (_spatial.TryGetValue((Cell(x), Cell(y)), out var entities) ? (IEnumerable<CanonicalEntity>)entities : []).Concat(_largeWater);
 
     private static int Cell(double value) => (int)Math.Floor(value / SpatialCellMeters);
     private static TerrainType ParseTerrain(string? value) => Enum.TryParse<TerrainType>(value, true, out var parsed) ? parsed : TerrainType.Grass;
@@ -371,16 +379,10 @@ public sealed class WorldNavigation
     private static double Width(CanonicalEntity entity, double fallback) =>
         double.TryParse(entity.Properties.GetValueOrDefault("collisionRadius") ?? entity.Properties.GetValueOrDefault("widthMeters") ?? entity.Properties.GetValueOrDefault("width"), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : fallback;
 
-    private static bool IsOnWater(CanonicalEntity entity, double x, double y) =>
-        entity.Geometry.Count >= 4 && entity.Geometry[0] == entity.Geometry[^1]
-            ? PointInPolygon(x, y, entity.Geometry)
-            : DistanceToGeometry(x, y, entity.Geometry) <= 1.5;
-
     private static TerrainType WaterTerrain(CanonicalEntity entity, double x, double y)
     {
-        var isClosed = entity.Geometry.Count >= 4 && entity.Geometry[0] == entity.Geometry[^1];
-        if (!isClosed) return TerrainType.ShallowWater;
-        return DistanceToGeometry(x, y, entity.Geometry) <= 3 ? TerrainType.ShallowWater : TerrainType.DeepWater;
+        if (!WaterGeometry.IsPolygon(entity)) return TerrainType.ShallowWater;
+        return WaterGeometry.ShoreDistance(entity, x, y) <= 3 ? TerrainType.ShallowWater : TerrainType.DeepWater;
     }
 
     private static bool InsideVehicle(CanonicalEntity entity, double x, double y, double radius)

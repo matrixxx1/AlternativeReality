@@ -53,6 +53,15 @@ public sealed class DrivewayGenerationTests
     }
 
     [Fact]
+    public void IslandDrivewayRemainsDryInsideWaterMultipolygon()
+    {
+        var river = Entity("river", EntityKind.Water, Rectangle(-100,-100,200,200)) with
+        { InteriorRings = [Rectangle(-60,-30,120,60)] };
+        Assert.Single(DrivewayGenerator.Generate([..Features(),river]));
+        Assert.Empty(DrivewayGenerator.Generate([..Features(),river with { InteriorRings = null }]));
+    }
+
+    [Fact]
     public void RequiresHouseDoorNearbyAccessibleRoadAndOutwardPath()
     {
         var f=Features();

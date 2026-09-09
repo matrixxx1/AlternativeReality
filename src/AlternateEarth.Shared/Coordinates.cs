@@ -72,6 +72,13 @@ public sealed class LocalTangentProjection
             throw new ArgumentOutOfRangeException(nameof(coordinate), "Coordinate is outside this projection's geographic region.");
         }
 
+        return ProjectGeometry(coordinate);
+    }
+
+    // A complete geographic feature can cross a region boundary. Keep its vertices
+    // in the importing region's coordinate system without truncating its shoreline.
+    public WorldPosition ProjectGeometry(GeoCoordinate coordinate)
+    {
         var latitude = DegreesToRadians(coordinate.Latitude);
         var longitude = DegreesToRadians(coordinate.Longitude);
         return new WorldPosition(

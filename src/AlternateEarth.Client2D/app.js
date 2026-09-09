@@ -576,10 +576,14 @@
   function path(entity, close = false) {
     if (!entity.geometry?.length) return false; ctx.beginPath();
     entity.geometry.forEach((point, index) => { const p = toScreen(point); index ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y); });
-    if (close) ctx.closePath(); return true;
+    if (close) {
+      ctx.closePath();
+      for(const ring of entity.interiorRings||[]){ring.forEach((point,index)=>{const p=toScreen(point);index?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});ctx.closePath();}
+    }
+    return true;
   }
   function drawGeometry(entity, fill, stroke, width = 1, close = false) {
-    if (!path(entity, close)) return; if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke(); }
+    if (!path(entity, close)) return; if (fill) { ctx.fillStyle = fill; ctx.fill(entity.interiorRings?.length ? 'evenodd' : 'nonzero'); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke(); }
   }
   function prop(entity, name, fallback) { const value = Number(entity.properties?.[name]); return Number.isFinite(value) ? value : fallback; }
   function hash(value) { let h=2166136261; for (let i=0;i<String(value).length;i++) h=Math.imul(h^String(value).charCodeAt(i),16777619); return (h>>>0)/4294967295; }
@@ -628,7 +632,9 @@
     }
     const lists=renderListsFor(view);state.currentRenderLists=lists;const visibleCount=Object.values(lists).reduce((count,entities)=>count+entities.length,0);
     measureRenderStage('Ground',()=>drawCachedGround(view,detail));
-    for (const e of lists.water) drawWater(e,detail,now);
+    for (const e of [...lists.water].sort((a,b)=>Number(waterGeometryClosed(a))-Number(waterGeometryClosed(b)))) drawWater(e,detail,now);
+    drawSidewalkNetwork(lists.sidewalk.filter(e=>e.properties?.bridge&&e.properties.bridge!=='no'),view,detail);
+    drawRoadNetwork(lists.road.filter(e=>e.properties?.bridge&&e.properties.bridge!=='no'),view,detail);
     drawAirports(lists.airport,view,detail);drawWorldBlocks(view);drawStateBoundaries(lists.stateBoundary,view,detail);drawPointsOfInterest(lists.pointOfInterest,view,detail);
     drawPlayerRanges(me);
     drawTarget(now);
@@ -767,7 +773,33 @@
   function drawStateBoundaries(entities,view,detail){const viewport=viewportWidth();ctx.save();ctx.setLineDash([18,8]);for(const e of entities){if(!visible(e,view))continue;drawGeometry(e,null,'rgba(255,219,91,.9)',3);if(detail===0)continue;const name=e.properties?.stateName||e.properties?.name;if(!name)continue;for(let i=0;i<(e.geometry?.length||0)-1;i++){const a=toScreen(e.geometry[i]),b=toScreen(e.geometry[i+1]),length=Math.hypot(b.x-a.x,b.y-a.y);if(length<140)continue;const repetitions=Math.max(1,Math.floor(length/260));for(let n=1;n<=repetitions;n++){const amount=n/(repetitions+1),x=a.x+(b.x-a.x)*amount,y=a.y+(b.y-a.y)*amount;if(x<50||x>viewport-50||y<20||y>innerHeight-20)continue;ctx.save();ctx.translate(x,y);let angle=Math.atan2(b.y-a.y,b.x-a.x);if(angle>Math.PI/2)angle-=Math.PI;if(angle<-Math.PI/2)angle+=Math.PI;ctx.rotate(angle);ctx.font='700 12px monospace';ctx.textAlign='center';ctx.lineWidth=4;ctx.strokeStyle='#25251d';ctx.strokeText(name,0,-7);ctx.fillStyle='#ffe68a';ctx.fillText(name,0,-7);ctx.restore();}}}ctx.restore();}
   function drawPointsOfInterest(entities,view,detail){if(detail===0)return;const viewport=viewportWidth();for(const e of entities){if(!visible(e,view))continue;const p=toScreen(e.position),category=e.properties?.merchantCategory,name=e.properties?.name||e.properties?.brand;if(!category||!name||p.x<30||p.x>viewport-30||p.y<20||p.y>innerHeight-20)continue;const icon=category==='gas'?'⛽':category==='clothing'?'▣':category==='food'?'◆':category==='furniture'?'▰':'●';ctx.save();ctx.textAlign='center';ctx.font='700 10px monospace';ctx.lineWidth=4;ctx.strokeStyle='#222620';ctx.strokeText(`${icon} ${name}`,p.x,p.y-8);ctx.fillStyle='#f6e7a9';ctx.fillText(`${icon} ${name}`,p.x,p.y-8);ctx.restore();}}
   function waterGeometryClosed(e){const geometry=e.geometry||[],first=geometry[0],last=geometry[geometry.length-1];return geometry.length>=4&&first.x===last.x&&first.y===last.y;}
-  function drawWater(e,detail,now){const closed=waterGeometryClosed(e),wave=detail===2?Math.sin(now/450)*state.scale*.08:0;if(closed){ctx.save();path(e,true);ctx.clip();drawGeometry(e,'#073550',null,0,true);drawGeometry(e,null,'#55b7bd',Math.max(5,state.scale*6+wave),true);drawGeometry(e,null,'#11708b',Math.max(2,state.scale*.45),true);if(detail===2){const view=viewBounds(1),b=e._bounds||boundsOf(e),step=3.5;ctx.save();path(e,true);ctx.clip();ctx.strokeStyle='rgba(139,220,225,.42)';ctx.lineWidth=1.2;let marks=0;for(let y=Math.max(view.minY,b.minY);y<Math.min(view.maxY,b.maxY)&&marks<700;y+=step)for(let x=Math.max(view.minX,b.minX);x<Math.min(view.maxX,b.maxX)&&marks<700;x+=step){if(hash(`${e.id}:water:${Math.floor(x/step)}:${Math.floor(y/step)}`)<.58)continue;marks++;const p=toScreen({x,y});ctx.beginPath();ctx.moveTo(p.x-5,p.y+Math.sin(now/350+x)*1.5);ctx.quadraticCurveTo(p.x,p.y-2,p.x+6,p.y);ctx.stroke();}ctx.restore();}ctx.restore();}else{drawGeometry(e,null,'#72cbd0',Math.max(5,state.scale*3));drawGeometry(e,null,'#116886',Math.max(2,state.scale*1.5));}}
+  function waterOutline(e){
+    const anchor=toScreen(e.geometry[0]),cached=e._waterOutline;
+    if(cached&&cached.geometry===e.geometry&&cached.holes===e.interiorRings&&cached.scale===state.scale&&cached.pitch===state.pitch&&cached.shear===state.shear&&cached.elevation===state.elevationGrid&&cached.dungeon===state.dungeon)return{path:cached.path,anchor};
+    const outline=new Path2D();
+    for(const ring of [e.geometry,...(e.interiorRings||[])]){
+      ring.forEach((point,index)=>{const p=toScreen(point);index?outline.lineTo(p.x-anchor.x,p.y-anchor.y):outline.moveTo(p.x-anchor.x,p.y-anchor.y);});outline.closePath();
+    }
+    e._waterOutline={path:outline,geometry:e.geometry,holes:e.interiorRings,scale:state.scale,pitch:state.pitch,shear:state.shear,elevation:state.elevationGrid,dungeon:state.dungeon};
+    return{path:outline,anchor};
+  }
+  function drawWater(e,detail,now){
+    if(!waterGeometryClosed(e)){const width=Math.max(.1,prop(e,'widthMeters',prop(e,'width',3)));drawGeometry(e,null,'#72cbd0',Math.max(2,state.scale*width));drawGeometry(e,null,'#116886',Math.max(1,state.scale*width*.5));return;}
+    const {path:outline,anchor}=waterOutline(e),wave=detail===2?Math.sin(now/450)*state.scale*.08:0;
+    ctx.save();ctx.translate(anchor.x,anchor.y);ctx.clip(outline,'evenodd');
+    ctx.fillStyle='#073550';ctx.fill(outline,'evenodd');ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.strokeStyle='#55b7bd';ctx.lineWidth=Math.max(5,state.scale*6+wave);ctx.stroke(outline);
+    ctx.strokeStyle='#11708b';ctx.lineWidth=Math.max(2,state.scale*.45);ctx.stroke(outline);
+    ctx.translate(-anchor.x,-anchor.y);
+    if(detail===2){
+      const view=viewBounds(1),b=e._bounds||boundsOf(e),step=3.5;
+      ctx.strokeStyle='rgba(139,220,225,.42)';ctx.lineWidth=1.2;let marks=0;
+      for(let y=Math.max(view.minY,b.minY);y<Math.min(view.maxY,b.maxY)&&marks<700;y+=step)for(let x=Math.max(view.minX,b.minX);x<Math.min(view.maxX,b.maxX)&&marks<700;x+=step){
+        if(hash(`${e.id}:water:${Math.floor(x/step)}:${Math.floor(y/step)}`)<.58)continue;marks++;const p=toScreen({x,y});ctx.beginPath();ctx.moveTo(p.x-5,p.y+Math.sin(now/350+x)*1.5);ctx.quadraticCurveTo(p.x,p.y-2,p.x+6,p.y);ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
   const weaponRanges={fist:1.6,knife:1.6,sword:2.3,hockeyStick:2.2,iceSkate:1.8,rock:25,slingshot:60,crossbow:100,pistol:50,rifle:200,ar15:200,machineGun:200,flamethrower:25,rocketLauncher:300,grenade:35,molotovCocktail:30,probulator:1.7};
   function candleActive(player,now=Date.now()){const until=Date.parse(player?.candleUntilUtc||'');return Number.isFinite(until)&&until>now;}
   function activeItemTypes(player){const items=[];const travel={skateboard:'skateboard',bike:'bike',eBike:'eBike',raft:'inflatableRaft',swim:'swimmies',dirtBike:'dirtBike',motorcycle:'motorcycle',ufo:'ufo'}[player?.travelMode];if(travel)items.push(travel);if(player?.magicHikingShoesOn)items.push('magicHikingShoes');if(player?.magicRunningShoesOn)items.push('magicRunningShoes');if(player?.hatOn)items.push('hat');if(player?.flashlightOn)items.push('flashlight');if(player?.lanternOn)items.push('lantern');if(candleActive(player))items.push('candle');if(player?.laserOn)items.push('laser');if(player?.equippedWeapon&&player.equippedWeapon!=='none')items.push(player.equippedWeapon);return[...new Set(items)];}
