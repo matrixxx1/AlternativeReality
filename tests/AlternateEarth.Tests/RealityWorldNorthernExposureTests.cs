@@ -11,6 +11,62 @@ public sealed partial class RealityWorldTests
     private static async Task NorthernCall(RealityWorld world, string name, params object[] args) => await (Task)typeof(RealityWorld).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(world, args)!;
 
     [Fact]
+    public async Task NorthernWildlifeSpawnsBattalionButDoesNotAdvanceHumanKillCount()
+    {
+        var (world, id, _, clock) = await RetroFixture();
+        world.StartInversion("northern", world.GetRetroBattleUpdate(id).Player!, clock.GetUtcNow());
+        var actors = ImpressionActors(world);
+        var wildlife = actors.Values.Where(a => a.Kind == EntityKind.Animal && a.EventName == "Northern exposure").ToArray();
+        Assert.Equal(4, wildlife.Count(a => a.Subtype == "angryMoose"));
+        Assert.Equal(8, wildlife.Count(a => a.Subtype == "helmetBeaver"));
+        Assert.Equal(12, wildlife.Count(a => a.Subtype == "tacticalGoose"));
+        Assert.Equal(3, wildlife.Where(a => a.Subtype == "tacticalGoose").Select(a => a.Name).Distinct().Count());
+        var kills = PhotoField<ConcurrentQueue<(string Player, ActorState Actor)>>(world, "_inversionKills");
+        foreach (var actor in wildlife) { actors.TryRemove(actor.Id, out _); kills.Enqueue((id, actor)); }
+        await world.AdvanceInversionsAsync(TimeSpan.Zero);
+        Assert.Equal(0, world.GetInversionView(id).Active!.Kills);
+        Assert.DoesNotContain(actors.Values, a => a.Subtype == "canadianBoss");
+    }
+
+    [Theory]
+    [InlineData("angryMoose", 6, "mooseCharge", 2.5)]
+    [InlineData("helmetBeaver", 4.5, "beaverBite", 1)]
+    [InlineData("tacticalGoose", 5.5, "goosePeck", .5)]
+    public async Task NorthernWildlifePursuesAttacksRapidlySpeaksAndIgnoresAlliedGas(string subtype, double speed, string weapon, double damage)
+    {
+        var (world, id, _, clock) = await RetroFixture();
+        var player = await world.TeleportAsync(id, new(0, 0, true));
+        world.StartInversion("northern", player, clock.GetUtcNow());
+        var e = world.GetInversionView(id).Active!;
+        var actors = ImpressionActors(world); actors.Clear();
+        var actor = new ActorState(e.Id + ":wildlife:test", EntityKind.Animal, subtype, "Test wildlife", player.Position with { X = 6 }, HealthHearts: 20, MaximumHealthHearts: 20, EventName: e.Name, FriendRating: -10);
+        actors[actor.Id] = actor;
+        world.TakeInversionChat();
+        await world.AdvanceInversionsAsync(TimeSpan.FromSeconds(.5));
+        Assert.Equal(6 - speed * .5, actors[actor.Id].Position.X, 5);
+        actors[actor.Id] = actors[actor.Id] with { Position = player.Position with { X = .5 } };
+        NorthernField(world, "_activeInversion", e with { Patches = [new("gas", player.Position, 6, "canadianGas", clock.GetUtcNow(), clock.GetUtcNow().AddSeconds(5))] });
+        await world.AdvanceInversionsAsync(TimeSpan.Zero);
+        Assert.Equal(damage, Assert.Single(world.TakeInversionCombat(), c => c.AttackerId == actor.Id && c.Weapon == weapon).Damage);
+        Assert.Single(world.TakeInversionChat(), c => c.PlayerId == actor.Id);
+        Assert.Equal(20, actors[actor.Id].HealthHearts);
+        await world.AdvanceInversionsAsync(TimeSpan.Zero);
+        Assert.DoesNotContain(world.TakeInversionCombat(), c => c.AttackerId == actor.Id);
+        clock.Advance(1); await world.AdvanceInversionsAsync(TimeSpan.Zero);
+        Assert.Single(world.TakeInversionCombat(), c => c.AttackerId == actor.Id && c.Weapon == weapon);
+        Assert.Equal(20, actors[actor.Id].HealthHearts);
+        var generic = await world.AdvanceHostilityAsync(TimeSpan.FromSeconds(.5));
+        Assert.DoesNotContain(generic.Combat, c => c.AttackerId == actor.Id);
+    }
+
+    [Fact]
+    public void NorthernAttackDialogueIncludesEveryRequestedLineVerbatim()
+    {
+        var lines = (string[])typeof(RealityWorld).GetField("CanadianLines", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        foreach (var line in new[] { "Yeah, no", "no, yeah", "sorry", "my bad, eh", "where's my bubby hug eh?", "Want to sniff my glitch?", " We ain't attacking eh, we only.out for a rip eh", "I miss my double double", "o no my mickey is empty eh", "how many clicks are we traveling per maple leaf fall, eh?" }) Assert.Contains(line, lines);
+    }
+
+    [Fact]
     public async Task NorthernKillsAreSharedDeduplicatedAndRequireBothBosses()
     {
         var (world, id, _, clock) = await RetroFixture();

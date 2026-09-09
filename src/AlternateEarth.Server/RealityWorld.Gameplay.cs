@@ -1881,7 +1881,7 @@ public sealed partial class RealityWorld
             var carryingQuestDrugs = _quests.Where(pair => pair.Key.Player == player.Id && pair.Value.Kind == "drugDelivery" && pair.Value.Status is "active" or "ready")
                 .Any(pair => InventoryQuantity(player.Id, QuestDrugItem(pair.Value)) > 0);
             var target = actors.Select(actor => (Actor: actor, Rating: Relationship(player.Id, actor.Id)))
-                .Where(item => !IsCanadian(item.Actor) && (!_deliveryDogs.TryGetValue(item.Actor.Id, out var deliveryDog) || deliveryDog.PlayerId == player.Id) && !IsGasAsleep(item.Actor.Id) && !item.Actor.IsPassingThroughPortal(now) && !IsProbulatorAbducted(item.Actor.Id) && (item.Rating < 0 || carryingQuestDrugs && item.Actor.FactionId == $"drug-watch:{player.Id}") &&
+                .Where(item => !IsNorthernInvader(item.Actor) && (!_deliveryDogs.TryGetValue(item.Actor.Id, out var deliveryDog) || deliveryDog.PlayerId == player.Id) && !IsGasAsleep(item.Actor.Id) && !item.Actor.IsPassingThroughPortal(now) && !IsProbulatorAbducted(item.Actor.Id) && (item.Rating < 0 || carryingQuestDrugs && item.Actor.FactionId == $"drug-watch:{player.Id}") &&
                     (item.Actor.Subtype != "policeOfficer" || player.WantedLevel > 0 || carryingQuestDrugs) &&
                     item.Actor.Position.Distance2D(player.Position) <= (player.LocationId == "outdoor" ? NpcSightRange(item.Actor, player.Position, player.Id) : 45 * ProgressionRules.NpcSight(StatsFor(player.Id))))
                 .OrderBy(item => item.Actor.Position.Distance2D(player.Position)).FirstOrDefault();

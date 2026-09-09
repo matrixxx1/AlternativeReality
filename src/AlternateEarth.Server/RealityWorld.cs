@@ -1024,7 +1024,7 @@ public sealed partial class RealityWorld
         {
             foreach (var actor in _actors.Values)
             {
-                if (IsCanadian(actor) || actor.Subtype == "haney" || IsProbulatorAbducted(actor.Id) || IsGasAsleep(actor.Id)) continue;
+                if (IsNorthernInvader(actor) || actor.Subtype == "haney" || IsProbulatorAbducted(actor.Id) || IsGasAsleep(actor.Id)) continue;
                 if (!_nextActorSpeech.TryGetValue(actor.Id, out var next))
                 {
                     _nextActorSpeech[actor.Id] = now.AddSeconds(_actorRandom.Next(10, 61));

@@ -11,8 +11,11 @@ public sealed partial class RealityWorld
     private sealed record Bleed(string Owner, string Location, DateTimeOffset Next, int Ticks);
     private readonly ConcurrentDictionary<string, Bleed> _bleeds = new();
     private static bool IsCanadian(ActorState actor) => actor.Subtype is "canadian" or "canadianBoss";
+    private static bool IsNorthernWildlife(ActorState actor) => actor.Subtype is "angryMoose" or "helmetBeaver" or "tacticalGoose";
+    private static bool IsNorthernInvader(ActorState actor) => IsCanadian(actor) || IsNorthernWildlife(actor);
     private bool MapleBoostActive(string id) => _mapleBoosts.GetValueOrDefault(id) > _probulatorClock.GetUtcNow();
-    private static readonly string[] CanadianLines = ["Eh hoser!", "Knobber!", "Sorry! Terribly sorry about your ribs, eh.", "Pardon me! Was that your personal space?", "Oh, sorry! After you. Into the gas, preferably.", "Take off, eh!", "Please accept my sincerest apologies for the atmosphere.", "Sorry, bud. I'll send a very polite get-well card."];
+    private static readonly string[] CanadianLines = ["Eh hoser!", "Knobber!", "Sorry! Terribly sorry about your ribs, eh.", "Pardon me! Was that your personal space?", "Oh, sorry! After you. Into the gas, preferably.", "Take off, eh!", "Please accept my sincerest apologies for the atmosphere.", "Sorry, bud. I'll send a very polite get-well card.",
+        "Yeah, no", "no, yeah", "sorry", "my bad, eh", "where's my bubby hug eh?", "Want to sniff my glitch?", " We ain't attacking eh, we only.out for a rip eh", "I miss my double double", "o no my mickey is empty eh", "how many clicks are we traveling per maple leaf fall, eh?"];
     private void CanadianAttackSpeech(ActorState actor) => EventSay(actor.Id, actor.Name, CanadianLines[Random.Shared.Next(CanadianLines.Length)]);
 
     private void SpawnNorthernBosses(InversionState e)
@@ -45,6 +48,7 @@ public sealed partial class RealityWorld
     private async Task StepNorthernCombatAsync(double seconds, DateTimeOffset now, CancellationToken token)
     {
         if (_activeInversion is not { } e) return;
+        await StepNorthernWildlifeAsync(e, seconds, now, token);
         var patches = e.Patches.Where(p => p.EndsAtUtc > now).ToList();
         foreach (var original in _actors.Values.Where(a => IsCanadian(a) && a.EventName == e.Name).ToArray())
         {
@@ -90,7 +94,7 @@ public sealed partial class RealityWorld
                 var damage = Math.Min(4, gas.Count(p => p.Position.Distance2D(player.Position) <= p.Radius)) * .5;
                 if (damage > 0) await EventHurtPlayerAsync(player, damage, e.BossId, player.Position, "canadianGas", token);
             }
-            foreach (var actor in _actors.Values.Where(a => a.LocationId == "outdoor" && !IsCanadian(a)).ToArray())
+            foreach (var actor in _actors.Values.Where(a => a.LocationId == "outdoor" && !IsNorthernInvader(a)).ToArray())
             {
                 var damage = Math.Min(4, gas.Count(p => p.Position.Distance2D(actor.Position) <= p.Radius)) * .5;
                 if (damage <= 0) continue;

@@ -111,6 +111,7 @@ public sealed partial class RealityWorld
                     else active = active with { Kills = active.Kills + 1, Message = $"Canadians defeated: {active.Kills + 1}/50. Then defeat Mecha Terry AND Mecha Phil." };
                     continue;
                 }
+                if (active.Type == "northern" && IsNorthernWildlife(kill.Actor)) continue;
                 if (kill.Actor.Id == active.BossId) { await FinishInversionAsync(true, token); return; }
                 active = active with { Kills = active.Kills + 1 };
                 if (_stolenWeapons.Remove(kill.Actor.Id, out var weapon))
@@ -155,7 +156,7 @@ public sealed partial class RealityWorld
                 if (type == "northern") { var actorId = id + ":minion:" + n; _actors[actorId] = _actors[actorId] with { EquippedWeapon = n % 10 < 7 ? "fist" : n % 10 < 9 ? "hockeyStick" : "iceSkate" }; }
             }
         }
-        if (type == "northern") _activeInversion = _activeInversion with { Message = "Defeat 50 Canadians together, then BOTH Mecha Terry and Mecha Phil." };
+        if (type == "northern") { SpawnNorthernWildlife(_activeInversion); _activeInversion = _activeInversion with { Message = "Defeat 50 Canadians together, then BOTH Mecha Terry and Mecha Phil. Watch for charging moose, helmeted beavers, and tactical goose squads!" }; }
         EventSay("server", definition.Name, type switch { "fruit" => "The beans have breached containment. Keep moving.", "hoa" => "Your portal is not an approved color.", "barrel" => "It loves you. Please maintain a safe distance.", _ => definition.Name + " is arriving through a portal!" });
     }
     private void SpawnInversionActor(InversionState e, string id, string subtype, string name, double health, WorldPosition point)
@@ -173,7 +174,7 @@ public sealed partial class RealityWorld
         foreach (var actor in _actors.Values.Where(ManagedEventActor).ToArray()) { _actors.TryRemove(actor.Id, out _); _inversionRemovals.Enqueue(actor.Id); }
         foreach (var stolen in _stolenWeapons.Values) { AddInventory(stolen.Owner, stolen.Weapon, 1); await SaveInventoryAsync(stolen.Owner, token); }
         _stolenWeapons.Clear();
-        _activeInversion = null; _retroEndsAt = null;
+        _activeInversion = null; _retroEndsAt = null; _northernWildlifeRoutes.Clear();
         foreach (var player in _players.Values.Where(p => _dungeons.TryGetValue(p.LocationId, out var d) && d.EventBattle?.EventId == e.Id).ToArray())
         {
             await ExitDungeonAsync(player.Id, token);
