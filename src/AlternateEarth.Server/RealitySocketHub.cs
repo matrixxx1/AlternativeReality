@@ -114,6 +114,7 @@ public sealed class RealitySocketHub
                         if (movement is not null)
                         {
                             if (movement.Moved || movement.Drowned || movement.Fell || movement.Died || movement.Message is not null) await BroadcastAsync(new { type = "playerMoved", player = movement.Player }, null, cancellationToken);
+                            else await connection.SendAsync(new { type = "playerMoved", player = movement.Player }, cancellationToken);
                             if (movement.Blocked) await connection.SendAsync(new { type = "movementBlocked", sequence = moveRequest.Sequence, message = movement.Message ?? "Something is blocking the way." }, cancellationToken);
                             if (movement.Fell) await connection.SendAsync(new { type = "playerFell", message = movement.Message, player = movement.Player }, cancellationToken);
                             if (movement.Message is not null && !movement.Blocked && !movement.Fell && !movement.Died) await connection.SendAsync(new { type = "movementNotice", message = movement.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
@@ -449,9 +450,14 @@ public sealed class RealitySocketHub
                         break;
                     case "openChest":
                         var chestRequest = root.Deserialize<OpenChestRequest>(SharedJson.Options)!;
-                        var reward = await _world.OpenChestAsync(characterId, chestRequest.ChestId, cancellationToken);
-                        await BroadcastAsync(new { type = "playerUpdated", player = reward.Player }, null, cancellationToken);
-                        await connection.SendAsync(new { type = "chestOpened", contents = reward.Contents, message = reward.Message, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        var nearbyChest = await _world.OpenNearbyTreasureAsync(characterId, chestRequest.ChestId, true, cancellationToken);
+                        await BroadcastNearbyTreasureAsync(nearbyChest, cancellationToken);
+                        await connection.SendAsync(new { type = "nearbyTreasureOpened", contents = nearbyChest, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "takeNearbyTreasure":
+                        var nearbyTaken = await _world.TakeNearbyTreasureAsync(characterId, root.Deserialize<TakeNearbyTreasureRequest>(SharedJson.Options)!, cancellationToken);
+                        await BroadcastNearbyTreasureAsync(nearbyTaken, cancellationToken);
+                        await connection.SendAsync(new { type = "nearbyTreasureUpdated", contents = nearbyTaken, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "takeChestItems":
                         var chestTake = await _world.TakeChestItemsAsync(characterId, root.Deserialize<TakeChestItemsRequest>(SharedJson.Options)!, cancellationToken);
@@ -464,8 +470,9 @@ public sealed class RealitySocketHub
                     case "collectLoot":
                     case "openLoot":
                         var lootId = root.GetProperty("lootId").GetString() ?? string.Empty;
-                        var openedLoot = _world.OpenLoot(characterId, lootId);
-                        await connection.SendAsync(new { type = "lootOpened", loot = openedLoot, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        var openedLoot = await _world.OpenNearbyTreasureAsync(characterId, lootId, false, cancellationToken);
+                        await BroadcastNearbyTreasureAsync(openedLoot, cancellationToken);
+                        await connection.SendAsync(new { type = "nearbyTreasureOpened", contents = openedLoot, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "takeLootItems":
                         var lootRequest = root.Deserialize<TakeLootItemsRequest>(SharedJson.Options)!;
@@ -584,6 +591,10 @@ public sealed class RealitySocketHub
                         await connection.SendAsync(new { type = "error", message = "Unknown message type." }, cancellationToken);
                         break;
                 }
+            }
+            catch (CombatTargetUnavailableException exception)
+            {
+                await connection.SendAsync(new { type = "combatTargetUnavailable", targetId = exception.TargetId }, cancellationToken);
             }
             catch (Exception exception) when (exception is InvalidOperationException or JsonException or HttpRequestException)
             {
@@ -717,6 +728,13 @@ public sealed class RealitySocketHub
 
     public Task BroadcastDoorLocksAsync(DoorLockSchedule schedule, CancellationToken cancellationToken = default) =>
         BroadcastAsync(new { type = "doorLocksChanged", doorLocks = schedule.Doors, doorLockCycleEndsAtUtc = schedule.EndsAtUtc }, null, cancellationToken);
+
+    private async Task BroadcastNearbyTreasureAsync(NearbyTreasureState treasure, CancellationToken token)
+    {
+        await BroadcastAsync(new { type = "playerUpdated", player = treasure.Player }, null, token);
+        foreach (var id in treasure.RemovedLoot) await BroadcastAsync(new { type = "lootRemoved", lootId = id }, null, token);
+        foreach (var loot in treasure.ChangedLoot) await BroadcastAsync(new { type = "lootCreated", loot }, null, token);
+    }
 
     public async Task BroadcastCombatAsync(IReadOnlyList<CombatEvent> combat, CancellationToken cancellationToken = default)
     {

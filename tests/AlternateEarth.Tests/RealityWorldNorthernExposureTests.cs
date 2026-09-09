@@ -57,6 +57,14 @@ public sealed partial class RealityWorldTests
         Assert.Equal(20, actors[actor.Id].HealthHearts);
         var generic = await world.AdvanceHostilityAsync(TimeSpan.FromSeconds(.5));
         Assert.DoesNotContain(generic.Combat, c => c.AttackerId == actor.Id);
+        if (subtype == "angryMoose")
+        {
+            clock.Advance(6);
+            await world.AdvanceInversionsAsync(TimeSpan.Zero);
+            var attacks = world.TakeInversionCombat();
+            Assert.Equal(0, Assert.Single(attacks, c => c.AttackerId == actor.Id && c.Weapon == "mooseSyrup").Damage);
+            Assert.DoesNotContain(attacks, c => c.AttackerId == actor.Id && c.Weapon == "mooseCharge");
+        }
     }
 
     [Fact]

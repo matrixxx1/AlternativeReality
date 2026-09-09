@@ -5,10 +5,25 @@ namespace AlternateEarth.Server;
 public sealed partial class RealityWorld
 {
     private readonly Dictionary<string, (DateTimeOffset ReplanAt, Queue<WorldPosition> Points)> _northernWildlifeRoutes = new();
+    private readonly Dictionary<string, DateTimeOffset> _mooseSyrupAttacks = new();
+
+    private void MooseSyrupAttack(ActorState moose, PlayerState target, DateTimeOffset now)
+    {
+        var drop = new LootDropState($"syrup:{Guid.NewGuid():N}", target.Position, target.LocationId, 0,
+            [InventoryStack("mapleSyrup", 1)], now.AddSeconds(5), "mapleSyrupPuddle");
+        _loot[drop.Id] = drop; _deathDropAnnouncements.Enqueue(drop);
+        _inversionCombat.Enqueue(new(moose.Id, target.Id, "mooseSyrup", moose.Position, target.Position, false, 0, false,
+            "The moose pees maple syrup! Standing in the puddle halves movement speed for up to 5 seconds. Collect it as maple syrup."));
+    }
+
+    private bool StandingInMapleSyrup(PlayerState player) => player.TravelMode != TravelMode.Ufo &&
+        _loot.Values.Any(drop => drop.DropKind == "mapleSyrupPuddle" && drop.ExpiresAtUtc > _probulatorClock.GetUtcNow() &&
+            drop.LocationId == player.LocationId && drop.Position.Distance2D(player.Position) <= 2.5);
 
     private void SpawnNorthernWildlife(InversionState e)
     {
         _northernWildlifeRoutes.Clear();
+        _mooseSyrupAttacks.Clear();
         for (var n = 0; n < 24; n++)
         {
             var subtype = n < 4 ? "angryMoose" : n < 12 ? "helmetBeaver" : "tacticalGoose";
@@ -74,7 +89,13 @@ public sealed partial class RealityWorld
             {
                 _inversionAttacks[actor.Id] = now.AddSeconds(moose ? .9 : beaver ? .65 : .5);
                 CanadianAttackSpeech(actor);
-                await EventHurtPlayerAsync(target, moose ? 2.5 : beaver ? 1 : .5, actor.Id, actor.Position, moose ? "mooseCharge" : beaver ? "beaverBite" : "goosePeck", token);
+                if (moose && !_mooseSyrupAttacks.ContainsKey(actor.Id)) _mooseSyrupAttacks[actor.Id] = now.AddSeconds(6);
+                if (moose && _mooseSyrupAttacks.GetValueOrDefault(actor.Id) <= now)
+                {
+                    _mooseSyrupAttacks[actor.Id] = now.AddSeconds(6);
+                    MooseSyrupAttack(actor, target, now);
+                }
+                else await EventHurtPlayerAsync(target, moose ? 2.5 : beaver ? 1 : .5, actor.Id, actor.Position, moose ? "mooseCharge" : beaver ? "beaverBite" : "goosePeck", token);
             }
             actor = actor with { Version = actor.Version + 1 }; _actors[actor.Id] = actor; _inversionActorUpdates.Enqueue(actor);
         }

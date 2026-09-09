@@ -9,7 +9,6 @@ public sealed partial class RealityWorld
 {
     public const long BasePurchasePriceCents = 35_000_000;
     public const double MaximumBackpackWeightPounds = 50;
-    public const int MaximumWeaponSlots = 3;
     private static readonly string[] FriendlyHumanNames =
     [
         "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",
@@ -1132,7 +1131,7 @@ public sealed partial class RealityWorld
         var playerTarget = actorTarget is null && _players.TryGetValue(request.TargetId, out var other) ? other : null;
         var busTarget = request.TargetId.StartsWith("bus:", StringComparison.Ordinal)
             ? _buses.Values.FirstOrDefault(b => b.State.Id == request.TargetId) : null;
-        if (actorTarget is null && playerTarget is null && busTarget is null) throw new InvalidOperationException("Target not found.");
+        if (actorTarget is null && playerTarget is null && busTarget is null) throw new CombatTargetUnavailableException(request.TargetId);
         if (busTarget is not null && (busTarget.State.HealthHearts <= 0 || player.RidingBusId is not null))
             throw new InvalidOperationException("Get off before attacking a serviceable bus.");
         if (playerTarget is not null && !Configuration.PvpEnabled) throw new InvalidOperationException("Player-versus-player combat is disabled in this reality.");
@@ -1383,7 +1382,7 @@ public sealed partial class RealityWorld
             if (_itemConfigurations.TryGetValue(itemType, out var item)) mph += (item.SpeedModifierMph ?? 0) * (itemType is "bike" or "skateboard" ? staminaScale : 1);
         mph = Math.Max(.1, mph);
         var loadMultiplier = player.GodMode ? 1 : Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / (MaximumBackpackWeightPounds * 2), .5, 1);
-        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * EnergyDrinkSpeedMultiplier(player) * (MapleBoostActive(player.Id) ? 1.25 : 1) * (ProbedActive(player) ? .5 : 1) * loadMultiplier * (player.TravelMode == TravelMode.Ufo ? .5 : 1);
+        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * EnergyDrinkSpeedMultiplier(player) * (MapleBoostActive(player.Id) ? 1.25 : 1) * (ProbedActive(player) ? .5 : 1) * (StandingInMapleSyrup(player) ? .5 : 1) * loadMultiplier * (player.TravelMode == TravelMode.Ufo ? .5 : 1);
     }
 
     private static bool EnergyDrinkBoostActive(PlayerState player, DateTimeOffset? at = null) => player.EnergyDrinkBoostUntilUtc is { } boostUntil && boostUntil > (at ?? DateTimeOffset.UtcNow);
@@ -1555,15 +1554,21 @@ public sealed partial class RealityWorld
 
     public async Task<ChestOpenResult> OpenChestAsync(string playerId, string chestId, CancellationToken cancellationToken = default)
     {
+        await _treasureInteractionLock.WaitAsync(cancellationToken);
+        try { return await OpenChestCoreAsync(playerId, chestId, cancellationToken); }
+        finally { _treasureInteractionLock.Release(); }
+    }
+
+    private async Task<ChestOpenResult> OpenChestCoreAsync(string playerId, string chestId, CancellationToken cancellationToken)
+    {
         var (player, _, dungeon) = ValidateTreasureChest(playerId, chestId);
         var contents = _chestContents.GetOrAdd(chestId, id => CreateChestContents(id, dungeon is { IsHome: false, IsStore: false }));
         var collectedMoney = contents.MoneyCents;
         var updated = player;
         if (collectedMoney > 0)
         {
-            updated = player with { WalletCents = player.WalletCents + collectedMoney, Version = player.Version + 1 };
+            updated = await CreditTreasureMoneyAsync(playerId, collectedMoney, cancellationToken);
             _chestContents[chestId] = contents = contents with { MoneyCents = 0 };
-            await SavePlayerAsync(updated, cancellationToken);
         }
         var message = collectedMoney > 0 ? $"Collected {collectedMoney / 100m:C} cash. Choose any items you want to carry." : "Choose any remaining items you want to carry.";
         return new ChestOpenResult(updated, contents, message);
@@ -2173,21 +2178,19 @@ public sealed partial class RealityWorld
         var items = GetInventoryItems(playerId);
         var carried = items.Where(item => item.CarriedInBackpack).ToArray();
         return new InventoryState(playerId, items,
-            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), PlayerCarryingCapacity(playerId),
-            carried.Count(item => item.Category == InventoryCategory.Weapon), MaximumWeaponSlots,
+            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), playerIsGod(playerId) ? null : PlayerCarryingCapacity(playerId),
+            carried.Count(item => item.Category == InventoryCategory.Weapon), null,
             carried.Count(item => item.Category == InventoryCategory.Quest), null,
             carried.Count(item => item.Category == InventoryCategory.Other && !item.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)), null);
     }
 
     private bool CanAddToBackpack(string playerId, IEnumerable<ItemStack> additions, out string message)
     {
+        if (playerIsGod(playerId)) { message = string.Empty; return true; }
         var combined = GetInventoryItems(playerId).ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         foreach (var addition in additions.Where(item => item.Quantity > 0)) combined[addition.ItemType] = combined.GetValueOrDefault(addition.ItemType) + addition.Quantity;
         var items = combined.Select(pair => InventoryStack(pair.Key, pair.Value)).Where(item => item.CarriedInBackpack).ToArray();
-        var weaponSlots = items.Count(item => item.Category == InventoryCategory.Weapon);
         var weight = items.Sum(item => item.UnitWeightPounds * item.Quantity);
-        if (weaponSlots > MaximumWeaponSlots) message = $"Your backpack only has {MaximumWeaponSlots} weapon slots (your fist is always free).";
-        else
         {
             var capacity = PlayerCarryingCapacity(playerId);
             if (weight > capacity + .0001) message = $"That would make your backpack weigh {weight:0.##} lb; your maximum current carrying capacity is {capacity:0} lb.";

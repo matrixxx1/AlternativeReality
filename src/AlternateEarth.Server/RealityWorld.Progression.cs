@@ -18,7 +18,8 @@ public sealed partial class RealityWorld
 
     internal CombatEvent ResolveCombatFear(CombatEvent combat)
     {
-        if (combat.TargetDied || !combat.Hit || combat.Damage <= 0 || combat.AttackerId == combat.TargetId ||
+        if (combat.Weapon is "canadianGas" or "areaHazard" or "molotovFire" ||
+            combat.TargetDied || !combat.Hit || combat.Damage <= 0 || combat.AttackerId == combat.TargetId ||
             !_players.TryGetValue(combat.TargetId, out var player) || player.GodMode || player.HealthHearts <= 0)
             return combat;
         var actor = FindActor(player.Id, combat.AttackerId);

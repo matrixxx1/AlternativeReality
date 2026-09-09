@@ -17,8 +17,12 @@ public sealed partial class RealityWorld
     public async Task<LootTakeResult> TakeLootItemsAsync(string playerId, TakeLootItemsRequest request, CancellationToken cancellationToken = default)
     {
         await _treasureInteractionLock.WaitAsync(cancellationToken);
-        try
-        {
+        try { return await TakeLootItemsCoreAsync(playerId, request, cancellationToken); }
+        finally { _treasureInteractionLock.Release(); }
+    }
+
+    private async Task<LootTakeResult> TakeLootItemsCoreAsync(string playerId, TakeLootItemsRequest request, CancellationToken cancellationToken)
+    {
             var loot = OpenLoot(playerId, request.LootId);
             if (request.Items is null || request.Items.Any(line => string.IsNullOrWhiteSpace(line.ItemType) || line.Quantity is < 1 or > 100_000))
                 throw new InvalidOperationException("Choose a valid item and quantity.");
@@ -41,13 +45,11 @@ public sealed partial class RealityWorld
                 throw new InvalidOperationException(capacityMessage + " Drop carried items or select fewer items.");
 
             foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity, reward.Quality);
-            var player = _players[playerId];
-            var updated = player with { WalletCents = player.WalletCents + loot.MoneyCents, Version = player.Version + 1 };
+            var updated = await CreditTreasureMoneyAsync(playerId, loot.MoneyCents, cancellationToken);
             var remainder = remaining.Count == 0 ? null : loot with { Items = remaining.ToArray(), MoneyCents = 0 };
             if (remainder is null) _loot.TryRemove(loot.Id, out _);
             else _loot[loot.Id] = remainder;
             await SaveInventoryAsync(playerId, cancellationToken);
-            await SavePlayerAsync(updated, cancellationToken);
             if (loot.DropKind is "tombstone" or "eventReward")
             {
                 if (remainder is null) await _store.RemovePersistentLootAsync(loot.Id, cancellationToken);
@@ -56,8 +58,6 @@ public sealed partial class RealityWorld
             var collected = rewards.Select(item => $"{item.Quantity} × {InventoryDefinition(item.ItemType).DisplayName}").ToList();
             if (loot.MoneyCents > 0) collected.Insert(0, $"{loot.MoneyCents / 100m:C}");
             return new LootTakeResult(updated, remainder, collected.Count > 0 ? $"Collected {string.Join(", ", collected)}." : "Left all items in the treasure.");
-        }
-        finally { _treasureInteractionLock.Release(); }
     }
 }
 

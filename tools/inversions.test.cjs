@@ -47,3 +47,9 @@ test('photo quest progress follows distinct carried prints and drops when one is
  state.privateState.inventory.items.pop();api.tick();assert.match(panel.children.find(e=>e.tag==='small').textContent,/1 \/ 3/);
  panel.children.find(e=>e.tag==='button'&&e.textContent==='Submit photographs').listeners.click();
 });
+
+test('nearby private rewards request one combined treasure window',()=>{
+ const {api,state,sent}=fixture();state.privateState.loot=[{id:'a',dropKind:'eventReward',locationId:'outdoor',position:{x:0,y:0}},{id:'b',dropKind:'eventReward',locationId:'outdoor',position:{x:2,y:0}}];
+ api.tick();api.tick();assert.equal(sent.filter(r=>r.type==='openLoot').length,1);
+ state.chestContents={sources:[{id:'a'},{id:'b'}]};api.tick();assert.equal(sent.filter(r=>r.type==='openLoot').length,1);
+});

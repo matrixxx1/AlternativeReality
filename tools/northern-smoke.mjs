@@ -23,11 +23,11 @@ try{
   for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
   const response=await fetch(base+'/api/account/setup',{method:'POST',headers:{'content-type':'application/json','x-alternativereality-smoke-test':'1'},body:JSON.stringify({username:'NorthSmoke',password:'NorthSmoke-test-123!'})});
   assert.ok(response.ok);const setup=await response.json();
-  const seeded=spawnSync('python',['-X','utf8','-c',"import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"INSERT INTO Inventories(OwnerId,Slot,ItemType,Quantity,MetadataJson) VALUES(?,9999,'mapleSyrup',2,'{}')\",(sys.argv[2],)); c.commit()",path.join(data,'reality.db'),setup.characterId],{encoding:'utf8',windowsHide:true});assert.equal(seeded.status,0,seeded.stderr);
+  const seeded=spawnSync('python',['-X','utf8','-c',"import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"INSERT INTO Inventories(OwnerId,Slot,ItemType,Quantity,MetadataJson) VALUES(?,9999,'mapleSyrup',2,'{}')\",(sys.argv[2],)); c.execute(\"INSERT INTO Inventories(OwnerId,Slot,ItemType,Quantity,MetadataJson) VALUES(?,10000,'rock',2,'{}')\",(sys.argv[2],)); c.commit()",path.join(data,'reality.db'),setup.characterId],{encoding:'utf8',windowsHide:true});assert.equal(seeded.status,0,seeded.stderr);
   ws=new WebSocket(base.replace('http','ws')+'/ws?session='+encodeURIComponent(setup.sessionToken));const messages=[];ws.addEventListener('message',e=>messages.push(JSON.parse(e.data)));
   async function wait(predicate,after=0){const until=Date.now()+20000;while(Date.now()<until){const recent=messages.slice(after),error=recent.find(m=>m.type==='error');if(error)throw Error(error.message);const found=recent.find(predicate);if(found)return found;await new Promise(r=>setTimeout(r,10));}throw Error('Timed out');}
   async function command(request,type){const after=messages.length;ws.send(JSON.stringify(request));return wait(m=>m.type===type,after);}
-  const welcome=await wait(m=>m.type==='welcome');assert.equal(welcome.protocolVersion,62);
+  const welcome=await wait(m=>m.type==='welcome');assert.equal(welcome.protocolVersion,63);
   const items=Object.fromEntries(welcome.privateState.serverConfiguration.items.map(i=>[i.itemType,i]));
   assert.ok(items.fist.damage<items.hockeyStick.damage&&items.hockeyStick.damage<items.sword.damage);
   assert.ok(items.knife.damage<items.iceSkate.damage&&items.iceSkate.damage<items.sword.damage);
@@ -51,6 +51,26 @@ try{
   assert.match(messages.slice(rejectionAfter).find(m=>m.type==='error')?.message||'',/God mode must be enabled/);
   await command({type:'setGodMode',enabled:true},'playerUpdated');
   assert.equal((await command({type:'cancelServerVote'},'inversionsUpdated')).inversions.vote,null);
-  console.log(JSON.stringify({result:'PASS',protocol:62,weapons:['hockeyStick','iceSkate'],mapleSyrupConsumed:1,temporaryVisionBoost:true,clientAssetHttp:200,godModeVoteCancellation:true,unauthorizedCancellationRejected:true}));
+  // No-op/throttled movement must acknowledge so the client never waits forever.
+  for(let sequence=1;sequence<=5;sequence++)await command({type:'moveRequest',x:0,y:0,sequence},'playerMoved');
+  const moved=await command({type:'moveRequest',x:1,y:0,sequence:6},'playerMoved');assert.ok(moved.player.position);
+  const firstDrop=await command({type:'dropItem',itemType:'rock',quantity:1},'inventoryItemDropped');
+  const secondDrop=await command({type:'dropItem',itemType:'rock',quantity:1},'inventoryItemDropped');
+  const ground=secondDrop.privateState.loot.filter(l=>l.items.some(i=>i.itemType==='rock'));
+  assert.ok(ground.length>=2);
+  const treasure=await command({type:'openLoot',lootId:ground[0].id},'nearbyTreasureOpened');
+  assert.ok(treasure.contents.sources.length>=2);assert.ok(treasure.contents.items.find(i=>i.itemType==='rock').quantity>=2);
+  assert.equal(treasure.privateState.inventory.maximumWeightPounds,null);assert.equal(treasure.privateState.inventory.maximumWeaponSlots,null);
+  const taken=await command({type:'takeNearbyTreasure',anchorId:treasure.contents.anchorId,sources:treasure.contents.sources.map(s=>({id:s.id,chest:s.chest})),items:[{itemType:'rock',quantity:2}]},'nearbyTreasureUpdated');
+  assert.ok(taken.privateState.inventory.items.some(i=>i.itemType==='rock'&&i.quantity>=2));
+  const origin=taken.contents.player.position,placeAfter=messages.length;
+  await command({type:'placeTestCharacter',kind:'npc',x:origin.x+.5,y:origin.y},'testCharacterPlaced');
+  const testNpc=messages.slice(placeAfter).flatMap(m=>m.actors||[]).find(a=>a.isTestCharacter);assert.ok(testNpc);
+  await command({type:'setEquipment',slot:'weapon',itemType:'fist'},'privateState');
+  const attack=await command({type:'attack',targetId:testNpc.id,weapon:'fist'},'combatEvent');assert.equal(attack.combat.targetId,testNpc.id);
+  await command({type:'clearTestCharacters'},'testCharactersCleared');
+  const stale=await command({type:'attack',targetId:testNpc.id,weapon:'fist'},'combatTargetUnavailable');assert.equal(stale.targetId,testNpc.id);
+  await command({type:'moveRequest',x:1,y:0,sequence:7},'playerMoved');
+  console.log(JSON.stringify({result:'PASS',protocol:63,weapons:['hockeyStick','iceSkate'],mapleSyrupConsumed:1,temporaryVisionBoost:true,clientAssetHttp:200,godModeVoteCancellation:true,unauthorizedCancellationRejected:true,movementAcknowledgements:7,groupedTreasure:true,staleTargetReconciled:true}));
   ws.close();ws=null;
-}finally{ws?.close();server.kill();fs.closeSync(log);}
+}finally{ws?.close();if(keep){console.log(JSON.stringify({fixtureUrl:base,fixturePid:server.pid,data}));server.unref();}else server.kill();fs.closeSync(log);}

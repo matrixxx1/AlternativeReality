@@ -1,4 +1,4 @@
-# Renderer-neutral protocol v36
+# Renderer-neutral protocol v63
 
 The prototype uses camel-case JSON text frames over WebSockets at `/ws`. Browser clients authenticate with an HTTP-only account-session cookie. The server selects the active character and sends `welcome` with an authoritative public snapshot plus player-private inventory, relationships, base, dungeon, chest, and loot state. Snapshots include exact `loadedAreas` cells in addition to aggregate bounds so clients never mistake an unloaded gap for generated geography.
 
@@ -81,7 +81,7 @@ Snapshots carry authoritative door-lock state and the current cycle's UTC end ti
 
 Dirt-bike and motorcycle tanks are separate authoritative character fields. Movement consumes gas from distance traveled at 50 mpg and 45 mpg respectively; an empty tank blocks motorized movement. God Mode neither checks nor consumes gasoline.
 
-Inventory stacks include their category, per-unit weight, and whether they are physically carried. Distinct carried item types consume one category slot per stack: 3 weapon, 3 quest, and 6 other stacks. Quantity does not consume additional slots, but it multiplies stack weight. The server normally rejects acquisitions or chest withdrawals above 50 pounds. Carried weight reduces normal movement speed by one percent per pound; God Mode bypasses the speed penalty but not inventory categorization. The permanent fist is virtual and free. Bikes, inflatable rafts, and motorcycles currently add no player-carried weight; dirt bikes and motorcycles are parked assets rather than backpack cargo.
+Inventory stacks include their category, per-unit weight, and whether they are physically carried. Weapon, quest, and other category slots are unlimited (`maximumWeaponSlots`, `maximumQuestSlots`, and `maximumOtherSlots` are null). Quantity multiplies stack weight. The server checks normal acquisitions against current carrying capacity, which starts at 50 pounds. God Mode bypasses the weight check and reports `maximumWeightPounds: null`. Carried weight reduces normal movement speed by one percent per pound; God Mode bypasses that penalty. The permanent fist is virtual and free. Bikes, inflatable rafts, and motorcycles currently add no player-carried weight; dirt bikes and motorcycles are parked assets rather than backpack cargo.
 
 Energy drinks cost a server-configurable $2–$10. Consuming one starts authoritative persisted UTC deadlines: 15 minutes at 2× final movement speed and 100-pound capacity, followed by a 5-minute crash at ⅕ final speed and 10-pound capacity. Existing cargo is retained during a crash, but new weight above the temporary limit is rejected. The boost prevents bed rest; after it ends, bed rest clears the crash immediately. Death clears both phases, while reconnects and server restarts preserve them.
 
@@ -92,3 +92,12 @@ Merchant offers use deterministic server-configured rotation buckets. Reopening 
 `PlayerState.bodyHeat` is the authoritative 0–100 thermal meter. Current hourly weather, outdoor movement, equipped clothing, indoor recovery, hypothermia damage, overheating stamina drain, death reset, and God Mode protection are all evaluated by the server.
 
 `PlayerState.candleUntilUtc` is the authoritative candle burn deadline. A non-God player consumes one candle when it enters the offhand slot; unequipping clears the deadline without refunding or consuming another candle. God Mode skips inventory consumption. The deadline is persisted and cleared by the server vitals tick when it expires.
+
+
+## Nearby treasure and combat acknowledgements (v63)
+
+`openLoot`, `collectLoot`, and `openChest` return `nearbyTreasureOpened` with `contents` and `privateState`. All accessible drops and chests within four meters share one item list; nearby private event rewards remain owner-only. Cash is credited immediately, independently of item selection or backpack capacity. `contents` contains `anchorId`, `sources` (`id`, `chest`, and items), aggregated `items`, `player`, and a message.
+
+`takeNearbyTreasure` accepts `anchorId`, a `sources` array of `{id, chest}`, and `items` containing `{itemType, quantity}`. The server validates every source, ownership, range, available quantities, and the combined backpack weight before taking items. It returns `nearbyTreasureUpdated` with remaining contents and refreshed private state. Existing single-source take commands remain supported.
+
+Every resolved `moveRequest` gets a `playerMoved` response, including zero displacement, throttling, and a revision conflict with combat. Older player revisions must not overwrite newer positions. `combatTargetUnavailable` identifies a removed target so clients can clear it from targeting and stop that pursuit. Damage from `canadianGas`, `areaHazard`, and `molotovFire` does not trigger fear or cancel an attack.

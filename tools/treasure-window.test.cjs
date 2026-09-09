@@ -6,7 +6,7 @@ function harness(){
   const heading=element(),ui={treasureItems:element(),treasureCash:element(),treasureWeight:element(),treasureWarning:element(),treasureTake:element(),treasureClose:element(),treasureWindow:{hidden:true,scrollHeight:500,classList:{contains:()=>false},querySelector:()=>heading}};
   ui.treasureItems.querySelectorAll=()=>ui.treasureItems.children.map(row=>row.children.at(-1));
   const state={players:new Map([['me',{}]]),playerId:'me',loot:new Map(),chests:new Map(),privateState:{inventory:{items:[{itemType:'rock',quantity:98,category:'weapon',unitWeightPounds:.5}],weightPounds:49,maximumWeightPounds:50}}};
-  const sent=[],c=vm.createContext({ui,state,sent,document:{createElement:element},itemDisplayName:type=>type,createItemArt:element,stackWeight:item=>item.quantity*item.unitWeightPounds,weightText:w=>w+' lb',effectiveCarryingCapacity:(_,capacity)=>capacity,send:message=>sent.push(message),innerWidth:1200,innerHeight:800,viewportWidth:()=>900,floatPanel:()=>{}});
+  const sent=[],c=vm.createContext({ui,state,sent,document:{createElement:element},itemDisplayName:type=>type,createItemArt:element,stackWeight:item=>item.quantity*item.unitWeightPounds,weightText:w=>w+' lb',effectiveCarryingCapacity:(me,capacity)=>me?.godMode?Infinity:capacity,send:message=>sent.push(message),innerWidth:1200,innerHeight:800,viewportWidth:()=>900,floatPanel:()=>{}});
   for(const name of ['closeTreasure','openLootTreasure','openTreasure','refreshTreasure','treasureSelection','treasureCapacity','updateTreasureWeight','sendTreasureTake','tryAutomaticTreasure','recoverAutomaticTreasure','takeAllTreasure','takeTreasureSelection'])vm.runInContext(implementation(name),c);
   c.loot={id:'loot',moneyCents:123,items:[{itemType:'rock',quantity:10,category:'weapon',unitWeightPounds:.5}]};state.loot.set(c.loot.id,c.loot);
   return c;
@@ -43,7 +43,7 @@ test('backpack changes from Inventory refresh capacity without losing the treasu
 test('cash can be collected alone and an existing item stack does not require a new slot',()=>{
   const c=harness();c.state.privateState.inventory.maximumWeaponSlots=1;c.openLootTreasure(c.loot);c.takeTreasureSelection();assert.equal(c.sent[0].items.length,0);
   c.ui.treasureItems.querySelectorAll()[0].value='1';c.updateTreasureWeight();assert.equal(c.ui.treasureTake.disabled,false);
-  c.openLootTreasure({...c.loot,items:[{itemType:'knife',quantity:1,category:'weapon',unitWeightPounds:.1}]});c.ui.treasureItems.querySelectorAll()[0].value='1';c.updateTreasureWeight();assert.equal(c.ui.treasureTake.disabled,true);assert.match(c.ui.treasureWarning.textContent,/slots/);
+  c.openLootTreasure({...c.loot,items:[{itemType:'knife',quantity:1,category:'weapon',unitWeightPounds:.1}]});c.ui.treasureItems.querySelectorAll()[0].value='1';c.updateTreasureWeight();assert.equal(c.ui.treasureTake.disabled,false);assert.equal(c.ui.treasureWarning.textContent,'');
 });
 test('chests use selective pickup too and stale ground quantities are clamped or closed',()=>{
   const c=harness();c.openTreasure({chestId:'chest',items:c.loot.items});c.ui.treasureItems.querySelectorAll()[0].value='1';c.takeTreasureSelection();assert.equal(c.sent[0].type,'takeChestItems');
@@ -58,8 +58,8 @@ test('Take all looting bypasses the window for both chests and loose treasure wh
     assert.equal(c.sent[0].type,kind==='loot'?'takeLootItems':'takeChestItems');
   }
 });
-test('Take all looting falls back to item selection when weight or slots are full',()=>{
-  for(const limit of ['weight','slots']){
+test('Take all looting falls back to item selection when weight is full',()=>{
+  for(const limit of ['weight']){
     const c=harness();c.state.lootingMode='all';
     if(limit==='slots'){c.state.privateState.inventory.weightPounds=1;c.state.privateState.inventory.maximumWeaponSlots=1;c.loot.items=[{itemType:'knife',quantity:1,category:'weapon',unitWeightPounds:.1}];}
     c.openLootTreasure(c.loot,null,false,true);assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.sent.length,0);
@@ -87,4 +87,19 @@ test('quest and other stacks have no slot cap for selective and automatic pickup
     if(!automatic){c.ui.treasureItems.querySelectorAll()[0].value='1';c.takeTreasureSelection();}
     assert.equal(c.sent.length,1);assert.equal(c.sent[0].items[0].quantity,1);
   }
+});
+
+
+test('God mode ignores backpack weight and all weapon counts',()=>{
+ const c=harness();c.state.players.set('me',{godMode:true});c.state.privateState.inventory.weightPounds=10000;
+ c.openTreasure({nearby:true,anchorId:'a',sources:[{id:'a',chest:false}],items:[{itemType:'sword',quantity:100,unitWeightPounds:4,category:'weapon'}]});
+ c.ui.treasureItems.querySelectorAll()[0].value='100';c.takeTreasureSelection();
+ assert.equal(c.sent[0].type,'takeNearbyTreasure');assert.equal(c.sent[0].items[0].quantity,100);assert.match(c.ui.treasureWeight.textContent,/Unlimited/);
+ c.state.players.set('me',{godMode:false});c.updateTreasureWeight();assert.equal(c.ui.treasureTake.disabled,true);
+});
+test('one nearby selection includes all source IDs and preserves quantity after pickup',()=>{
+ const c=harness();const contents={nearby:true,anchorId:'a',sources:[{id:'a',chest:false},{id:'b',chest:true}],items:[{itemType:'rock',quantity:2,unitWeightPounds:.5}]};
+ c.openTreasure(contents);c.ui.treasureItems.querySelectorAll()[0].value='1';c.takeTreasureSelection();
+ assert.equal(c.sent[0].sources.length,2);assert.equal(c.sent[0].items.length,1);
+ c.openTreasure({...contents,items:[{...contents.items[0],quantity:1}]},null,true);assert.equal(c.ui.treasureItems.querySelectorAll()[0].value,'1');
 });

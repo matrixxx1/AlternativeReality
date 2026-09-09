@@ -970,7 +970,7 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BackpackRejectsRewardsAboveAbsoluteWeightOrWeaponSlotLimit()
+    public async Task BackpackRejectsOverweightRewardsOutsideGodMode()
     {
         var configuration = new RealityConfiguration("inventory-limits", "Inventory Limits", 223, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var store = new SqliteRealityStore(Path.Combine(_directory, "inventory-limits.db"));
@@ -987,6 +987,7 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         Assert.True(opened.Player.WalletCents > player.WalletCents);
         Assert.Equal(100, world.GetPrivateState(player.Id).Inventory.Items.Single(item => item.ItemType == "rock").Quantity);
         var reward = opened.Contents.Items.First();
+        await world.SetGodModeAsync(player.Id, false);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.TakeChestItemsAsync(player.Id, new TakeChestItemsRequest(chest.Id, new[] { new PurchaseLine(reward.ItemType, 1) })));
         Assert.Contains("maximum", error.Message, StringComparison.OrdinalIgnoreCase);
     }

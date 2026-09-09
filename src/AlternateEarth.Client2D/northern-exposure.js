@@ -42,6 +42,13 @@
   }
   ctx.restore();const top=moose?-s*2.65:-s*2;ctx.textAlign='center';ctx.font='bold 10px monospace';ctx.strokeStyle='#18211b';ctx.lineWidth=3;ctx.strokeText(a.name,0,top);ctx.fillStyle='#ffe5ad';ctx.fillText(a.name,0,top);ctx.fillStyle='#3d2e2b';ctx.fillRect(-s*.55,top+5,s*1.1,3);ctx.fillStyle='#f75e49';ctx.fillRect(-s*.55,top+5,s*1.1*Math.max(0,a.healthHearts/a.maximumHealthHearts),3);ctx.restore();return true;
  }
+ function drawSyrup(ctx,loot,toScreen,state){
+  if(loot.dropKind!=='mapleSyrupPuddle')return false;
+  const p=toScreen(loot.position),r=state.scale*2.5;
+  ctx.save();ctx.fillStyle='rgba(185,104,19,.7)';ctx.strokeStyle='#e5ad47';ctx.lineWidth=2;
+  ctx.beginPath();ctx.ellipse(p.x,p.y,r,r*state.pitch,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.fillStyle='#ffe8a2';ctx.fillText('Maple syrup · ½ speed · collect',p.x,p.y-r*state.pitch-5);ctx.restore();return true;
+ }
  function drawTruck(ctx,e,toScreen,state){
   if(e.properties?.subtype!=='haneyPickup')return false;
   const p=toScreen(e.position),l=4.8*state.scale,w=1.9*state.scale*state.pitch,a=Number(e.properties.rotationDegrees||0)*Math.PI/180;
@@ -53,5 +60,5 @@
   ctx.fillStyle='#9f512e';for(const [x,y] of [[-.44,-.38],[-.1,.38],[.35,.25],[.4,-.3]])ctx.fillRect(l*x,w*y,l*.09,w*.15);
   ctx.fillStyle='#dad19b';ctx.fillRect(l*.46,-w*.43,l*.04,w*.18);ctx.fillRect(l*.46,w*.25,l*.04,w*.18);ctx.fillStyle='#999687';ctx.fillRect(l*.49,-w*.52,l*.035,w*1.04);ctx.restore();return true;
  }
- root.NorthernExposure={drawCanadian,drawWildlife,drawTruck};
+ root.NorthernExposure={drawCanadian,drawWildlife,drawTruck,drawSyrup};
 })(typeof window!=='undefined'?window:globalThis);

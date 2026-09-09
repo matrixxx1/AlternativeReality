@@ -118,3 +118,21 @@ test('a crowded attack click opens choices instead of attacking the first charac
  c.handlePrimaryClick({x:10,y:0},10,0);
  assert.equal(chosen.length,2);assert.equal(c.state.followCommand,null);assert.equal(c.sent.length,0);
 });
+
+function block(name){const start=source.indexOf(`  function ${name}(`);return source.slice(start,source.indexOf('\n  function ',start+1));}
+test('defeated dungeon actors are removed from follow targets and action choices',()=>{
+ const state={actors:new Map([['dead',{id:'dead'}]]),dungeon:{actors:[{id:'dead'},{id:'alive'}]},actionActor:{id:'dead'},actionChoices:{targets:[{id:'dead'},{id:'alive'}]}};
+ const remove=vm.runInNewContext(`(${block('removeCombatTarget')})`,{state});remove('dead');
+ assert.equal(state.actors.has('dead'),false);assert.deepEqual(state.dungeon.actors.map(a=>a.id),['alive']);assert.equal(state.actionActor,null);assert.equal(state.actionChoices.targets[0].id,'alive');
+});
+test('old combat player snapshots cannot move a player back after a newer movement',()=>{
+ const current={id:'me',version:12,position:{x:10,y:0}},state={players:new Map([['me',current]])};
+ const update=vm.runInNewContext(`(${block('updatePlayer')})`,{state});update({...current,version:11,position:{x:0,y:0}});assert.equal(state.players.get('me'),current);
+});
+test('incoming fear never clears held movement keys or repeatedly restarts an escape',()=>{
+ for(const moving of [true,false]){
+  const state={playerId:'me',players:new Map([['me',{id:'me'}]]),keys:new Set(moving?['w']:[]),autoFlee:!moving};
+  const receive=vm.runInNewContext(`(${block('receiveCombatFear')})`,{state,stopTravel:()=>assert.fail('Movement canceled')});
+  receive({targetId:'me',fleeInFear:true});assert.equal(state.keys.size,moving?1:0);
+ }
+});
