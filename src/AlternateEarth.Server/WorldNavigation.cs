@@ -42,6 +42,8 @@ public sealed class WorldNavigation
                     var roadPriority = entity.Properties.GetValueOrDefault("bridge") is not (null or "no") ? 12 : 4;
                     if (priority < roadPriority) { terrain = RoadTerrain(entity); priority = roadPriority; }
                     break;
+                case EntityKind.Water when priority < 3 && !WaterGeometry.Contains(entity,x,y) && (WaterGeometry.IsPolygon(entity) ? WaterGeometry.ShoreDistance(entity,x,y) <= 3 : DistanceToGeometry(x,y,entity.Geometry) <= WaterGeometry.Width(entity)/2+3):
+                    terrain=TerrainType.Sand; priority=2; break;
                 case EntityKind.Water when priority < 11 && WaterGeometry.Contains(entity, x, y):
                     terrain = WaterTerrain(entity, x, y);
                     priority = 10;
@@ -346,7 +348,7 @@ public sealed class WorldNavigation
         var padding = entity.Kind switch
         {
             EntityKind.Road or EntityKind.Sidewalk => Width(entity, 5) / 2,
-            EntityKind.Water => WaterGeometry.Width(entity) / 2,
+            EntityKind.Water => WaterGeometry.Width(entity) / 2 + 3,
             EntityKind.Tree => Width(entity, .85) + PlayerRadiusMeters,
             EntityKind.Vehicle => 3,
             _ => PlayerRadiusMeters

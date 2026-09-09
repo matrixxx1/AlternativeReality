@@ -129,7 +129,8 @@ public sealed class WaterImportTests
             new Dictionary<string, string> { ["width"] = "80" });
         var navigation = new WorldNavigation(Area.Bounds, [water], []);
         Assert.Equal(TerrainType.ShallowWater, navigation.TerrainAt(39, 0));
-        Assert.Equal(TerrainType.Grass, navigation.TerrainAt(41, 0));
+        Assert.Equal(TerrainType.Sand, navigation.TerrainAt(41, 0));
+        Assert.Equal(TerrainType.Grass, navigation.TerrainAt(44, 0));
     }
 
     private static async Task<GeographicDataset> Import(string json, GeographicArea area)

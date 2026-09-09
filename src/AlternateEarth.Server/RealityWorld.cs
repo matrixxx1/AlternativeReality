@@ -87,13 +87,14 @@ public sealed partial class RealityWorld
             if (_itemConfigurations.TryGetValue(item.ItemType, out var defaults))
                 _itemConfigurations[item.ItemType] = item with
                 {
+                    Nutrition = defaults.Nutrition,
                     SpeedModifierMph = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) && Math.Abs((item.SpeedModifierMph ?? 56.5) - 56.5) < .001
                         ? defaults.SpeedModifierMph
                         : item.SpeedModifierMph ?? defaults.SpeedModifierMph,
                     RangeMeters = item.ItemType.Equals("probulator", StringComparison.OrdinalIgnoreCase) && (Math.Abs(item.RangeMeters - 100) < .001 || Math.Abs(item.RangeMeters - 8) < .001)
                         ? defaults.RangeMeters
                         : item.RangeMeters,
-                    Effect = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) || item.ItemType.Equals("probulator", StringComparison.OrdinalIgnoreCase) ? defaults.Effect : item.Effect,
+                    Effect = defaults.Nutrition is not null || item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) || item.ItemType.Equals("probulator", StringComparison.OrdinalIgnoreCase) ? defaults.Effect : item.Effect,
                     VisibilityModifierMeters = item.VisibilityModifierMeters ?? defaults.VisibilityModifierMeters,
                     WeightPounds = defaults.WeightPounds,
                     Category = defaults.Category,
@@ -116,6 +117,7 @@ public sealed partial class RealityWorld
         await _store.ReleaseExpiredBaseClaimsAsync(Configuration.Id, DateTimeOffset.UtcNow, cancellationToken);
         foreach (var claim in await _store.LoadPublicBaseClaimsAsync(Configuration.Id, cancellationToken))
             _publicBaseClaims[claim.BuildingId] = claim;
+        RestoreBuriedChests();
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
         _loadedAreas["0:0"] = Configuration.Area.Bounds;
         await AdvanceTransitAsync(TimeSpan.Zero, cancellationToken);
@@ -220,7 +222,7 @@ public sealed partial class RealityWorld
         var location = resumesInterior ? existing!.LocationId : home is not null && !newAccountSpawn && !resumesOutdoors ? home.Id : "outdoor";
         var inside = location != "outdoor";
         var position = resumesInterior
-            ? InteriorPositionIsSafe(existing!.Position, _dungeons[existing.LocationId]) ? existing.Position : _dungeons[existing.LocationId].Exit
+            ? _dungeons[existing!.LocationId].Underwater is not null || InteriorPositionIsSafe(existing.Position, _dungeons[existing.LocationId]) ? existing.Position : _dungeons[existing.LocationId].Exit
             : location == home?.Id ? home.Exit : newAccountSpawn ? InitialBaseSpawn(characterId, home) : resumesOutdoors ? existing!.Position : Navigation.FindNearestWalkable(center);
         position = inside ? position with { Z = 0 } : position with { Z = Navigation.ElevationAt(position.X, position.Y) };
         var health = existing is null || existing.HealthHearts <= 0 ? 10 : Math.Clamp(existing.HealthHearts, .25, 10);
@@ -237,7 +239,9 @@ public sealed partial class RealityWorld
             existing?.EquippedShirt ?? "none", existing?.EquippedPants ?? "none", existing?.WantedLevel ?? 0, existing?.EBikeRemainingMeters ?? 1609.344,
             existing?.EnergyDrinkBoostUntilUtc, existing?.EnergyDrinkCrashUntilUtc, existing?.ProbedUntilUtc, existing?.CandleUntilUtc, existing?.ShieldOn ?? false, existing?.Ar15FireMode is "burst" ? "burst" : "single", Math.Clamp(existing?.FlamethrowerGasGallons ?? 0, 0, 5));
         if (player.MagicHikingShoesOn && player.MagicRunningShoesOn) player = player with { MagicRunningShoesOn = false };
-        player = player with { UfoRemainingMeters = existing?.UfoRemainingMeters ?? 0 };
+        player = player with { UfoRemainingMeters = existing?.UfoRemainingMeters ?? 0, Survival = existing?.Survival ?? new(), Air = existing?.Air ?? 10, MaximumAir = existing?.MaximumAir ?? 10, SwimExhausted = existing?.SwimExhausted ?? false };
+        if (resumesInterior && _dungeons[location].Underwater is not null) player = player with { TravelMode = TravelMode.Scuba, Terrain = TerrainType.DeepWater };
+        else if (player.TravelMode == TravelMode.Scuba) player = player with { TravelMode = TravelMode.Walk };
         var offhand = ActiveOffhand(player);
         player = player with { FlashlightOn = offhand == "flashlight", LanternOn = offhand == "lantern", LaserOn = offhand == "laser", ShieldOn = offhand == "shield" };
         if (IsGasAsleep(characterId)) player = player with { AsleepUntilUtc = _sleepUntil[characterId] };
@@ -463,7 +467,7 @@ public sealed partial class RealityWorld
         var vehicle = player.TravelMode switch
         {
             TravelMode.Skateboard => "skateboard", TravelMode.Bike => "bike", TravelMode.EBike => "eBike",
-            TravelMode.DirtBike => "dirtBike", TravelMode.Motorcycle => "motorcycle", TravelMode.Raft => "inflatableRaft", TravelMode.Ufo => "ufo", TravelMode.Swim => "swimmies", _ => null
+            TravelMode.DirtBike => "dirtBike", TravelMode.Motorcycle => "motorcycle", TravelMode.Raft => "inflatableRaft", TravelMode.Ufo => "ufo", TravelMode.Scuba => "scubaGear", TravelMode.Swim => InventoryQuantity(characterId, "scubaGear") > 0 ? "scubaGear" : "swimmies", _ => null
         };
         if (vehicle is not null && (!player.GodMode || player.TravelMode == TravelMode.Ufo) && InventoryQuantity(characterId, vehicle) <= 0)
         {
@@ -600,13 +604,15 @@ public sealed partial class RealityWorld
         return length > 1 ? (request.X / length, request.Y / length, null) : (request.X, request.Y, null);
     }
 
-    public async Task<PlayerState> SetTravelModeAsync(string characterId, TravelMode mode, CancellationToken cancellationToken = default)
+    public async Task<PlayerState> SetTravelModeAsync(string characterId, TravelMode mode, CancellationToken cancellationToken = default, WorldBounds? mapView = null)
     {
         EnsureNotOnBus(characterId);
         EnsureNotProbulatorAbducted(characterId);
         if (IsGasAsleep(characterId)) throw new InvalidOperationException("You are asleep until the gas effect wears off.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (IsSubmerged(player) && mode != TravelMode.Scuba) return await ExitDungeonAsync(characterId, cancellationToken);
         if (ProbedActive(player) && mode != TravelMode.Walk) throw new InvalidOperationException("While Probed, you can only walk. Sleep or wait for the effect to end.");
+        if (mode == TravelMode.Scuba) return await SubmergeAsync(player, mapView, cancellationToken);
         if (player.LocationId != "outdoor" && mode is TravelMode.Bike or TravelMode.EBike or TravelMode.DirtBike or TravelMode.Motorcycle or TravelMode.Ufo)
             throw new InvalidOperationException("Bikes, e-bikes, dirt bikes, motorcycles, and UFOs cannot be used inside a dungeon or Home.");
         if (!player.GodMode && mode == TravelMode.Skateboard && InventoryQuantity(characterId, "skateboard") <= 0) throw new InvalidOperationException("You need a skateboard in your inventory.");
@@ -725,6 +731,7 @@ public sealed partial class RealityWorld
         if (!_players.TryGetValue(characterId, out var player)) return (new(false, Array.Empty<WorldPosition>(), "Unknown player."), false);
         if (player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var dungeon))
         {
+            if (dungeon.Underwater is not null) request = request with { X = Math.Clamp(request.X, .5, dungeon.Width - .5), Y = Math.Clamp(request.Y, .5, dungeon.Height - .5) };
             if (request.X < .5 || request.Y < .5 || request.X > dungeon.Width - .5 || request.Y > dungeon.Height - .5) return (new(false, Array.Empty<WorldPosition>(), dungeon.IsHome ? "That point is outside Home." : "That point is outside the dungeon."), false);
             var target = player.Position with { X = request.X, Y = request.Y, Z = 0 };
             if (dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, target, wall))) return (new(false, Array.Empty<WorldPosition>(), dungeon.IsHome ? "A wall in Home blocks that route. Move through a doorway." : "A dungeon wall blocks that route. Move through a doorway."), false);
@@ -921,7 +928,7 @@ public sealed partial class RealityWorld
                     }
                     continue;
                 }
-                if (actor.Subtype is "fish" or "waterMonster")
+                if (NutritionCatalog.Aquatic(actor.Subtype))
                 {
                     var swimming = AdvanceWaterActor(actor, elapsed);
                     _actors[actor.Id] = swimming; changed.Add(swimming); continue;
@@ -1213,6 +1220,7 @@ public sealed partial class RealityWorld
         _loadedBounds = _loadedBounds is null ? bounds : new WorldBounds(Math.Min(_loadedBounds.MinimumX, bounds.MinimumX), Math.Min(_loadedBounds.MinimumY, bounds.MinimumY), Math.Max(_loadedBounds.MaximumX, bounds.MaximumX), Math.Max(_loadedBounds.MaximumY, bounds.MaximumY));
         _navigation = new WorldNavigation(_loadedBounds, _baseEntities.Values.Concat(_realityEntities.Values).ToArray(), _elevationSamples.Values.ToArray());
         PopulateWaterLife(generated);
+        PopulateForaging(generated);
         var chestRandom = new Random(StableInt($"chests:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
         for (var chestIndex = 0; chestIndex < 2; chestIndex++)
         {
@@ -1223,7 +1231,7 @@ public sealed partial class RealityWorld
             var id = $"chest:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{chestIndex}";
             _outdoorChests.TryAdd(id, new TreasureChestState(id, safe, "outdoor"));
         }
-        string[] looseItemTypes = ["pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas"];
+        string[] looseItemTypes = ["spear", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas"];
         var looseRandom = new Random(StableInt($"loose-items:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
         for (var itemIndex = 0; itemIndex < 14; itemIndex++)
         {
@@ -1553,13 +1561,13 @@ public sealed partial class RealityWorld
             return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
                 HealthHearts = 10, Stamina = ProgressionRules.Stamina(StatsFor(player.Id)), MaximumStamina = ProgressionRules.Stamina(StatsFor(player.Id)), Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = home.Id,
                 EquippedWeapon = player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
-                FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
+                Survival = new(), FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
         }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
             HealthHearts = 10, Stamina = ProgressionRules.Stamina(StatsFor(player.Id)), MaximumStamina = ProgressionRules.Stamina(StatsFor(player.Id)), Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = "outdoor",
             EquippedWeapon = player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
-            FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
+            Survival = new(), FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
     }
 
     private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken, int kryptoniteUsed = 0)

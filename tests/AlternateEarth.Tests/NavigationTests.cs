@@ -102,7 +102,8 @@ public sealed class NavigationTests
         var navigation = CreateNavigation(stream);
 
         Assert.Equal(TerrainType.ShallowWater, navigation.TerrainAt(32.4, 0));
-        Assert.Equal(TerrainType.Grass, navigation.TerrainAt(32.6, 0));
+        Assert.Equal(TerrainType.Sand, navigation.TerrainAt(32.6, 0));
+        Assert.Equal(TerrainType.Grass, navigation.TerrainAt(36, 0));
     }
 
     [Fact]

@@ -40,7 +40,8 @@ public enum TravelMode
     Motorcycle,
     EBike,
     Ufo,
-    Swim
+    Swim,
+    Scuba
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -116,7 +117,13 @@ public sealed record PlayerState(
     DateTimeOffset? AsleepUntilUtc = null,
     double UfoRemainingMeters = 0,
     string? WaitingAtBusStopId = null,
-    string? RidingBusId = null, double Air = 10, double MaximumAir = 10, bool SwimExhausted = false, string? DisplayTitle = null);
+    string? RidingBusId = null, double Air = 10, double MaximumAir = 10, bool SwimExhausted = false, string? DisplayTitle = null,
+    SurvivalState? Survival = null);
+
+public sealed record IllnessState(string Name, DateTimeOffset EndsAtUtc);
+public sealed record FoodBuff(string Stat, int Amount, DateTimeOffset EndsAtUtc);
+public sealed record SurvivalState(double Hunger = 0, IReadOnlyList<IllnessState>? Illnesses = null, IReadOnlyList<FoodBuff>? Buffs = null);
+public sealed record Nutrition(double Hunger, double Health, double Stamina, double Water = 0, bool Raw = false, IReadOnlyDictionary<string, int>? Bonuses = null);
 
 public sealed record ActorState(
     string Id,
@@ -177,7 +184,7 @@ public sealed record InventoryState(
     int OtherSlotsUsed = 0,
     int? MaximumOtherSlots = null,
     bool Unlimited = false);
-public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true, double Accuracy = 1, double AttackIntervalSeconds = .5);
+public sealed record ItemConfiguration(string ItemType, string DisplayName, string Effect, double Damage, double RangeMeters, long MinimumPriceCents, long MaximumPriceCents, bool ForSale = true, bool Single = false, string? AmmoType = null, double? SpeedModifierMph = null, double? VisibilityModifierMeters = null, double WeightPounds = 1, InventoryCategory Category = InventoryCategory.Other, bool CarriedInBackpack = true, double Accuracy = 1, double AttackIntervalSeconds = .5, Nutrition? Nutrition = null);
 public sealed record MovementConfiguration(
     double BaseSpeedMph,
     double BaseVisibilityMeters,
@@ -260,7 +267,8 @@ public sealed record DungeonState(
     int Level = 1, int LevelCount = 1, WorldPosition? Stairs = null,
     WorldPosition? Doorway = null, string? SessionId = null,
     bool IsStore = false, string? StoreCategory = null,
-    int Difficulty = 1, bool IsCompleted = false, RetroBattleState? RetroBattle = null, EventBattleState? EventBattle = null, IReadOnlyList<DungeonWater>? WaterAreas = null, IReadOnlyList<DungeonBarrier>? Barriers = null);
+    int Difficulty = 1, bool IsCompleted = false, RetroBattleState? RetroBattle = null, EventBattleState? EventBattle = null, IReadOnlyList<DungeonWater>? WaterAreas = null, IReadOnlyList<DungeonBarrier>? Barriers = null, UnderwaterState? Underwater = null);
+public sealed record UnderwaterState(string Name, WorldPosition Origin, double WestX, double EastX, bool WestShore, bool EastShore, double VisibleWaterSquareMeters);
 public sealed record RetroEnemyState(int Id, double X, bool Defeated = false, int Hearts = 1, bool IsBoss = false);
 public sealed record RetroBattleState(double ScrollSpeed, double TrackLength, double Scroll,
     double JumpHeight, double JumpVelocity, IReadOnlyList<RetroEnemyState> Enemies,

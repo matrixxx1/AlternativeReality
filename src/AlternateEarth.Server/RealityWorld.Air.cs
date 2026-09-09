@@ -11,7 +11,7 @@ public sealed partial class RealityWorld
     private TerrainType TerrainFor(PlayerState player) => player.LocationId == "outdoor"
         ? EventTerrainAt(player.Position, Navigation.TerrainAt(player.Position.X, player.Position.Y)) : _dungeons.TryGetValue(player.LocationId, out var d) ? DungeonTerrainAt(d, player.Position) : player.Terrain;
 
-    internal static PlayerState StepAir(PlayerState player, double seconds, bool gas, bool submerged, bool struggling)
+    internal static PlayerState StepAir(PlayerState player, double seconds, bool gas, bool submerged, bool struggling, bool scubaGear = false)
     {
         seconds = Math.Clamp(seconds, 0, 2);
         if (player.GodMode) return player with { Air = player.MaximumAir, SwimExhausted = false };
@@ -19,10 +19,11 @@ public sealed partial class RealityWorld
             (player.Stamina <= .025 || player.SwimExhausted && (player.Stamina < 2 || struggling));
         var drowning = submerged && player.TravelMode is not (TravelMode.Raft or TravelMode.Ufo) &&
             (player.TravelMode != TravelMode.Swim || exhausted);
-        var drain = gas || drowning || exhausted && struggling;
-        var air = Math.Clamp(player.Air + (drain ? -2 : 2) * seconds, 0, player.MaximumAir);
+        var drain = gas || drowning || exhausted && struggling || player.TravelMode == TravelMode.Scuba;
+        var drainRate = !gas && (scubaGear || player.TravelMode == TravelMode.Scuba) ? .025 : 2;
+        var air = Math.Clamp(player.Air + (drain ? -drainRate : 2) * seconds, 0, player.MaximumAir);
         // Only the part of this tick actually spent without air inflicts suffocation damage.
-        var withoutAir = drain ? Math.Max(0, seconds - player.Air / 2) : 0;
+        var withoutAir = drain ? Math.Max(0, seconds - player.Air / drainRate) : 0;
         return player with { Air = air, SwimExhausted = exhausted,
             HealthHearts = Math.Max(0, player.HealthHearts - player.MaximumHealthHearts / 5 * withoutAir) };
     }
@@ -38,7 +39,7 @@ public sealed partial class RealityWorld
         gas |= InsideInversion(player) && _activeInversion!.Patches.Any(p => p.Kind == "stink" && p.ChangesAtUtc <= now && p.EndsAtUtc > now && p.Position.Distance2D(player.Position) <= p.Radius);
         var submerged = terrain == TerrainType.DeepWater || _drowningUntil.GetValueOrDefault(player.Id) > now;
         var updated = StepAir(player with { Terrain = terrain }, seconds, gas, submerged,
-            _swimAttempts.TryGetValue(player.Id, out var attempt) && now - attempt < TimeSpan.FromSeconds(1));
+            _swimAttempts.TryGetValue(player.Id, out var attempt) && now - attempt < TimeSpan.FromSeconds(1), InventoryQuantity(player.Id, "scubaGear") > 0);
         return updated.HealthHearts <= 0 ? await DieAndResetPlayerAsync(updated, token) : updated;
     }
 }

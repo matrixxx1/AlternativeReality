@@ -42,6 +42,7 @@ internal static class CraftingCatalog
         new("charcoal", "Charcoal briquettes", "charcoal", 1, [new("wood", 2)]),
         new("hat", "Hat", "hat", 1, [new("cloth", 2)]),
         new("tShirt", "T-shirt", "tShirt", 1, [new("cloth", 3)]),
+        .. NutritionCatalog.Recipes,
         new("food", "Food rations", "food", 2, [new("flour", 2), new("cookingOil", 1), new("water", 1)]),
         new("skateboard", "Skateboard", "skateboard", 1, [new("wood", 6), new("plastic", 4), new("metal", 2), new("rubber", 2)]),
         new("rocketLauncher", "Rocket launcher", "rocketLauncher", 1, [new("metal", 20), new("weaponParts", 12), new("mechanicalParts", 8), new("powerCore", 2)]),
@@ -55,7 +56,7 @@ internal static class CraftingCatalog
         // Broad game difficulty and destructive potential; no real manufacturing details.
         var level = recipe.Id switch
         {
-            "hockeyStick" or "mapleSyrup" or "molotovCocktail" or "salvageCloth" or "charcoal" or "food" or "candle" => 1,
+            "fishStew" or "friedFish" or "hockeyStick" or "mapleSyrup" or "molotovCocktail" or "salvageCloth" or "charcoal" or "food" or "candle" => 1,
             "hat" => 3,
             "gunpowder" or "tShirt" or "slingshot" or "ballBearing" => 5,
             "arrow" => 8,
@@ -71,6 +72,7 @@ internal static class CraftingCatalog
             "rocketLauncher" => 50,
             "motorcycle" => 100,
             "ufo" => 5_000,
+            _ when NutritionCatalog.Recipes.Any(r=>r.Id==recipe.Id) => 1,
             _ => throw new InvalidOperationException($"Assign a crafting level to {recipe.Id}.")
         };
         var difficulty = level >= 5_000 ? "Extraterrestrial" : level >= 100 ? "Expert" : level >= 40 ? "Advanced" : level >= 15 ? "Intermediate" : "Basic";
@@ -84,7 +86,7 @@ internal static class CraftingCatalog
     public static readonly string[] ChemicalItems =
         ["charcoal", "potassiumNitrate", "salt", "pepper", "sulfur", "bleach", "ammonia", "sulfuricAcid", "cookingOil", "flour", "sugar", "cookingSupplies", "laundryDetergent", .. HazardCatalog.FictionalReagents];
     public static readonly string[] LitterItems =
-        ["pencil", "pen", "marker", "newspaper", "emptyGlassBottle", "emptyGlassJar", "emptyPlasticBottle", "crustySocks", "soiledUnderwear", "areaMap", "paper", "wood", "cloth", "plastic", "styrofoam", "metal", "drugs", "glassScrap", "rubber", "mechanicalParts", "electronics", "battery"];
+        ["spear", "pencil", "pen", "marker", "newspaper", "emptyGlassBottle", "emptyGlassJar", "emptyPlasticBottle", "crustySocks", "soiledUnderwear", "areaMap", "paper", "wood", "cloth", "plastic", "styrofoam", "metal", "drugs", "glassScrap", "rubber", "mechanicalParts", "electronics", "battery"];
 
     private static ItemConfiguration Material(string id, string name, double weight, long min, long max, bool forSale = true) =>
         new(id, name, "Scavenging and crafting inventory item", 0, 0, min, max, forSale, WeightPounds: weight);

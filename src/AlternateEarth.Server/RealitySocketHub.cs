@@ -149,8 +149,9 @@ public sealed class RealitySocketHub
                         break;
                     case "setTravelMode":
                         var travelRequest = root.Deserialize<SetTravelModeRequest>(SharedJson.Options)!;
-                        var travelPlayer = await _world.SetTravelModeAsync(characterId, travelRequest.Mode, cancellationToken);
+                        var travelPlayer = await _world.SetTravelModeAsync(characterId, travelRequest.Mode, cancellationToken, connection.MapView);
                         await BroadcastAsync(new { type = "playerUpdated", player = travelPlayer }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "assignStats":
                         var statPlayer = await _world.AssignStatsAsync(characterId, root.Deserialize<AssignStatsRequest>(SharedJson.Options)!, cancellationToken);
@@ -387,6 +388,12 @@ public sealed class RealitySocketHub
                         var capturedPet = await _world.CaptureQuestPetAsync(characterId, root.Deserialize<CaptureQuestPetRequest>(SharedJson.Options)!.ActorId, cancellationToken);
                         await BroadcastAsync(new { type = "actorRemoved", actorId = root.Deserialize<CaptureQuestPetRequest>(SharedJson.Options)!.ActorId }, null, cancellationToken);
                         await connection.SendAsync(new { type = "questUpdated", privateState = capturedPet.PrivateState, quest = capturedPet.Quest, message = capturedPet.Message }, cancellationToken);
+                        break;
+                    case "gatherWild":
+                        var resourceId = root.GetProperty("entityId").GetString()!;
+                        var gathered = await _world.GatherWildAsync(characterId,resourceId,cancellationToken);
+                        await BroadcastAsync(new { type = "vegetationChopped", entityId = resourceId },null,cancellationToken);
+                        await connection.SendAsync(new {type="questUpdated",privateState=gathered.PrivateState,message=gathered.Message},cancellationToken);
                         break;
                     case "chopVegetation":
                         var chopped = await _world.ChopVegetationAsync(characterId, root.Deserialize<ChopVegetationRequest>(SharedJson.Options)!.EntityId, cancellationToken);

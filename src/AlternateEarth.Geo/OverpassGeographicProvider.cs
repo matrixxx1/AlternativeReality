@@ -130,7 +130,7 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
                $"way[\"landuse\"]({bbox});" +
                $"way[\"leisure\"~\"park|garden|recreation_ground\"]({bbox});" +
                $"way[\"amenity\"=\"parking\"]({bbox});" +
-               $"nwr[\"amenity\"~\"^(fuel|restaurant|fast_food|food_court|cafe|ice_cream)$\"]({bbox});" +
+               $"nwr[\"amenity\"~\"^(fuel|pharmacy|restaurant|fast_food|food_court|cafe|ice_cream)$\"]({bbox});" +
                $"nwr[\"shop\"]({bbox});" +
                $"nwr[\"takeaway\"~\"^(yes|only)$\"]({bbox});" +
                $"nwr[\"delivery\"=\"yes\"]({bbox});" +
@@ -300,6 +300,7 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
 
     private static string? MerchantCategory(IReadOnlyDictionary<string, string> tags)
     {
+        if (tags.GetValueOrDefault("amenity") == "pharmacy" || tags.GetValueOrDefault("shop") == "chemist") return "pharmacy";
         if (tags.GetValueOrDefault("amenity") == "fuel") return "gas";
         if (FoodBusinesses.OffersDelivery(tags)) return "food";
         if (!tags.TryGetValue("shop", out var shop)) return null;
@@ -322,7 +323,7 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
         if (tags.TryGetValue("natural", out var natural) && natural == "water") return EntityKind.Water;
         if (tags.ContainsKey("waterway")) return EntityKind.Water;
         if (tags.ContainsKey("building")) return EntityKind.Building;
-        if (tags.ContainsKey("shop") || FoodBusinesses.OffersDelivery(tags) || tags.GetValueOrDefault("amenity") == "fuel") return EntityKind.PointOfInterest;
+        if (tags.ContainsKey("shop") || FoodBusinesses.OffersDelivery(tags) || tags.GetValueOrDefault("amenity") is "fuel" or "pharmacy") return EntityKind.PointOfInterest;
         if (tags.TryGetValue("barrier", out var barrier) && barrier == "fence") return EntityKind.Fence;
         if (tags.TryGetValue("highway", out var highway))
             return highway is "footway" or "pedestrian" or "steps" ? EntityKind.Sidewalk : EntityKind.Road;

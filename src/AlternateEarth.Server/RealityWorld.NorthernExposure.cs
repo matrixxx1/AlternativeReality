@@ -39,7 +39,7 @@ public sealed partial class RealityWorld
     {
         if (!RemoveInventory(player.Id, "mapleSyrup", 1)) throw new InvalidOperationException("You do not have any maple syrup.");
         _mapleBoosts[player.Id] = _probulatorClock.GetUtcNow().AddMinutes(5);
-        var updated = player with { Stamina = player.MaximumStamina, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), FoodProtectedUntilUtc = _mapleBoosts[player.Id], Version = player.Version + 1 };
+        var updated = player with { Survival=(player.Survival??new()) with{Hunger=Math.Max(0,(player.Survival?.Hunger??0)-25)}, Water=player.MaximumWater, Stamina = player.MaximumStamina, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2), FoodProtectedUntilUtc = _mapleBoosts[player.Id], Version = player.Version + 1 };
         await SaveInventoryAsync(player.Id, token); await SavePlayerAsync(updated, token);
         _progressionNotices.Enqueue(new(player.Id, "Maple syrup: +25% speed and +5 perception for five minutes."));
         return updated;

@@ -154,7 +154,7 @@ public sealed partial class RealityWorld
             if (InventoryQuantity(playerId, itemType) < 1) throw new InvalidOperationException("The food order is not in your backpack.");
             await FailFoodDeliveryCoreAsync(quest, _probulatorClock.GetUtcNow(), "Delivery failed: you ate the customer's food. Food theft is a crime.", token);
             var player = _players[playerId];
-            await SavePlayerAsync(player with { Stamina = player.MaximumStamina, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2),
+            await SavePlayerAsync(player with { Survival=(player.Survival??new()) with{Hunger=0}, Stamina = player.MaximumStamina, HealthHearts = Math.Min(player.MaximumHealthHearts, player.HealthHearts + 2),
                 FoodProtectedUntilUtc = _probulatorClock.GetUtcNow().AddMinutes(5), Version = player.Version + 1 }, token);
             var scene = player.Position;
             if (_dungeons.TryGetValue(player.LocationId, out var interior) && _baseEntities.TryGetValue(interior.BuildingId, out var building)) scene = building.Position;

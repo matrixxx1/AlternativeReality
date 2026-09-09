@@ -25,5 +25,5 @@ test('open rivers use their imported width without filling a polygon',()=>{
   const draws=[];
   const draw=new Function('ctx','state','drawGeometry','prop',`${fn('waterGeometryClosed')}\n${fn('drawWater')}\nreturn drawWater;`)({}, {scale:2},(...args)=>draws.push(args),(e,k,f)=>Number(e.properties?.[k]??f));
   draw({geometry:[{x:0,y:0},{x:100,y:0}],properties:{width:'80'}},1,0);
-  assert.equal(draws[0][3],160);assert.ok(draws.every(d=>d[1]===null));
+  assert.equal(draws[0][3],172);assert.equal(draws[0][2],'#d3b86e');assert.equal(draws[1][3],160);assert.ok(draws.every(d=>d[1]===null));
 });

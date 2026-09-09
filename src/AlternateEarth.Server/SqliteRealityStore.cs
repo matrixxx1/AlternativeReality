@@ -151,6 +151,10 @@ public sealed partial class SqliteRealityStore
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "HomeShopListings", "PhotographJson", "TEXT", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "TravelMode", "TEXT NOT NULL DEFAULT 'Walk'", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "SurvivalJson", "TEXT", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "Air", "REAL NOT NULL DEFAULT 10", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "MaximumAir", "REAL NOT NULL DEFAULT 10", cancellationToken);
+        await EnsureColumnAsync(connection, "Characters", "SwimExhausted", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Stamina", "REAL NOT NULL DEFAULT 10", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "Water", "REAL NOT NULL DEFAULT 10", cancellationToken);
         await EnsureColumnAsync(connection, "Characters", "WantedLevel", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
@@ -299,7 +303,7 @@ public sealed partial class SqliteRealityStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters FROM Characters WHERE RealityId = $reality AND Id = $id";
+        command.CommandText = "SELECT Name, RegionLatitude, RegionLongitude, X, Y, Z, Version, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters, Air, MaximumAir, SwimExhausted, SurvivalJson FROM Characters WHERE RealityId = $reality AND Id = $id";
         command.Parameters.AddWithValue("$reality", realityId);
         command.Parameters.AddWithValue("$id", characterId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -317,7 +321,7 @@ public sealed partial class SqliteRealityStore
             EquippedWeapon: reader.IsDBNull(24) ? "fist" : reader.GetString(24), BodyHeat: Math.Clamp(reader.GetDouble(25), 0, 100),
             EquippedHat: reader.IsDBNull(26) ? "none" : reader.GetString(26), EquippedShirt: reader.IsDBNull(27) ? "none" : reader.GetString(27),
             EquippedPants: reader.IsDBNull(28) ? "none" : reader.GetString(28), WantedLevel: reader.GetInt32(29), EBikeRemainingMeters: reader.GetDouble(30),
-            EnergyDrinkBoostUntilUtc: ReadDate(reader, 31), EnergyDrinkCrashUntilUtc: ReadDate(reader, 32), ProbedUntilUtc: ReadDate(reader, 33), CandleUntilUtc: ReadDate(reader, 34), ShieldOn: reader.GetInt64(35) != 0, Ar15FireMode: reader.IsDBNull(36) ? "single" : reader.GetString(36), FlamethrowerGasGallons: reader.GetDouble(37), UfoRemainingMeters: Math.Max(0, reader.GetDouble(38)));
+            EnergyDrinkBoostUntilUtc: ReadDate(reader, 31), EnergyDrinkCrashUntilUtc: ReadDate(reader, 32), ProbedUntilUtc: ReadDate(reader, 33), CandleUntilUtc: ReadDate(reader, 34), ShieldOn: reader.GetInt64(35) != 0, Ar15FireMode: reader.IsDBNull(36) ? "single" : reader.GetString(36), FlamethrowerGasGallons: reader.GetDouble(37), UfoRemainingMeters: Math.Max(0, reader.GetDouble(38)), Air: Math.Clamp(reader.GetDouble(39), 0, Math.Max(1, reader.GetDouble(40))), MaximumAir: Math.Max(1, reader.GetDouble(40)), SwimExhausted: reader.GetInt64(41) != 0, Survival: reader.IsDBNull(42) ? new() : JsonSerializer.Deserialize<SurvivalState>(reader.GetString(42), SharedJson.Options));
     }
 
     public async Task SaveCharacterAsync(string realityId, PlayerState player, CancellationToken cancellationToken = default, InventoryState? inventory = null)
@@ -327,8 +331,8 @@ public sealed partial class SqliteRealityStore
         var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction?)transaction;
         command.CommandText = """
-            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters, Version, UpdatedUtc)
-            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $bodyHeat, $equippedHat, $equippedShirt, $equippedPants, $wantedLevel, $eBikeRemaining, $energyBoostUntil, $energyCrashUntil, $probedUntil, $candleUntil, $shieldOn, $ar15FireMode, $flamethrowerGas, $ufoRemaining, $version, $updated)
+            INSERT INTO Characters (Id, RealityId, Name, RegionLatitude, RegionLongitude, X, Y, Z, Health, TravelMode, Stamina, Water, WalletCents, GodMode, FoodProtectedUntilUtc, WaterProtectedUntilUtc, LocationId, FlashlightOn, LanternOn, LaserOn, MagicHikingShoesOn, MagicRunningShoesOn, HatOn, DirtBikeGasGallons, MotorcycleGasGallons, EquippedWeapon, BodyHeat, EquippedHat, EquippedShirt, EquippedPants, WantedLevel, EBikeRemainingMeters, EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc, ProbedUntilUtc, CandleUntilUtc, ShieldOn, Ar15FireMode, FlamethrowerGasGallons, UfoRemainingMeters, Air, MaximumAir, SwimExhausted, SurvivalJson, Version, UpdatedUtc)
+            VALUES ($id, $reality, $name, $regionLat, $regionLon, $x, $y, $z, $health, $travelMode, $stamina, $water, $wallet, $god, $foodUntil, $waterUntil, $location, $flashlight, $lantern, $laser, $magicHikingShoes, $magicRunningShoes, $hat, $dirtBikeGas, $motorcycleGas, $equippedWeapon, $bodyHeat, $equippedHat, $equippedShirt, $equippedPants, $wantedLevel, $eBikeRemaining, $energyBoostUntil, $energyCrashUntil, $probedUntil, $candleUntil, $shieldOn, $ar15FireMode, $flamethrowerGas, $ufoRemaining, $air, $maximumAir, $swimExhausted, $survival, $version, $updated)
             ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, X = excluded.X, Y = excluded.Y, Z = excluded.Z,
                 Health = excluded.Health, TravelMode = excluded.TravelMode, Stamina = excluded.Stamina, Water = excluded.Water,
                 WalletCents = excluded.WalletCents, GodMode = excluded.GodMode,
@@ -340,6 +344,7 @@ public sealed partial class SqliteRealityStore
                 EquippedShirt=excluded.EquippedShirt, EquippedPants=excluded.EquippedPants, WantedLevel=excluded.WantedLevel, EBikeRemainingMeters=excluded.EBikeRemainingMeters,
                 EnergyDrinkBoostUntilUtc=excluded.EnergyDrinkBoostUntilUtc, EnergyDrinkCrashUntilUtc=excluded.EnergyDrinkCrashUntilUtc,
                 ProbedUntilUtc=excluded.ProbedUntilUtc, CandleUntilUtc=excluded.CandleUntilUtc, ShieldOn=excluded.ShieldOn, Ar15FireMode=excluded.Ar15FireMode, FlamethrowerGasGallons=excluded.FlamethrowerGasGallons, UfoRemainingMeters=excluded.UfoRemainingMeters,
+                Air = excluded.Air, MaximumAir = excluded.MaximumAir, SwimExhausted = excluded.SwimExhausted, SurvivalJson = excluded.SurvivalJson,
                 Version = excluded.Version, UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$id", player.Id);
@@ -382,6 +387,10 @@ public sealed partial class SqliteRealityStore
         command.Parameters.AddWithValue("$ar15FireMode", player.Ar15FireMode);
         command.Parameters.AddWithValue("$flamethrowerGas", player.FlamethrowerGasGallons);
         command.Parameters.AddWithValue("$ufoRemaining", player.UfoRemainingMeters);
+        command.Parameters.AddWithValue("$survival", JsonSerializer.Serialize(player.Survival ?? new(), SharedJson.Options));
+        command.Parameters.AddWithValue("$air", player.Air);
+        command.Parameters.AddWithValue("$maximumAir", player.MaximumAir);
+        command.Parameters.AddWithValue("$swimExhausted", player.SwimExhausted ? 1 : 0);
         command.Parameters.AddWithValue("$version", player.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);

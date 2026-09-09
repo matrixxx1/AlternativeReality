@@ -13,7 +13,7 @@ public sealed partial class RealityWorld
     private readonly ConcurrentQueue<ProgressionNotice> _progressionNotices = new();
     internal Func<double> ProgressionRoll { get; set; } = Random.Shared.NextDouble;
     private static ProgressionProfile NewProgression => new(0, new CharacterStats(), Array.Empty<string>());
-    private CharacterStats StatsFor(string playerId) { var stats = _progression.GetValueOrDefault(playerId)?.Stats ?? new CharacterStats(); return MapleBoostActive(playerId) ? stats with { Perception = stats.Perception + 5 } : stats; }
+    private CharacterStats StatsFor(string playerId) { var stats = FoodStats(playerId, _progression.GetValueOrDefault(playerId)?.Stats ?? new CharacterStats()); return MapleBoostActive(playerId) ? stats with { Perception = stats.Perception + 5 } : stats; }
     private readonly ConcurrentDictionary<(string Player, string Attacker), DateTimeOffset> _fearChecks = new();
 
     internal CombatEvent ResolveCombatFear(CombatEvent combat)
@@ -40,8 +40,8 @@ public sealed partial class RealityWorld
     {
         var profile = _progression.GetValueOrDefault(playerId) ?? NewProgression;
         var (level, earned, required) = ProgressionRules.LevelAt(profile.Experience);
-        var stats = profile.Stats;
-        return new(level, profile.Experience, earned, required, ProgressionRules.StartingPoints + level - 1 - stats.Total, stats,
+        var stats = StatsFor(playerId);
+        return new(level, profile.Experience, earned, required, ProgressionRules.StartingPoints + level - 1 - profile.Stats.Total, profile.Stats,
             ProgressionRules.Damage(stats), ProgressionRules.Capacity(stats), ProgressionRules.Accuracy(stats),
             ProgressionRules.Vision(StatsFor(playerId)), ProgressionRules.Stamina(stats), ProgressionRules.Charisma(stats),
             ProgressionRules.Experience(stats), ProgressionRules.Drain(stats), ProgressionRules.NpcSight(stats),
@@ -172,7 +172,7 @@ public sealed partial class RealityWorld
         await _dungeonCompletionLock.WaitAsync(cancellationToken);
         try
         {
-            if (!_dungeons.TryGetValue(killer.LocationId, out var floor) || floor.IsHome || floor.IsStore || floor.IsCompleted || floor.Actors.Any(actor => actor.HealthHearts > 0)) return;
+            if (!_dungeons.TryGetValue(killer.LocationId, out var floor) || floor.IsHome || floor.IsStore || floor.Underwater is not null || floor.IsCompleted || floor.Actors.Any(actor => actor.HealthHearts > 0)) return;
             var session = floor.SessionId ?? floor.Id;
             var floors = _dungeons.Values.Where(item => (item.SessionId ?? item.Id) == session).ToArray();
             if (floors.Length < floor.LevelCount || floors.Any(item => item.Actors.Any(actor => actor.HealthHearts > 0))) return;

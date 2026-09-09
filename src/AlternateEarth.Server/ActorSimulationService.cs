@@ -39,6 +39,8 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.BroadcastPlayersAsync(players, stoppingToken);
             var firstImpressions = await _world.AdvanceFirstImpressionsAsync(stoppingToken);
             await _hub.SendRelationshipsAsync(firstImpressions, stoppingToken);
+            await _hub.BroadcastCombatAsync(await _world.AdvanceSpearsAsync(stoppingToken), stoppingToken);
+            await _hub.BroadcastPlayersAsync(_world.TakeSpearPlayerUpdates(), stoppingToken);
             var hostile = await _world.AdvanceHostilityAsync(Tick, stoppingToken);
             await _hub.BroadcastActorsAsync(hostile.Actors, stoppingToken);
             await _hub.BroadcastPlayersAsync(hostile.Players, stoppingToken);

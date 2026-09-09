@@ -13,6 +13,7 @@
     if (weapon === 'craftingExplosion') return { kind: 'thrown', speed: 1, minimum: 0, maximum: 0, arc: 0, impact: 1800 };
     if (firearms.has(weapon)) return { kind: 'bullet', muzzle: true, speed: 240, minimum: 240, maximum: 950, arc: 0, impact: 420 };
     if (weapon === 'rocketLauncher') return { kind: 'rocket', muzzle: true, speed: 90, minimum: 480, maximum: 2200, arc: 0, impact: 1800 };
+    if (weapon === 'spearGun') return { kind: 'arrow', speed: 40, minimum: 350, maximum: 5000, arc: 0, impact: 200 };
     if (weapon === 'crossbow') return { kind: 'arrow', speed: 75, minimum: 380, maximum: 1600, arc: 5, impact: 450 };
     if (weapon === 'slingshot' || weapon === 'ballBearing') return { kind: 'pellet', speed: 95, minimum: 300, maximum: 1300, arc: 8, impact: 400 };
     if (thrown.has(weapon) || /^(chloramineGas|chlorineGas|chloroformGas|peraceticAcidGas|napalm)(Bottle|Jar)$/.test(weapon))

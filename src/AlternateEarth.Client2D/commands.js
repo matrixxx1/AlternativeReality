@@ -1,6 +1,6 @@
 /* Shared command state helpers, also exercised by the Node regression tests. */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.PlayerCommands=factory();})(globalThis,()=>{
-  const pending=['pendingDoor','pendingMerchant','pendingChest','pendingLoot','pendingDungeonAction','pendingChop','pendingPet'];
+  const pending=['pendingDoor','pendingMerchant','pendingChest','pendingLoot','pendingDungeonAction','pendingChop','pendingPet','pendingWild'];
   function cancel(state){
     state.path=[];state.target=null;state.followCommand=null;state.autoFlee=false;state.defensiveThreats?.clear();
     for(const key of pending)state[key]=null;
