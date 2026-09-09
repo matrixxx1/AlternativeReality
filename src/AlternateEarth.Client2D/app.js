@@ -228,7 +228,7 @@
       case 'lockPickResult': if(message.privateState)applyPrivate(message.privateState);if(message.success&&state.doorLocks.has(message.doorId))state.doorLocks.set(message.doorId,{...state.doorLocks.get(message.doorId),locked:false});showToast(message.message);break;
       case 'actorRemoved': state.actors.delete(message.actorId);if(state.dungeon)state.dungeon={...state.dungeon,actors:(state.dungeon.actors||[]).filter(actor=>actor.id!==message.actorId)};break;
       case 'vegetationChopped': state.base=state.base.filter(entity=>entity.id!==message.entityId);if(state.snapshot)state.snapshot.baseEntities=state.base;applySnapshot({...state.snapshot,baseEntities:state.base});break;
-      case 'nearbyTreasureOpened': case 'nearbyTreasureUpdated': state.automaticTreasure=null;applyPrivate(message.privateState);openTreasure({...message.contents,nearby:true},message.contents.message,message.type==='nearbyTreasureUpdated',message.type==='nearbyTreasureOpened');break;
+      case 'nearbyTreasureOpened': case 'nearbyTreasureUpdated': receiveNearbyTreasure(message);break;
       case 'combatTargetUnavailable': removeCombatTarget(message.targetId);if(state.followCommand?.targetId===message.targetId)stopTravel('That target is no longer available.');break;
       case 'chestOpened': updatePlayer(message.player||state.players.get(state.playerId));applyPrivate(message.privateState);openTreasure(message.contents,message.message,false,true);break;
       case 'chestItemsTaken': state.automaticTreasure=null;applyPrivate(message.privateState);if(message.chestRemoved){state.chests.delete(message.chestId);if(state.dungeon?.retroBattle)openTreasure({chestId:message.chestId,items:[]},'Everything collected. Close this chest to leave the dungeon.');else{state.chestContents=null;ui.treasureWindow.hidden=true;}}else openTreasure(message.contents,message.message);showToast(message.message);break;
@@ -665,6 +665,13 @@
   function precipitationVelocity(weather,pitch,shear,snow){
     const wind=screenWind(weather,pitch,shear),speed=Math.min(60,Math.max(0,weather?.windSpeedKilometersPerHour??0))*2;
     return {x:wind.x*speed,y:wind.y*speed+(snow?130:450)};
+  }
+  function precipitationParticle(index,seconds,width,height,velocity,snow){
+    const random=(channel,cycle=0)=>{let n=Math.imul(index+1,0x9e3779b1)^Math.imul(channel+1,0x85ebca6b)^Math.imul(cycle,0xc2b2ae35);n=Math.imul(n^(n>>>16),0x7feb352d);n=Math.imul(n^(n>>>15),0x846ca68b);return ((n^(n>>>16))>>>0)/4294967296;};
+    const w=Math.max(1,width),h=Math.max(1,height)+40,vy=velocity.y*(.7+random(0)*.65),life=h/vy,age=seconds+random(1)*life,cycle=Math.floor(age/life),phase=age-cycle*life;
+    const vx=velocity.x*(snow?1:.25)+(random(2,cycle)-.5)*(snow?24:12),sway=snow?Math.sin(seconds*1.5+random(3)*6)*9:0;
+    const x=((random(4,cycle)*w+vx*phase+sway)%w+w)%w,y=phase*vy-20,trail=snow?.015:.009+random(5,cycle)*.015;
+    return {x,y,dx:vx*trail,dy:vy*trail,alpha:.3+random(6,cycle)*.55,width:snow?1+random(7):.6+random(7)*.6};
   }
   function drawWindFlags(view,now){if(state.dungeon)return;const wind=screenWind(state.weather,state.pitch,state.shear),dx=wind.x,dy=wind.y;for(const flag of renderList('resourceNode')){if(flag.properties?.subtype!=='windFlag'||!pointVisible(flag.position,view))continue;const p=toScreen(flag.position),h=Math.max(25,state.scale*2.5),length=Math.max(20,state.scale*1.6),flutter=Math.sin(now/150+hash(flag.id)*10)*3;ctx.save();ctx.strokeStyle='#d8dedb';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y-h);ctx.stroke();ctx.fillStyle='#f3b447';ctx.beginPath();ctx.moveTo(p.x,p.y-h);ctx.lineTo(p.x+dx*length+flutter,p.y-h+dy*length);ctx.lineTo(p.x+dx*length*.65,p.y-h+dy*length*.65+8);ctx.lineTo(p.x,p.y-h+9);ctx.closePath();ctx.fill();ctx.restore();}}
   function drawWaterCreature(a,p,now){const monster=a.subtype==='waterMonster',s=Math.max(monster?16:5,state.scale*(monster?1.3:.28)),surface=.65+.35*Math.sin(now/1200+hash(a.id)*6);ctx.save();ctx.translate(p.x,p.y);ctx.scale(a.facing==='west'?-1:1,1);ctx.globalAlpha=.6+surface*.4;ctx.strokeStyle='#b7e8ed';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(0,0,s*1.8,s*.4,0,0,Math.PI*2);ctx.stroke();ctx.fillStyle=monster?'#367f6d':'#abd4cc';ctx.beginPath();ctx.ellipse(0,-s*.25,s*1.2,s*.45,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(-s,0);ctx.lineTo(-s*1.65,-s*.65);ctx.lineTo(-s*1.65,s*.3);ctx.closePath();ctx.fill();if(monster){ctx.beginPath();ctx.ellipse(s*.75,-s*.55,s*.4,s*.65,-.3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ffda76';ctx.beginPath();ctx.arc(s*.85,-s*.85,s*.09,0,Math.PI*2);ctx.fill();}ctx.restore();}
@@ -1152,18 +1159,26 @@
   ui.craftingRefresh.addEventListener('click',()=>{if(state.crafting&&!state.crafting.tableDestroyed)send({type:'requestCrafting',furnitureId:state.crafting.furnitureId});});
   function openHomeShop(shop){state.homeShop=shop;ui.homeShopTitle.textContent=shop.isOwner?'Manage your Home shop':`${shop.ownerName}'s Home shop`;ui.homeShopHint.textContent=shop.isOwner?'Listed stock is held safely by the shop. Set quantity to zero to return it to your backpack.':'This shop stays open even while its owner is offline.';ui.homeShopListings.replaceChildren();ui.homeShopInventory.replaceChildren();const listings=shop.listings||[];if(!listings.length)ui.homeShopListings.innerHTML='<small>This shop has no items for sale yet.</small>';for(const item of listings){const row=document.createElement('div');row.className='home-shop-listing';row.append(createItemArt(item.itemType,{quality:item.quality},item.itemType));const label=document.createElement('span');label.innerHTML=`<strong>${item.quality?`${item.quality} `:''}${item.displayName}</strong><small>${item.unitWeightPounds.toFixed(2)} lb each · ${item.quantity} available</small>`;const price=document.createElement('strong');price.textContent=`$${(item.unitPriceCents/100).toFixed(2)}`;const quantity=document.createElement('input');quantity.type='number';quantity.min='0';quantity.max=String(item.quantity);quantity.value=shop.isOwner?String(item.quantity):'0';const action=document.createElement('button');action.type='button';action.textContent=shop.isOwner?'Update':'Buy';action.addEventListener('click',()=>{const amount=Math.max(0,Number(quantity.value)||0);if(shop.isOwner){const nextPrice=Math.max(1,Math.round(Number(priceInput.value)*100)||item.unitPriceCents);send({type:'setHomeShopListing',furnitureId:shop.furnitureId,itemType:item.itemType,quantity:amount,unitPriceCents:nextPrice});}else if(amount>0)send({type:'purchaseHomeShop',furnitureId:shop.furnitureId,itemType:item.itemType,quantity:amount});});let priceInput=null;if(shop.isOwner){priceInput=document.createElement('input');priceInput.type='number';priceInput.min='.01';priceInput.step='.01';priceInput.value=(item.unitPriceCents/100).toFixed(2);row.append(label,quantity,priceInput,action);}else row.append(label,price,quantity,action);ui.homeShopListings.append(row);}if(shop.isOwner){const heading=document.createElement('h3');heading.textContent='Add backpack item';ui.homeShopInventory.append(heading);const listed=new Set(listings.map(item=>item.itemType));const inventory=(shop.ownerInventory?.items||[]).filter(item=>!listed.has(item.itemType)&&!['fist','personalFlag'].includes(item.itemType)&&item.category!=='quest');if(!inventory.length)ui.homeShopInventory.append(Object.assign(document.createElement('small'),{textContent:'No additional sellable items in your backpack.'}));for(const item of inventory){const row=document.createElement('div');row.className='home-shop-listing';row.append(createItemArt(item.itemType,{quality:item.quality},item.itemType));const label=document.createElement('span');label.innerHTML=`<strong>${item.quality?`${item.quality} `:''}${title(item.itemType)}</strong><small>${item.quantity} owned · ${item.unitWeightPounds.toFixed(2)} lb each</small>`;const quantity=document.createElement('input');quantity.type='number';quantity.min='1';quantity.max=String(item.quantity);quantity.value='1';const price=document.createElement('input');price.type='number';price.min='.01';price.step='.01';price.value='1.00';const action=document.createElement('button');action.type='button';action.textContent='List';action.addEventListener('click',()=>send({type:'setHomeShopListing',furnitureId:shop.furnitureId,itemType:item.itemType,quantity:Number(quantity.value)||1,unitPriceCents:Math.max(1,Math.round((Number(price.value)||1)*100))}));row.append(label,quantity,price,action);ui.homeShopInventory.append(row);}}ui.homeShopWindow.hidden=false;}
   function closeTreasure(){const leave=!!state.dungeon?.retroBattle&&state.dungeon.isCompleted&&!!state.chestContents;state.chestContents=null;ui.treasureWindow.hidden=true;if(leave)send({type:'exitDungeon'});}
+  function receiveNearbyTreasure(message){
+    const automatic=message.type==='nearbyTreasureUpdated'&&state.automaticTreasure?.contents?.anchorId===message.contents.anchorId;
+    state.automaticTreasure=null;applyPrivate(message.privateState);
+    if(automatic&&!message.contents.items?.length&&!state.dungeon?.retroBattle){closeTreasure();showToast(message.contents.message||'Treasure collected.');return;}
+    openTreasure({...message.contents,nearby:true},message.contents.message,message.type==='nearbyTreasureUpdated',message.type==='nearbyTreasureOpened');
+  }
   function openLootTreasure(loot,message,preserve=false,allowAutomatic=false){
     if(!loot)return;
     openTreasure({lootId:loot.id,items:loot.items,moneyCents:loot.moneyCents,dropKind:loot.dropKind},message||`Cash: $${((loot.moneyCents||0)/100).toFixed(2)} · Collected when you take items or cash.`,preserve,allowAutomatic);
   }
   function openTreasure(contents,message,preserve=false,allowAutomatic=false){
     if(!contents)return;
-    if(allowAutomatic&&!state.dungeon?.retroBattle&&tryAutomaticTreasure(contents))return;
+    if(allowAutomatic&&!contents.isEventReward&&contents.dropKind!=='eventReward'&&!state.dungeon?.retroBattle&&tryAutomaticTreasure(contents))return;
     const wasHidden=ui.treasureWindow.hidden,selection=preserve?new Map(treasureSelection().map(item=>[item.itemType,item.quantity])):new Map();
     state.chestContents=contents;
-    ui.treasureWindow.querySelector('h2').textContent=contents.nearby?'Nearby treasure':contents.lootId?(contents.dropKind==='tombstone'?'Tombstone':'Treasure'):'Treasure chest';
+    ui.treasureWindow.querySelector('h2').textContent=contents.isEventReward||contents.dropKind==='eventReward'?'Event treasure':contents.nearby?'Nearby treasure':contents.lootId?(contents.dropKind==='tombstone'?'Tombstone':'Treasure'):'Treasure chest';
     ui.treasureCash.textContent=message||'Cash was collected automatically.';
     ui.treasureItems.replaceChildren();
+    if(!contents.items?.length){const empty=document.createElement('p');empty.textContent='No items remain to select. Check your inventory for collected treasure.';ui.treasureItems.append(empty);}
+    if(ui.treasureTakeAll)ui.treasureTakeAll.disabled=!contents.items?.length;
     for(const item of contents.items||[]){
       const row=document.createElement('label'),details=document.createElement('span'),name=document.createElement('strong'),weight=document.createElement('small'),input=document.createElement('input');
       row.className='treasure-item';row.append(createItemArt(item.itemType));
@@ -1343,11 +1358,10 @@
     const code=state.weather?.weatherCode??0,snow=(code>=71&&code<=77)||code===85||code===86,rain=(code>=51&&code<=67)||(code>=80&&code<=82)||code>=95;
     if((rain||snow)&&detail>0){
       const count=detail===2?90:35,velocity=precipitationVelocity(state.weather,state.pitch,state.shear,snow),seconds=now/1000;
-      const wrap=(value,size)=>((value%size)+size)%size;
       ctx.strokeStyle=rain?'rgba(169,211,232,.55)':'rgba(245,250,255,.8)';ctx.lineWidth=rain?1:2;
       for(let i=0;i<count;i++){
-        const x=wrap(hash(`${i}:x`)*viewport+seconds*velocity.x,viewport),y=wrap(hash(`${i}:y`)*innerHeight+seconds*velocity.y,innerHeight),trail=rain?.025:.015;
-        ctx.beginPath();ctx.moveTo(x-velocity.x*trail,y-velocity.y*trail);ctx.lineTo(x,y);ctx.stroke();
+        const p=precipitationParticle(i,seconds,viewport,innerHeight,velocity,snow);
+        ctx.save();ctx.globalAlpha=p.alpha;ctx.lineWidth=p.width;ctx.beginPath();ctx.moveTo(p.x-p.dx,p.y-p.dy);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.restore();
       }
     }
   }

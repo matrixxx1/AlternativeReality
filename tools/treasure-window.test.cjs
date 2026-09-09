@@ -4,10 +4,10 @@ function implementation(name){const start=source.indexOf(`  function ${name}(`);
 function harness(){
   function element(){return{children:[],dataset:{},listeners:{},classList:{contains:()=>false},append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},setAttribute(){},addEventListener(type,listener){this.listeners[type]=listener;},focus(){}};}
   const heading=element(),ui={treasureItems:element(),treasureCash:element(),treasureWeight:element(),treasureWarning:element(),treasureTake:element(),treasureClose:element(),treasureWindow:{hidden:true,scrollHeight:500,classList:{contains:()=>false},querySelector:()=>heading}};
-  ui.treasureItems.querySelectorAll=()=>ui.treasureItems.children.map(row=>row.children.at(-1));
+  ui.treasureItems.querySelectorAll=()=>ui.treasureItems.children.map(row=>row.children.at(-1)).filter(input=>input?.dataset?.item);
   const state={players:new Map([['me',{}]]),playerId:'me',loot:new Map(),chests:new Map(),privateState:{inventory:{items:[{itemType:'rock',quantity:98,category:'weapon',unitWeightPounds:.5}],weightPounds:49,maximumWeightPounds:50}}};
-  const sent=[],c=vm.createContext({ui,state,sent,document:{createElement:element},itemDisplayName:type=>type,createItemArt:element,stackWeight:item=>item.quantity*item.unitWeightPounds,weightText:w=>w+' lb',effectiveCarryingCapacity:(me,capacity)=>me?.godMode?Infinity:capacity,send:message=>sent.push(message),innerWidth:1200,innerHeight:800,viewportWidth:()=>900,floatPanel:()=>{}});
-  for(const name of ['closeTreasure','openLootTreasure','openTreasure','refreshTreasure','treasureSelection','treasureCapacity','updateTreasureWeight','sendTreasureTake','tryAutomaticTreasure','recoverAutomaticTreasure','takeAllTreasure','takeTreasureSelection'])vm.runInContext(implementation(name),c);
+  const sent=[],c=vm.createContext({ui,state,sent,document:{createElement:element},itemDisplayName:type=>type,createItemArt:element,stackWeight:item=>item.quantity*item.unitWeightPounds,weightText:w=>w+' lb',effectiveCarryingCapacity:(me,capacity)=>me?.godMode?Infinity:capacity,send:message=>sent.push(message),applyPrivate:()=>{},showToast:()=>{},innerWidth:1200,innerHeight:800,viewportWidth:()=>900,floatPanel:()=>{}});
+  for(const name of ['closeTreasure','receiveNearbyTreasure','openLootTreasure','openTreasure','refreshTreasure','treasureSelection','treasureCapacity','updateTreasureWeight','sendTreasureTake','tryAutomaticTreasure','recoverAutomaticTreasure','takeAllTreasure','takeTreasureSelection'])vm.runInContext(implementation(name),c);
   c.loot={id:'loot',moneyCents:123,items:[{itemType:'rock',quantity:10,category:'weapon',unitWeightPounds:.5}]};state.loot.set(c.loot.id,c.loot);
   return c;
 }
@@ -102,4 +102,25 @@ test('one nearby selection includes all source IDs and preserves quantity after 
  c.openTreasure(contents);c.ui.treasureItems.querySelectorAll()[0].value='1';c.takeTreasureSelection();
  assert.equal(c.sent[0].sources.length,2);assert.equal(c.sent[0].items.length,1);
  c.openTreasure({...contents,items:[{...contents.items[0],quantity:1}]},null,true);assert.equal(c.ui.treasureItems.querySelectorAll()[0].value,'1');
+});
+
+test('event victory offers selectable rewards even with Take all enabled',()=>{
+ const c=harness();c.state.lootingMode='all';c.state.privateState.inventory.weightPounds=0;
+ c.openTreasure({nearby:true,isEventReward:true,anchorId:'reward',sources:[{id:'reward',chest:false}],items:c.loot.items},'Event complete. Collect your treasure.',false,true);
+ assert.equal(c.sent.length,0);assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.ui.treasureItems.querySelectorAll().length,1);
+});
+
+test('automatic ordinary pickup does not reopen an empty window',()=>{
+ const c=harness();c.state.lootingMode='all';c.state.privateState.inventory.weightPounds=0;
+ c.receiveNearbyTreasure({type:'nearbyTreasureOpened',contents:{anchorId:'drop',sources:[{id:'drop',chest:false}],items:c.loot.items}});
+ assert.equal(c.sent.length,1);assert.equal(c.ui.treasureWindow.hidden,true);
+ c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{anchorId:'drop',sources:[],items:[],message:'Everything collected.'}});
+ assert.equal(c.ui.treasureWindow.hidden,true);assert.equal(c.state.chestContents,null);
+});
+test('event collection leaves explicit completion feedback and closing Retro exits once',()=>{
+ const c=harness();c.state.dungeon={retroBattle:{},isCompleted:true};
+ c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{anchorId:'reward',isEventReward:true,sources:[],items:[],message:'Everything collected. Your treasure is in your inventory.'}});
+ assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.ui.treasureItems.querySelectorAll().length,0);
+ assert.match(c.ui.treasureCash.textContent,/Everything collected/);assert.equal(c.ui.treasureTake.disabled,true);
+ c.closeTreasure();c.closeTreasure();assert.equal(c.sent.filter(m=>m.type==='exitDungeon').length,1);
 });

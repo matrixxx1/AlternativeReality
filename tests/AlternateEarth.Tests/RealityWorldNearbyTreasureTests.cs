@@ -6,6 +6,29 @@ namespace AlternateEarth.Tests;
 public sealed partial class RealityWorldTests
 {
     [Fact]
+    public async Task RemoteEventRewardsRemainSelectableAfterTheFirstDropIsEmptied()
+    {
+        var (world, _, loot) = await CreateSelectiveLootWorld();
+        var drops = PhotoField<System.Collections.Concurrent.ConcurrentDictionary<string, LootDropState>>(world, "_loot");
+        drops.Clear();
+        var reward = loot with { Id = "reward-a", DropKind = "eventReward", OwnerId = "collector", LocationId = "finished-dungeon", MoneyCents = 0, Items = [new("mapleSyrup", 1)] };
+        drops[reward.Id] = reward;
+        drops["reward-b"] = reward with { Id = "reward-b", Items = [new("canadianMoney", 2)] };
+        var opened = await world.OpenNearbyTreasureAsync("collector", reward.Id, false);
+        Assert.True(opened.IsEventReward);
+        Assert.Equal(2, opened.Items.Count);
+        var partial = await world.TakeNearbyTreasureAsync("collector", new(reward.Id,
+            opened.Sources.Select(s => new TreasureSourceRequest(s.Id, s.Chest)).ToArray(), [new("mapleSyrup", 1)]));
+        Assert.True(partial.IsEventReward);
+        Assert.Equal("canadianMoney", Assert.Single(partial.Items).ItemType);
+        var finished = await world.TakeNearbyTreasureAsync("collector", new(reward.Id,
+            partial.Sources.Select(s => new TreasureSourceRequest(s.Id, s.Chest)).ToArray(), [new("canadianMoney", 2)]));
+        Assert.Empty(finished.Items);
+        Assert.True(finished.IsEventReward);
+        Assert.Contains("Everything collected", finished.Message);
+    }
+
+    [Fact]
     public async Task NearbyTreasureCombinesDropsAndCollectsCashBeforeSelectingOverweightItems()
     {
         var (world, _, loot) = await CreateSelectiveLootWorld();

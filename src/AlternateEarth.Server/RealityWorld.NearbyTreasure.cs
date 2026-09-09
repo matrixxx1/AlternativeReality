@@ -28,10 +28,10 @@ public sealed partial class RealityWorld
         finally { _treasureInteractionLock.Release(); }
     }
 
-    private async Task<NearbyTreasureState> ReadNearbyTreasureAsync(string playerId, string anchorId, CancellationToken token)
+    private async Task<NearbyTreasureState> ReadNearbyTreasureAsync(string playerId, string anchorId, CancellationToken token, LootDropState? rewardAnchor = null)
     {
         var player = _players[playerId];
-        var anchor = _loot.GetValueOrDefault(anchorId);
+        var anchor = _loot.GetValueOrDefault(anchorId) ?? rewardAnchor;
         var sources = new List<TreasureSource>();
         var cash = 0L;
         var removed = new List<string>();
@@ -64,7 +64,7 @@ public sealed partial class RealityWorld
         return new(anchorId, sources, sources.SelectMany(s => s.Items).GroupBy(i => i.ItemType, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First() with { Quantity = g.Sum(i => i.Quantity), Quality = g.Select(i => i.Quality).Distinct().Count() == 1 ? g.First().Quality : null }).ToArray(),
             cash > 0 ? $"Collected {cash / 100m:C} cash. Choose items from nearby treasure (within 4 meters)." : "Money collected automatically. Choose items from nearby treasure (within 4 meters).",
-            _players[playerId], changed, removed);
+            _players[playerId], changed, removed, anchor?.DropKind == "eventReward" || sources.Any(s => _loot.GetValueOrDefault(s.Id)?.DropKind == "eventReward"));
     }
 
     public async Task<NearbyTreasureState> TakeNearbyTreasureAsync(string playerId, TakeNearbyTreasureRequest request, CancellationToken token = default)
@@ -76,6 +76,7 @@ public sealed partial class RealityWorld
                 request.Items.Any(i => string.IsNullOrWhiteSpace(i.ItemType) || i.Quantity is < 1 or > 100_000))
                 throw new InvalidOperationException("Choose valid treasure and quantities.");
             var sources = new List<TreasureSource>();
+            var rewardAnchor = _loot.GetValueOrDefault(request.AnchorId);
             foreach (var source in request.Sources.DistinctBy(s => (s.Id, s.Chest)))
             {
                 if (source.Chest)
@@ -86,6 +87,7 @@ public sealed partial class RealityWorld
                 }
                 else sources.Add(new(source.Id, false, OpenLoot(playerId, source.Id).Items));
             }
+            rewardAnchor ??= sources.Select(s => _loot.GetValueOrDefault(s.Id)).FirstOrDefault(l => l?.DropKind == "eventReward");
             var requested = request.Items.GroupBy(i => i.ItemType, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.Sum(i => (long)i.Quantity), StringComparer.OrdinalIgnoreCase);
             foreach (var line in requested)
@@ -105,7 +107,8 @@ public sealed partial class RealityWorld
                 if (source.Chest && lines.Count > 0) await TakeChestItemsCoreAsync(playerId, new(source.Id, lines), token);
                 else if (!source.Chest) await TakeLootItemsCoreAsync(playerId, new(source.Id, lines), token);
             }
-            var result = await ReadNearbyTreasureAsync(playerId, request.AnchorId, token);
+            var result = await ReadNearbyTreasureAsync(playerId, request.AnchorId, token, rewardAnchor);
+            result = result with { Message = result.Items.Count == 0 ? "Everything collected. Your treasure is in your inventory." : "Selected items collected. Choose any remaining treasure." };
             return result with { RemovedLoot = result.RemovedLoot.Concat(sources.Where(s => !s.Chest && !_loot.ContainsKey(s.Id)).Select(s => s.Id)).Distinct().ToArray() };
         }
         finally { _treasureInteractionLock.Release(); }
@@ -116,4 +119,4 @@ public sealed record TreasureSource(string Id, bool Chest, IReadOnlyList<ItemSta
 public sealed record TreasureSourceRequest(string Id, bool Chest);
 public sealed record TakeNearbyTreasureRequest(string AnchorId, TreasureSourceRequest[] Sources, PurchaseLine[] Items);
 public sealed record NearbyTreasureState(string AnchorId, IReadOnlyList<TreasureSource> Sources, IReadOnlyList<ItemStack> Items, string Message,
-    PlayerState Player, IReadOnlyList<LootDropState> ChangedLoot, IReadOnlyList<string> RemovedLoot);
+    PlayerState Player, IReadOnlyList<LootDropState> ChangedLoot, IReadOnlyList<string> RemovedLoot, bool IsEventReward = false);

@@ -104,6 +104,10 @@ public sealed partial class RealityWorldTests
         var reward = Assert.Single(world.GetPrivateState(id).Loot!, l => l.DropKind == "eventReward");
         Assert.Equal(0, reward.MoneyCents);
         Assert.Equal(new[] { "canadianMoney", "hockeyStick", "mapleSyrup", "recipe:hockeyStick", "recipe:mapleSyrup" }, reward.Items.Select(i => i.ItemType).OrderBy(i => i).ToArray());
+        var opened = await world.OpenNearbyTreasureAsync(id, reward.Id, false);
+        Assert.True(opened.IsEventReward);
+        foreach (var item in reward.Items)
+            Assert.Contains(opened.Items, collected => collected.ItemType == item.ItemType && collected.Quantity >= item.Quantity);
     }
 
     [Fact]

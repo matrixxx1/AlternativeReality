@@ -96,7 +96,7 @@ Merchant offers use deterministic server-configured rotation buckets. Reopening 
 
 ## Nearby treasure and combat acknowledgements (v63)
 
-`openLoot`, `collectLoot`, and `openChest` return `nearbyTreasureOpened` with `contents` and `privateState`. All accessible drops and chests within four meters share one item list; nearby private event rewards remain owner-only. Cash is credited immediately, independently of item selection or backpack capacity. `contents` contains `anchorId`, `sources` (`id`, `chest`, and items), aggregated `items`, `player`, and a message.
+`openLoot`, `collectLoot`, and `openChest` return `nearbyTreasureOpened` with `contents` and `privateState`. All accessible drops and chests within four meters share one item list; nearby private event rewards remain owner-only. Cash is credited immediately, independently of item selection or backpack capacity. `contents` contains `anchorId`, `sources` (`id`, `chest`, and items), aggregated `items`, `player`, `isEventReward`, and a message. Event rewards always open for item selection, including when ordinary looting is set to Take all. Successful automatic collection does not reopen an empty window.
 
 `takeNearbyTreasure` accepts `anchorId`, a `sources` array of `{id, chest}`, and `items` containing `{itemType, quantity}`. The server validates every source, ownership, range, available quantities, and the combined backpack weight before taking items. It returns `nearbyTreasureUpdated` with remaining contents and refreshed private state. Existing single-source take commands remain supported.
 
