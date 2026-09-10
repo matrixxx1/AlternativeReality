@@ -121,6 +121,7 @@ public sealed partial class RealityWorld
         await _store.InitializeCasinoAsync(cancellationToken);
         RestoreBuriedChests();
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
+        RestoreGardens();
         _loadedAreas["0:0"] = Configuration.Area.Bounds;
         await AdvanceTransitAsync(TimeSpan.Zero, cancellationToken);
         await RefreshWeatherAsync(cancellationToken);
@@ -1248,7 +1249,7 @@ public sealed partial class RealityWorld
             var id = $"chest:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{chestIndex}";
             _outdoorChests.TryAdd(id, new TreasureChestState(id, safe, "outdoor"));
         }
-        string[] looseItemTypes = ["spear", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas"];
+        string[] looseItemTypes = ["spear", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas", "fertilizer", "wood", "gardeningBook", .. GardenRules.Crops.Select(GardenRules.Seed)];
         var looseRandom = new Random(StableInt($"loose-items:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
         for (var itemIndex = 0; itemIndex < 14; itemIndex++)
         {
@@ -1258,7 +1259,7 @@ public sealed partial class RealityWorld
             var position = Navigation.FindNearestWalkable(candidate);
             var itemType = looseItemTypes[looseRandom.Next(looseItemTypes.Length)];
             var id = $"loot:world:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{itemIndex}";
-            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, 1) }, DateTimeOffset.MaxValue));
+            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, itemType.StartsWith("seed:") ? looseRandom.Next(5,21) : itemType=="fertilizer" ? looseRandom.Next(1,6) : 1) }, DateTimeOffset.MaxValue));
         }
         var newspaperRandom = new Random(StableInt($"newspapers:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
         var residentialBuildingIds = staticEntities.Where(entity => entity.Kind == EntityKind.Building && !entity.Properties.ContainsKey("merchantCategory")).Select(entity => entity.Id).ToHashSet(StringComparer.Ordinal);
@@ -1307,7 +1308,7 @@ public sealed partial class RealityWorld
             var a = road.Geometry[segment]; var b = road.Geometry[segment + 1];
             var position = Navigation.FindNearestWalkable(new WorldPosition(generated.Area.Region, a.X + (b.X - a.X) * amount, a.Y + (b.Y - a.Y) * amount));
             var itemType = litterTypes[mailboxRandom.Next(litterTypes.Length)]; var id = $"loot:litter:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{index}";
-            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, 1) }, DateTimeOffset.MaxValue));
+            _loot.TryAdd(id, new LootDropState(id, position, "outdoor", 0, new[] { InventoryStack(itemType, itemType.StartsWith("seed:") ? looseRandom.Next(5,21) : itemType=="fertilizer" ? looseRandom.Next(1,6) : 1) }, DateTimeOffset.MaxValue));
         }
         _navigation = new WorldNavigation(_loadedBounds, _baseEntities.Values.Concat(_realityEntities.Values).ToArray(), _elevationSamples.Values.ToArray());
         var residentRandom = new Random(StableInt($"additional-residents:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
@@ -1583,13 +1584,13 @@ public sealed partial class RealityWorld
             return player with { Position = home.Exit, Terrain = TerrainType.Pavement, SpeedMetersPerSecond = 0,
                 HealthHearts = 10, Stamina = ProgressionRules.Stamina(StatsFor(player.Id)), MaximumStamina = ProgressionRules.Stamina(StatsFor(player.Id)), Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = home.Id,
                 EquippedWeapon = player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
-                Survival = new(), FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
+                Survival = new(GardeningBookRead: player.Survival?.GardeningBookRead == true), FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
         }
         var spawn = Navigation.FindNearestWalkable(new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         return player with { Position = spawn, Terrain = Navigation.TerrainAt(spawn.X, spawn.Y), SpeedMetersPerSecond = 0,
             HealthHearts = 10, Stamina = ProgressionRules.Stamina(StatsFor(player.Id)), MaximumStamina = ProgressionRules.Stamina(StatsFor(player.Id)), Water = 10, BodyHeat = 50, TravelMode = TravelMode.Walk, LocationId = "outdoor",
             EquippedWeapon = player.EquippedWeapon == "probulator" ? "fist" : player.EquippedWeapon,
-            Survival = new(), FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
+            Survival = new(GardeningBookRead: player.Survival?.GardeningBookRead == true), FoodProtectedUntilUtc = null, WaterProtectedUntilUtc = null, EnergyDrinkBoostUntilUtc = null, EnergyDrinkCrashUntilUtc = null, ProbedUntilUtc = null, CandleUntilUtc = null, Version = player.Version + 1 };
     }
 
     private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken, int kryptoniteUsed = 0)

@@ -15,6 +15,7 @@
     const s=player.survival||{},hunger=Math.max(0,Math.min(100,s.hunger||0));
     const illnesses=(s.illnesses||[]).filter(i=>Date.parse(i.endsAtUtc)>now).map(i=>`${i.name} · ${Math.ceil((Date.parse(i.endsAtUtc)-now)/60000)} min`);
     const buffs=(s.buffs||[]).filter(b=>Date.parse(b.endsAtUtc)>now).map(b=>`+${b.amount} ${b.stat} (${Math.ceil((Date.parse(b.endsAtUtc)-now)/60000)} min)`);
+    if(s.gardeningBookRead)buffs.push("Gardening: permanent +5% build success");
     const fruitEnd=Date.parse(s.musicalFruit?.endsAtUtc),fruitLeft=Math.ceil((fruitEnd-now)/1000);
     if(fruitLeft>0)buffs.push(`Musical Fruit · ${Math.floor(fruitLeft/60)}:${String(fruitLeft%60).padStart(2,'0')}`);
     else if(fruitEnd+20000>now)buffs.push(`Musical Fruit · Grand toot finale (${Math.ceil((fruitEnd+20000-now)/1000)}s)`);

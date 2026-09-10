@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
   <link rel="stylesheet" href="styles.css?v=88">
+<style>.garden-dialog{max-width:760px;width:90vw;max-height:80vh;overflow:auto;background:#263c37;color:#f1e4bd;border:2px solid #a68a51;border-radius:12px;padding:22px}.garden-dialog::backdrop{background:#0008}.garden-dialog button{margin:6px;padding:8px}.garden-build-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ffffff20;padding:6px}.garden-placement-banner{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;background:#263c37;color:#fff1c1;border:2px solid #c9ac67;padding:14px;border-radius:9px;max-width:75vw}.garden-placement-banner button{margin-left:16px}</style>
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -424,12 +425,12 @@
   <section id="busRidePanel" class="bus-ride-panel" aria-live="polite" hidden><span id="busRideStatus"></span><button id="getOffBusButton" type="button" hidden>Get off bus now</button><button id="cancelBusWaitButton" type="button" hidden>Cancel waiting</button><button id="rideViewRouteButton" type="button">View route</button></section>
   <dialog id="busRouteDialog" aria-labelledby="busRouteTitle"><h2 id="busRouteTitle">Bus route</h2><button id="closeBusRouteButton" type="button">Close route</button><label>Service <select id="busRouteSelect"></select></label><p id="busRouteSummary"></p><canvas id="busRouteCanvas" width="800" height="480" aria-label="Bus route, direction arrows and numbered stops"></canvas><ol id="busRouteStops"></ol><button id="routeWaitForBusButton" type="button">Wait at selected stop</button></dialog>
   <script src="transit.js?v=7"></script>
-  <script src="commands.js?v=8"></script>
+  <script src="commands.js?v=9"></script>
   <script src="combat-effects.js?v=3"></script>
   <script src="map-markers.js?v=3"></script>
   <script src="quest-navigation.js?v=1"></script>
   <script src="action-targets.js?v=1"></script>
-  <script src="survival.js?v=3"></script>
+  <script src="survival.js?v=4"></script>
   <script src="held-weapons.js?v=1"></script>
   <script src="scuba.js?v=5"></script>
   <script src="retro-battles.js?v=1"></script>
@@ -442,6 +443,7 @@
   <link rel="stylesheet" href="casino.css?v=2">
   <script src="casino.js?v=2"></script>
   <script src="inventory-sections.js?v=2"></script>
-  <script src="app.js?v=176"></script>
+  <script src="gardens.js?v=1"></script>
+  <script src="app.js?v=177"></script>
 </body>
 </html>

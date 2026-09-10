@@ -178,7 +178,7 @@ public sealed partial class RealityWorld
         var size = FurnitureSize(furniture, rotation); const double clearance = .18;
         var station=furniture.Properties.GetValueOrDefault("objectType");
         if(station is "garageWorkbench" or "weaponsBench" && !InsideGarage(home.Garage,x,y))return false;
-        if(station is "stove" or "craftingTable" && InsideGarage(home.Garage,x,y))return false;
+        if(station is "kitchenSink" or "stove" or "craftingTable" && InsideGarage(home.Garage,x,y))return false;
         if(home.Garage is { } garage)
         {
             var entryY=(garage.Passage[0].Y+garage.Passage[^1].Y)/2;
@@ -338,7 +338,7 @@ public sealed partial class RealityWorld
         }, cancellationToken);
 
     public Task<DungeonState> StoreFurnitureAsync(string playerId, StoreFurnitureRequest request, CancellationToken cancellationToken = default) =>
-        UpdateFurnitureAsync(playerId, request.FurnitureId, (_, item, _) => item.Properties.GetValueOrDefault("builtIn") == "true" && item.Properties.GetValueOrDefault("objectType") is "fireplace" or "storageChest"
+        UpdateFurnitureAsync(playerId, request.FurnitureId, (_, item, _) => item.Properties.GetValueOrDefault("builtIn") == "true" && item.Properties.GetValueOrDefault("objectType") is "fireplace" or "storageChest" or "kitchenSink"
             ? throw new InvalidOperationException("That built-in fixture cannot be placed in storage.")
             : SetFurniturePlacement(item, 0, 0, 0, true), cancellationToken);
 }

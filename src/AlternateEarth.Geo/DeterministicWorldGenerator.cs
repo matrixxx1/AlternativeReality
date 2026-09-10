@@ -74,10 +74,13 @@ public sealed class DeterministicWorldGenerator
             var streetLights = GenerateStreetLights(reality, withDriveways);
             var obstacles = withDriveways.Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).ToArray();
             var actors = GenerateActors(reality, obstacles).Concat(GeneratePoiMerchants(reality, withSidewalks)).ToArray();
+            var gardenFeatures = withDriveways.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).ToArray();
+            var gardens = GardenGenerator.Generate(gardenFeatures, reality.Area.Bounds, unchecked((int)reality.Seed));
+            var hoses = GardenGenerator.GenerateHoses(gardenFeatures.Concat(gardens).ToArray(), reality.Area.Bounds, unchecked((int)reality.Seed));
             var generated = geographic with
             {
                 Provider = $"Generated canonical world ({geographic.Provider})",
-                Features = withDriveways.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).ToArray(),
+                Features = withDriveways.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).Concat(gardens).Concat(hoses).ToArray(),
                 CachedAtUtc = DateTimeOffset.UtcNow
             };
             if (cachePath is not null)

@@ -389,6 +389,31 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "actorRemoved", actorId = root.Deserialize<CaptureQuestPetRequest>(SharedJson.Options)!.ActorId }, null, cancellationToken);
                         await connection.SendAsync(new { type = "questUpdated", privateState = capturedPet.PrivateState, quest = capturedPet.Quest, message = capturedPet.Message }, cancellationToken);
                         break;
+                    case "drinkHose":
+                        var hoseDrink=await _world.DrinkHoseAsync(characterId,root.GetProperty("entityId").GetString()!,cancellationToken);
+                        await BroadcastAsync(new {type="playerUpdated",player=hoseDrink.Player},null,cancellationToken);
+                        if(hoseDrink.Remark is not null)await BroadcastAsync(new {type="chatSaid",chat=hoseDrink.Remark},null,cancellationToken);
+                        await connection.SendAsync(new {type="gardenResult",privateState=_world.GetPrivateState(characterId),message=hoseDrink.Remark is null?"The hose water was clean this time.":hoseDrink.Remark.Message+" You have parasites."},cancellationToken);
+                        break;
+                    case "useKitchenSink":
+                        var sinkAction=root.GetProperty("action").GetString()!;
+                        var sinkPlayer=await _world.UseKitchenSinkAsync(characterId,root.GetProperty("sinkId").GetString()!,sinkAction,cancellationToken);
+                        await BroadcastAsync(new {type="playerUpdated",player=sinkPlayer},null,cancellationToken);
+                        await connection.SendAsync(new {type="gardenResult",privateState=_world.GetPrivateState(characterId),message=sinkAction=="drink"?"Drank purified water from the kitchen sink.":"Filled your container with purified water."},cancellationToken);
+                        break;
+                    case "requestGardenBuild":
+                        await connection.SendAsync(new {type="gardenBuildOptions",garden=_world.RequestGardenBuild(characterId)},cancellationToken);
+                        break;
+                    case "buildGarden":
+                        var gardenBuilt=await _world.BuildGardenAsync(characterId,root.Deserialize<BuildGardenRequest>(SharedJson.Options)!,cancellationToken);
+                        if(gardenBuilt.Entity is not null)await BroadcastAsync(new {type="worldObjectUpdated",entity=gardenBuilt.Entity},null,cancellationToken);
+                        await connection.SendAsync(new {type="gardenResult",privateState=gardenBuilt.PrivateState,message=gardenBuilt.Message},cancellationToken);
+                        break;
+                    case "harvestGarden":
+                        var harvest=await _world.HarvestGardenAsync(characterId,root.GetProperty("entityId").GetString()!,cancellationToken);
+                        await BroadcastAsync(new {type="worldObjectUpdated",entity=harvest.Entity},null,cancellationToken);
+                        await connection.SendAsync(new {type="gardenResult",privateState=harvest.PrivateState,message=harvest.Message},cancellationToken);
+                        break;
                     case "gatherWild":
                         var resourceId = root.GetProperty("entityId").GetString()!;
                         var gathered = await _world.GatherWildAsync(characterId,resourceId,cancellationToken);
@@ -824,6 +849,8 @@ public sealed class RealitySocketHub
             }
         }
     }
+
+    public async Task BroadcastGardensAsync(IReadOnlyList<CanonicalEntity> entities,CancellationToken token) { foreach(var entity in entities)await BroadcastAsync(new {type="worldObjectUpdated",entity},null,token); }
 
     public async Task BroadcastRemovedWorldObjectsAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken = default)
     {

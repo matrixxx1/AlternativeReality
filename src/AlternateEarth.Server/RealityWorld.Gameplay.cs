@@ -100,7 +100,7 @@ public sealed partial class RealityWorld
         ,new("metal","Scrap metal","Reusable metal recovered from litter or a mailbox",0,0,50,500,WeightPounds:1)
         ,new("lockPickSet","Lock pick set","Reusable tool with a 15% chance to open a locked door",0,0,2_500,9_000,true,true,WeightPounds:.4)
     };
-    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.Concat(GloveCatalog.Items).Concat(CraftingCatalog.Materials).Concat(CraftingCatalog.RecipeItems).Concat(HazardCatalog.Materials).Concat(HazardCatalog.Items).Concat(NutritionCatalog.Items).Select(item => NutritionCatalog.Foods.TryGetValue(item.ItemType, out var nutrition) ? item with { Nutrition = nutrition, Effect = NutritionCatalog.Description(nutrition) } : item).Select(item => item with { StorageSection = InventorySections.Section(item) }).ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.Concat(GardenCatalog.Items).Concat(GloveCatalog.Items).Concat(CraftingCatalog.Materials).Concat(CraftingCatalog.RecipeItems).Concat(HazardCatalog.Materials).Concat(HazardCatalog.Items).Concat(NutritionCatalog.Items).Select(item => NutritionCatalog.Foods.TryGetValue(item.ItemType, out var nutrition) ? item with { Nutrition = nutrition, Effect = NutritionCatalog.Description(nutrition) } : item).Select(item => item with { StorageSection = InventorySections.Section(item) }).ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     private static readonly MovementConfiguration DefaultMovementConfiguration = new(
         3.5,
         100,
@@ -513,6 +513,8 @@ public sealed partial class RealityWorld
         if (CraftingCatalog.RecipeFromItem(itemType) is { } studyRecipe) return await ReadRecipeAsync(playerId, studyRecipe, cancellationToken);
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (itemType.StartsWith("quest:food:", StringComparison.Ordinal)) return await ConsumeDeliveryFoodAsync(playerId, itemType, cancellationToken);
+        if (itemType is "bottledWater" or "jarOfWater") return await DrinkContainerAsync(playerId,itemType,cancellationToken);
+        if (itemType.Equals("gardeningBook", StringComparison.OrdinalIgnoreCase)) return await ReadGardeningBookAsync(playerId, cancellationToken);
         if (itemType.Equals("craftingSkillBook", StringComparison.OrdinalIgnoreCase)) return await ReadCraftingSkillBookAsync(playerId, cancellationToken);
         if (itemType.Equals("mapleSyrup", StringComparison.OrdinalIgnoreCase)) return await ConsumeMapleSyrupAsync(player, cancellationToken);
         if (itemType.Equals("antibiotics", StringComparison.OrdinalIgnoreCase) || NutritionCatalog.Foods.ContainsKey(itemType)) return await ConsumeNutritionAsync(player,itemType,cancellationToken);
@@ -1700,6 +1702,11 @@ public sealed partial class RealityWorld
     {
         var random = new Random(StableInt($"treasure:{Configuration.Seed}:{chestId}"));
         var rewards = new List<ItemStack> { InventoryStack("rock", random.Next(1, 8), quality: RandomWeaponQuality(random)) };
+        var gardenRandom=new Random(StableInt("garden-supplies:"+chestId));
+        rewards.Add(InventoryStack(GardenRules.Seed(GardenRules.Crops[gardenRandom.Next(GardenRules.Crops.Length)]),gardenRandom.Next(5,21)));
+        if(gardenRandom.NextDouble()<.4)rewards.Add(InventoryStack("fertilizer",gardenRandom.Next(1,6)));
+        if(gardenRandom.NextDouble()<.3)rewards.Add(InventoryStack("wood",gardenRandom.Next(1,6)));
+        if(gardenRandom.NextDouble()<.03)rewards.Add(InventoryStack("gardeningBook",1));
         var bearings = random.Next(0, 12);
         if (bearings > 0) rewards.Add(InventoryStack("ballBearing", bearings));
         rewards.Add(InventoryStack("film", random.Next(1, 7)));

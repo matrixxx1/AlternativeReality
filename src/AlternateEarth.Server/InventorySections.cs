@@ -10,6 +10,7 @@ public static class InventorySections
 
     public static string Section(ItemConfiguration item)
     {
+        if (item.ItemType.StartsWith("seed:") || item.ItemType is "fertilizer" or "gardeningBook") return "crafting";
         if (GloveCatalog.IsGlove(item.ItemType)) return "gloves";
         if (item.Nutrition is not null || NutritionCatalog.Foods.ContainsKey(item.ItemType) ||
             item.ItemType is "food" or "water" or "dirtyWater" or "purifiedWater" or "energyDrink" or "mapleSyrup") return "food";

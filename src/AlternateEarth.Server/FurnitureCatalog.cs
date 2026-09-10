@@ -15,6 +15,7 @@ internal sealed record FurnitureDefinition(
 
 internal static class FurnitureCatalog
 {
+    public static readonly FurnitureDefinition KitchenSink = new("kitchenSink", "Kitchen sink", 1.2, .8, 0, 0, "kitchenSink", ["white"], ["solid"]);
     public static readonly FurnitureDefinition[] All =
     [
         new("craftingTable", "Crafting table", 1.6, .8, 15_000, 45_000, "craftingTable", ["oak", "walnut", "black"], ["woodgrain", "solid"]),

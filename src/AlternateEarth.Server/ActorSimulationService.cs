@@ -33,6 +33,9 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.BroadcastActorsAsync(_world.AdvanceDeliveryDogs(Tick), stoppingToken);
             await _hub.SendRelationshipsAsync(_world.TakeDeliveryDogRelationships(), stoppingToken);
             await _hub.BroadcastRemovedActorsAsync(_world.TakeDeliveryActorRemovals(), stoppingToken);
+            var gardens=await _world.AdvanceGardensAsync(stoppingToken);
+            await _hub.BroadcastGardensAsync(gardens.Changed,stoppingToken);
+            await _hub.BroadcastRemovedWorldObjectsAsync(gardens.Removed,stoppingToken);
             var actors = _world.AdvanceActors(Tick);
             await _hub.BroadcastActorsAsync(actors, stoppingToken);
             var players = await _world.AdvanceStaminaAsync(Tick, stoppingToken);

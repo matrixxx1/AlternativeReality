@@ -255,10 +255,12 @@ public sealed partial class SqliteRealityStore
         return ids;
     }
 
-    public async Task SaveEntityAsync(string realityId, CanonicalEntity entity, CancellationToken cancellationToken = default)
+    public async Task SaveEntityAsync(string realityId, CanonicalEntity entity, CancellationToken cancellationToken = default, IReadOnlyList<InventoryState>? inventories = null)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = inventories is null ? null : await connection.BeginTransactionAsync(cancellationToken);
         var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction?)transaction;
         command.CommandText = """
             INSERT INTO RealityDeltas
                 (EntityId, RealityId, Operation, Kind, RegionLatitude, RegionLongitude, X, Y, Z, GeometryJson, PropertiesJson, Version, UpdatedUtc)
@@ -283,6 +285,7 @@ public sealed partial class SqliteRealityStore
         command.Parameters.AddWithValue("$version", entity.Version);
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
+        if (inventories is not null) { foreach(var inventory in inventories) await WriteInventoryAsync(connection, (SqliteTransaction)transaction!, inventory, cancellationToken); await transaction!.CommitAsync(cancellationToken); }
     }
 
     public async Task RemoveEntityAsync(string realityId, CanonicalEntity entity, CancellationToken cancellationToken = default)

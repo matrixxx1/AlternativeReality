@@ -219,6 +219,7 @@ public sealed partial class RealityWorld
 
     public async Task<WorldCrimeResult> AttackWorldObjectAsync(string playerId, string entityId, CancellationToken cancellationToken = default)
     {
+        if (Garden(entityId) is not null) return await AttackGardenAsync(playerId,entityId,cancellationToken);
         if (!_players.TryGetValue(playerId, out var player) || player.LocationId != "outdoor") throw new InvalidOperationException("You can only attack outdoor world objects.");
         if (!_baseEntities.TryGetValue(entityId, out var entity) || entity.Kind is not (EntityKind.Vehicle or EntityKind.Building)) throw new InvalidOperationException("That world object is no longer there.");
         if (entity.Kind == EntityKind.Building && _publicBaseClaims.ContainsKey(entity.Id)) throw new InvalidOperationException("A claimed Home is protected and cannot be damaged.");
