@@ -277,7 +277,7 @@
       case 'inversionsUpdated': state.inversions=message.inversions;if(message.progression&&state.privateState){state.privateState.progression=message.progression;renderProgression();}Inversions.tick();break;
       case 'eventBattleUpdated': state.dungeon=message.dungeon;if(message.player)state.players.set(message.player.id,message.player);if(message.privateState)applyPrivate(message.privateState);Inversions.tick();break;
       case 'combatEvent': receiveCombat(message.combat);receiveCombatFear(message.combat);break;
-      case 'worldRebuilt': applySnapshot(message.snapshot);applyPrivate(message.privateState);state.path=[];state.target=null;state.dungeon=message.privateState?.dungeon||null;centerOnPlayer();setWorldTask(null);state.rebuildPending=false;ui.rebuild.textContent='Rebuild Reality';syncGodControls(state.players.get(state.playerId));showToast('The entire reality was reset and rebuilt. You returned Home.');if(!ui.serverConfigWindow.hidden)refreshRealityInfo();break;
+      case 'worldRebuilt': reconnectAfterRebuild();break;
       case 'objectCreated': state.reality.set(message.entity.id, message.entity); break;
       case 'worldObjectUpdated': {if(state.mapCoverage.length&&!state.mapCoverage.some(area=>visible(message.entity,{minX:area.minimumX-50,minY:area.minimumY-50,maxX:area.maximumX+50,maxY:area.maximumY+50})))break;const index=state.base.findIndex(entity=>entity.id===message.entity.id);if(index>=0)state.base[index]=message.entity;else state.base.push(message.entity);rebuildBaseIndexes();break;}
       case 'busRoute': if(message.route?.id===$('#busRouteSelect').value){state.busRouteDetail=message;renderBusRoute();}break;
@@ -2031,7 +2031,39 @@ function movementLoop(time){const me=state.players.get(state.playerId);if(me&&!c
   ui.chatForm.addEventListener('submit',event=>{event.preventDefault();const message=ui.chatInput.value.trim();if(!message)return;send({type:'say',message});ui.chatInput.value='';ui.chatInput.focus();});
   ui.serverConfigWindow.querySelector('#refreshRealityInfo').addEventListener('click',refreshRealityInfo);
   ui.serverConfigWindow.querySelector('#rebuildMode').addEventListener('change',event=>{ui.serverConfigWindow.querySelector('#rebuildDescription').textContent=event.target.value==='fresh'?'Downloads fresh geography for the starting block, discards all saved map blocks, and applies current generation rules, including driveways. Other blocks regenerate as explored. Requires internet access.':'Resets gameplay changes and reloads the starting block from its saved map. Saved geography remains available.';});
-  ui.rebuild.addEventListener('click',()=>{if(!state.players.get(state.playerId)?.godMode){showToast('Wait for God Mode to finish enabling.');return;}const fromScratch=ui.serverConfigWindow.querySelector('#rebuildMode').value==='fresh';if(confirm((fromScratch?'Rebuild FROM SCRATCH? All saved map blocks will be discarded and regenerated as explored. Internet access is required. ':'Reset using saved map blocks? ')+ 'Reset and rebuild the entire server reality? Generated regions, dungeons, chests, relationships, and player-created world changes will be reset. Accounts, characters, inventories, base ownership, and purchased maps will remain.')){state.rebuildPending=true;ui.rebuild.disabled=true;ui.rebuild.textContent='Rebuilding world…';setWorldTask('Rebuilding reality…');showToast(fromScratch?'Rebuilding from fresh geography…':'Resetting the world using saved map blocks…');send({type:'rebuildArea',godMode:true,fromScratch});}});
+  function confirmRealityRebuild(fromScratch) {
+    return new Promise(resolve=>{
+      const dialog=document.createElement('dialog');
+      dialog.className='rebuild-confirmation';
+      dialog.setAttribute('aria-labelledby','rebuildConfirmationTitle');
+      dialog.setAttribute('aria-describedby','rebuildConfirmationDescription');
+      dialog.innerHTML='<h2 id="rebuildConfirmationTitle">Rebuild Reality?</h2><p id="rebuildConfirmationDescription"></p><p>World changes, gardens, dungeons, chests, and relationships will be reset. Accounts, characters, inventories, Home ownership, and purchased maps will remain. Everyone connected will reload and reconnect when the rebuild finishes.</p><form method="dialog"><button value="cancel" autofocus>Cancel</button><button value="rebuild" class="danger-action">Confirm rebuild</button></form>';
+      dialog.querySelector('#rebuildConfirmationDescription').textContent=fromScratch?'All saved map blocks will be discarded and generated again using the current rules. Internet access is required.':'Gameplay will reset using the saved map blocks. Existing map geography will remain.';
+      dialog.addEventListener('close',()=>{const confirmed=dialog.returnValue==='rebuild';dialog.remove();resolve(confirmed);},{once:true});
+      document.body.append(dialog);dialog.showModal();
+    });
+  }
+  async function requestRealityRebuild() {
+    if(state.rebuildPending||state.rebuildConfirming)return;
+    if(!state.players.get(state.playerId)?.godMode){showToast('Wait for God Mode to finish enabling.');return;}
+    const fromScratch=ui.serverConfigWindow.querySelector('#rebuildMode').value==='fresh';
+    state.rebuildConfirming=true;
+    let confirmed;
+    try {confirmed=await confirmRealityRebuild(fromScratch);} finally {state.rebuildConfirming=false;}
+    if(!confirmed)return;
+    if(!state.players.get(state.playerId)?.godMode||controlsPaused()||state.socket?.readyState!==WebSocket.OPEN){showToast('Wait for the connection and God Mode to be ready, then try again.');return;}
+    state.rebuildPending=true;ui.rebuild.disabled=true;ui.rebuild.textContent='Rebuilding world…';
+    setWorldTask('Rebuilding reality…');showToast(fromScratch?'Rebuilding from fresh geography…':'Resetting the world using saved map blocks…');
+    send({type:'rebuildArea',godMode:true,fromScratch});
+  }
+  function reconnectAfterRebuild() {
+    if(state.rebuildReloading)return;
+    state.rebuildReloading=true;state.rebuildPending=false;
+    setConnectionTask('Reality rebuilt — reconnecting…');
+    // A new page discards stale map, dungeon, and action state and reconnects with the saved character.
+    location.reload();
+  }
+  ui.rebuild.addEventListener('click',requestRealityRebuild);
   ui.accountForm.addEventListener('submit',async event=>{event.preventDefault();ui.accountError.textContent='';const username=ui.accountUsername.value.trim(),password=ui.accountPassword.value;try{const response=await fetch('/api/account/setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password})});const body=await response.json();if(!response.ok)throw new Error(body.message||'Unable to create player.');ui.accountSetup.hidden=true;connect();}catch(error){ui.accountError.textContent=error.message;}});
   async function configureReality(latitude,longitude){ui.realitySetupError.textContent='Building the initial world…';const response=await fetch('/api/reality/setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({latitude,longitude})});const body=await response.json();if(!response.ok)throw new Error(body.message||'Unable to initialize this reality.');ui.realitySetup.hidden=true;ui.realitySetupError.textContent='';await bootstrap();}
   ui.realitySetupForm.addEventListener('submit',async event=>{event.preventDefault();try{await configureReality(Number(ui.realityLatitude.value),Number(ui.realityLongitude.value));}catch(error){ui.realitySetupError.textContent=error.message;}});
