@@ -23,6 +23,10 @@
   const modes=['timid','defensive','neutral','attackReady','aggressive'];
   function nextMode(mode){return modes[(modes.indexOf(mode)+1)%modes.length];}
   function clickAttacks(mode){return mode==='attackReady'||mode==='aggressive';}
+  function rememberAttacker(state,combat,now){
+    if(['defensive','attackReady'].includes(state.actionMode)&&combat.targetId===state.playerId&&combat.attackerId!==state.playerId&&!combat.targetDied)
+      state.defensiveThreats.set(combat.attackerId,now+30000);
+  }
   function automaticAction({mode,me,targets,players,relationships,attackers,now,pvpEnabled=true,avoid=new Map()}){
     const nearby=targets.filter(target=>target.id!==me.id&&!defeated(target)&&!target.abduction&&
       (target.locationId||'outdoor')===(me.locationId||'outdoor'))
@@ -37,7 +41,7 @@
       if(length<.001){x=me.position.x-threats[0].target.position.x;y=me.position.y-threats[0].target.position.y;if(Math.hypot(x,y)<.001)x=1;}
       const norm=Math.hypot(x,y);return {kind:'flee',destination:{x:me.position.x+x/norm*8,y:me.position.y+y/norm*8}};
     }
-    if(!['aggressive','defensive'].includes(mode)||(me.equippedWeapon||'none')==='none')return null;
+    if(!['aggressive','defensive','attackReady'].includes(mode)||(me.equippedWeapon||'none')==='none')return null;
     const candidate=nearby.find(({target,distance})=>(players.has(target.id)?pvpEnabled:['npc','animal'].includes(target.kind))&&
       (avoid.get(target.id)||0)<=now&&(mode==='aggressive'?distance<=15:(attackers.get(target.id)||0)>now));
     return candidate?{kind:'attack',target:candidate.target}:null;
@@ -49,5 +53,5 @@
     if(dungeon){point.x=Math.max(.6,Math.min(dungeon.width-.6,point.x));point.y=Math.max(.6,Math.min(dungeon.height-.6,point.y));}
     return point;
   }
-  return {cancel,attackPoint,defeated,nextMode,clickAttacks,automaticAction,fearDestination};
+  return {cancel,attackPoint,defeated,nextMode,clickAttacks,rememberAttacker,automaticAction,fearDestination};
 });

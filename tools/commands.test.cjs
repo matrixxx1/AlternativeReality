@@ -89,7 +89,7 @@ function automatic(mode,extra={}){
  const me={id:'me',position:{x:0,y:0},equippedWeapon:'rifle'},npc={id:'npc',kind:'npc',position:{x:4,y:0},healthHearts:10},player={id:'player',position:{x:3,y:0},healthHearts:10},animal={id:'animal',kind:'animal',position:{x:5,y:0},healthHearts:10};
  return commands.automaticAction({mode,me,targets:[npc,player,animal],players:new Map([['player',player]]),relationships:new Map(),attackers:new Map(),now:1000,...extra});
 }
-test('Poised never auto-attacks; Aggressive chooses nearby characters and respects PvP',()=>{
+test('Poised leaves bystanders alone; Aggressive chooses nearby characters and respects PvP',()=>{
  assert.equal(automatic('attackReady'),null);assert.equal(automatic('aggressive').target.id,'player');
  assert.equal(automatic('aggressive',{pvpEnabled:false}).target.id,'npc');
  assert.equal(automatic('aggressive',{pvpEnabled:false,avoid:new Map([['npc',2000]])}).target.id,'animal');
@@ -196,3 +196,22 @@ test('UFO Attack enables the Probulator immediately, including when its visible 
  const c=harness();c.me.travelMode='ufo';c.beginFollowCommand('stalk',c.target);assert.equal(c.sent.length,0);
  c.me.travelMode='walk';c.beginFollowCommand('attack',c.target);assert.equal(c.sent.length,0);
 });
+
+ test('Poised retaliates against each kind of attacker and respects target restrictions',()=>{
+   for(const id of ['npc','animal','player']){
+     const attackers=new Map([[id,2000]]);
+     assert.equal(automatic('attackReady',{attackers}).target.id,id);
+     assert.equal(automatic('attackReady',{attackers:new Map([[id,999]])}),null);
+     assert.equal(automatic('attackReady',{attackers,avoid:new Map([[id,2000]])}),null);
+   }
+   assert.equal(automatic('attackReady',{attackers:new Map([['player',2000]]),pvpEnabled:false}),null);
+ });
+ test('incoming attacks including misses trigger Poised retaliation, but self attacks and other targets do not',()=>{
+   for(const mode of ['attackReady','defensive','neutral','timid','aggressive']){
+     const state={actionMode:mode,playerId:'me',defensiveThreats:new Map()};
+     commands.rememberAttacker(state,{attackerId:'npc',targetId:'me',hit:false},1000);
+     assert.equal(state.defensiveThreats.get('npc'),['attackReady','defensive'].includes(mode)?31000:undefined);
+     for(const combat of [{attackerId:'me',targetId:'me'},{attackerId:'other',targetId:'someoneElse'},{attackerId:'other',targetId:'me',targetDied:true}])commands.rememberAttacker(state,combat,1000);
+     assert.equal(state.defensiveThreats.has('me'),false);assert.equal(state.defensiveThreats.has('other'),false);
+   }
+ });
