@@ -46,6 +46,7 @@
       <button id="openProgression" type="button" title="Character stats" aria-label="Character stats" aria-controls="progressionWindow">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="4" r="2.5"/><path d="M12 7v8m-7-5 7 2 7-2m-7 5-5 7m5-7 5 7"/></svg>
       </button>
+      <button id="serverConfigButton" type="button" title="Server configuration" aria-label="Server configuration">⚙</button>
       <button id="openInventoryButton" type="button" title="Inventory" aria-label="Inventory" aria-controls="inventoryPanel" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M7 6h10a3 3 0 0 1 3 3v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a3 3 0 0 1 3-3Z"/><rect x="7" y="13" width="10" height="6" rx="1"/><path d="M9 9h6m-3 4v2"/></svg>
       </button>
@@ -63,7 +64,6 @@
     <h2>NOT SPECIAL</h2>
     <p id="progressionSummary"></p>
     <p id="alignmentSummary"></p>
-    <div class="admin-controls god-controls"><button id="godMode" type="button" aria-pressed="false">God Mode: Off</button><button id="serverConfigButton" type="button" title="Enable God Mode to open server configuration" aria-label="Server configuration" disabled>⚙</button></div>
     <p>Each level grants one point. You can redistribute your points at any time; no stat can go below zero.</p>
     <strong id="statPointsRemaining" aria-live="polite"></strong>
     <div id="statAllocation"></div>
@@ -204,6 +204,7 @@
     <button id="craftingRefresh" type="button">Refresh supplies</button>
     <button id="craftingClose" type="button">Close</button>
   </section>
+  <button id="cancelGodPlacement" type="button" hidden style="position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:1500">Cancel placement</button>
   <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
     <strong>Actions</strong>
     <button id="openHomeUpgradesButton" type="button" hidden>Home upgrades</button>
@@ -216,11 +217,6 @@
     <button id="goUpstairsButton" type="button" hidden>Go upstairs</button>
     <button id="goDownstairsButton" type="button" hidden>Go downstairs</button>
     <button id="leaveDungeonButton" type="button" hidden>Leave dungeon</button>
-    <button data-test-character="npc" type="button" hidden>Place NPC here</button>
-    <button data-test-character="player" type="button" hidden>Place fake player here</button>
-    <button data-test-character="animal" type="button" hidden>Place animal here</button>
-    <button id="clearTestCharactersButton" type="button" hidden>Clear my test characters</button>
-    <button id="teleportButton" type="button" hidden>Teleport here</button>
     <button id="placeFlagButton" type="button" hidden>Place flag</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
     <button id="questButton" type="button" hidden>Quest</button>
@@ -277,6 +273,7 @@
   <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
     <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
     <nav class="server-config-tabs" role="tablist" aria-label="Server configuration sections">
+      <button type="button" role="tab" data-server-config-tab="god">God Mode</button>
       <button type="button" role="tab" data-server-config-tab="vehicles" class="active">Vehicles</button>
       <button type="button" role="tab" data-server-config-tab="weapons">Weapons</button>
       <button type="button" role="tab" data-server-config-tab="ammo">Ammo</button>
@@ -286,6 +283,18 @@
       <button type="button" role="tab" data-server-config-tab="events">Reality inversion</button>
       <button type="button" role="tab" data-server-config-tab="rebuild">Reality rebuilding</button>
     </nav>
+    <section class="server-config-page" data-server-config-page="god" hidden>
+      <h3>God Mode</h3>
+      <button id="godMode" type="button" aria-pressed="false">God Mode: Off</button>
+      <p>Enable God Mode to use these tools and edit server settings. Choose a placement tool, then click a location on the outdoor map. Escape or Cancel exits placement.</p>
+      <div id="godActionTools">
+    <button data-test-character="npc" type="button">Place NPC</button>
+    <button data-test-character="player" type="button">Place fake player</button>
+    <button data-test-character="animal" type="button">Place animal</button>
+    <button id="clearTestCharactersButton" type="button">Clear my test characters</button>
+    <button id="teleportButton" type="button">Teleport to location</button>
+      </div>
+    </section>
     <section class="server-config-page" data-server-config-page="vehicles">
       <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigVehicles"></div></div>
     </section>
@@ -445,6 +454,6 @@
   <script src="casino.js?v=2"></script>
   <script src="inventory-sections.js?v=2"></script>
   <script src="gardens.js?v=1"></script>
-  <script src="app.js?v=178"></script>
+  <script src="app.js?v=179"></script>
 </body>
 </html>

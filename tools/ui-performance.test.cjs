@@ -104,17 +104,24 @@ test('God Mode bypasses fog without erasing exploration, and disabling it restor
  state.players.set('me',me);draw({minX:40,maxX:70,minY:40,maxY:70},me);assert.equal(fills,0);assert.ok(fog.has('5:5'));assert.equal(revealed(99,99),true);
  me.godMode=false;draw({minX:40,maxX:70,minY:40,maxY:70},me);assert.equal(fills,1);assert.equal(revealed(99,99),false);assert.equal(revealed(1,1),true);
 });
-test('stats owns the only God Mode button and no separate fog control remains',()=>{
- const html=fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8');const panel=html.slice(html.indexOf('<section id="progressionWindow"'),html.indexOf('<section id="activeEventsPanel"'));
- assert.match(panel,/<button id="godMode"[^>]+aria-pressed="false"/);assert.match(panel,/<button id="serverConfigButton"/);assert.equal((html.match(/id="godMode"/g)||[]).length,1);assert.doesNotMatch(html+source,/hideFogToggle|hideFogLabel|ui\.hideFog/);
+test('God Mode tools are in server configuration and its gear is beside stats',()=>{
+ const html=fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8');
+ const stats=html.slice(html.indexOf('<section id="progressionWindow"'),html.indexOf('<section id="activeEventsPanel"'));
+ const god=html.slice(html.indexOf('data-server-config-page="god"'),html.indexOf('data-server-config-page="vehicles"'));
+ const actions=html.slice(html.indexOf('<section id="actionMenu"'),html.indexOf('<section id="serverConfigWindow"'));
+ assert.doesNotMatch(stats,/id="godMode"|id="serverConfigButton"/);
+ assert.match(god,/id="godMode"/);assert.match(god,/data-test-character="npc"/);assert.match(god,/id="clearTestCharactersButton"/);assert.match(god,/id="teleportButton"/);
+ assert.doesNotMatch(actions,/data-test-character|id="teleportButton"|id="clearTestCharactersButton"/);
+ assert.ok(html.indexOf('id="openProgression"')<html.indexOf('id="serverConfigButton"'));assert.ok(html.indexOf('id="serverConfigButton"')<html.indexOf('id="openInventoryButton"'));
+ assert.equal((html.match(/id="godMode"/g)||[]).length,1);
 });
 
 test('God Mode button changes its indicator only after acknowledgement and blocks duplicate requests',()=>{
  const me={godMode:false},state={playerId:'me',players:new Map([['me',me]]),godTogglePending:null},sent=[];
  const node=()=>({setAttribute(k,v){this[k]=v;}}),ui={god:node(),serverConfigButton:node(),performancePanel:node(),rebuild:node(),actionMenu:{hidden:true}};
- const c=require('node:vm').createContext({state,ui,send:m=>sent.push(m),showToast(){},updateActionMenu(){},closeServerConfigWindow(){},clearTimeout(){},setTimeout:()=>1});
+ const c=require('node:vm').createContext({state,ui,send:m=>sent.push(m),showToast(){},updateActionMenu(){},closeServerConfigWindow(){},syncGodConfigTab(){},cancelGodPlacement(){},clearTimeout(){},setTimeout:()=>1});
  for(const name of ['syncGodControls','toggleGodMode'])require('node:vm').runInContext(source.split('\n').find(line=>line.startsWith('  function '+name+'(')),c);
- c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'false');assert.equal(ui.serverConfigButton.disabled,true);
+ c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'false');assert.equal(ui.serverConfigButton.disabled,false);
  c.toggleGodMode();c.toggleGodMode();assert.equal(sent.length,1);assert.equal(sent[0].enabled,true);assert.equal(ui.god['aria-pressed'],'false');
  c.syncGodControls(me);assert.equal(ui.god.disabled,true);me.godMode=true;c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'true');assert.equal(ui.god.textContent,'God Mode: On');assert.equal(ui.serverConfigButton.disabled,false);
  c.toggleGodMode();assert.equal(sent[1].enabled,false);me.godMode=false;c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'false');assert.equal(ui.god.disabled,false);
@@ -127,4 +134,11 @@ test('Effects combines active meal bonuses with other effects and removes expire
  c.updateTelemetry(me);assert.match(ui.effects.textContent,/\+3 strength.*God Mode/);assert.doesNotMatch(ui.effects.textContent,/luck/);
  now=62000;c.updateTelemetry(me);assert.doesNotMatch(ui.effects.textContent,/strength/);assert.match(ui.effects.textContent,/God Mode/);
  assert.doesNotMatch(fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8'),/foodBuffValue|Meal effects/);
+});
+test('God placement waits for a map click, cancels safely, and checks current permission',()=>{
+ const nodes={'#cancelGodPlacement':{}},sent=[],state={playerId:'me',players:new Map([['me',{godMode:true}]]),godPlacement:null},ui={actionMenu:{}},c={state,ui,$:id=>nodes[id],controlsPaused:()=>false,stopTravel(){},closeServerConfigWindow(){},showToast(){},window:{focus(){}},send:m=>sent.push(m),requestTeleport:p=>sent.push({type:'teleport',...p})};
+ require('node:vm').runInNewContext(source.slice(source.indexOf('  function cancelGodPlacement('),source.indexOf("  for(const button of ui.serverConfigWindow.querySelectorAll('[data-test-character]'))")),c);
+ c.beginGodPlacement('npc');assert.equal(sent.length,0);assert.equal(nodes['#cancelGodPlacement'].hidden,false);assert.equal(c.placeGodTool({x:12,y:34}),true);assert.equal(sent[0].kind,'npc');assert.equal(sent[0].x,12);assert.equal(c.placeGodTool({x:1,y:1}),false);
+ c.beginGodPlacement('teleport');c.cancelGodPlacement();assert.equal(c.placeGodTool({x:1,y:1}),false);assert.equal(sent.length,1);
+ c.beginGodPlacement('animal');state.players.get('me').godMode=false;c.placeGodTool({x:1,y:1});assert.equal(sent.length,1);
 });
