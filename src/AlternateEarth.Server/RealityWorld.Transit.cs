@@ -408,7 +408,7 @@ public sealed partial class RealityWorld
         {
             var p = _players.GetValueOrDefault(original.Id) ?? original;
             if (!TransitGeometry.Contains(footprint, p.Position) || !bus.HitPeople.Add(p.Id)) continue;
-            var health = p.GodMode ? Math.Max(1, p.HealthHearts - 5) : Math.Max(0, p.HealthHearts - 5);
+            var health = Math.Max(PlayerCanDie(p.Id) ? 0 : 1, p.HealthHearts - 5);
             var updated = p with { HealthHearts = health, Position = Fling(p.Position), WaitingAtBusStopId = null, Version = p.Version + 1 };
             if (health <= 0) updated = await DieAndResetPlayerAsync(updated, token);
             await SavePlayerAsync(updated, token); players[p.Id] = _players[p.Id];

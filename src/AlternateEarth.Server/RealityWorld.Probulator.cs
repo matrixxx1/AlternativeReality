@@ -72,7 +72,7 @@ public sealed partial class RealityWorld
             var damage = pending.Damage / pulseCount * Math.Max(0, duePulses - pending.AppliedPulses);
             var name = player?.Name ?? actor!.Name;
             var oldHealth = player?.HealthHearts ?? actor!.HealthHearts;
-            var health = Math.Round(player?.GodMode == true ? Math.Max(1, oldHealth - damage) : Math.Max(0, oldHealth - damage), 10);
+            var health = Math.Round(player is not null && !PlayerCanDie(player.Id) ? Math.Max(1, oldHealth - damage) : Math.Max(0, oldHealth - damage), 10);
             // Complete the full animation before resolving a lethal outcome.
             var died = finished && health <= 0;
             if (player is not null)

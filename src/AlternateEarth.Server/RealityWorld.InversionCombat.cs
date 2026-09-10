@@ -98,7 +98,7 @@ public sealed partial class RealityWorld
     }
     private async Task EventHurtPlayerAsync(PlayerState target, double damage, string owner, WorldPosition origin, string weapon, CancellationToken token)
     {
-        var health = target.GodMode ? target.HealthHearts : Math.Max(0, target.HealthHearts - damage);
+        var health = Math.Max(PlayerCanDie(target.Id) ? 0 : 1, target.HealthHearts - damage);
         var died = health <= 0;
         var updated = target with { HealthHearts = health, Version = target.Version + 1 };
         if (died) updated = await DieAndResetPlayerAsync(updated, token);

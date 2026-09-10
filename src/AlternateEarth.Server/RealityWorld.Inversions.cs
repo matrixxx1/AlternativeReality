@@ -42,19 +42,19 @@ public sealed partial class RealityWorld
     }
     public void StartServerVote(string playerId)
     {
-        if (!_players.TryGetValue(playerId, out var player) || !player.GodMode) throw new InvalidOperationException("Only a server administrator can start a vote.");
+        if (!_players.TryGetValue(playerId, out var player) || player.IsTestCharacter) throw new InvalidOperationException("Join the server before starting a vote.");
         lock (_voteLock) { if (_serverVote is not null) throw new InvalidOperationException("A Server Vote is already running."); BeginServerVote(_probulatorClock.GetUtcNow()); }
     }
     public void CancelServerVote(string playerId)
     {
         lock (_voteLock)
         {
-            if (!_players.TryGetValue(playerId, out var player) || !player.GodMode)
-                throw new InvalidOperationException("God mode must be enabled to cancel a Server Vote.");
+            if (!_players.TryGetValue(playerId, out var player) || player.IsTestCharacter)
+                throw new InvalidOperationException("Join the server before canceling a Server Vote.");
             if (_serverVote is null) throw new InvalidOperationException("No Server Vote is open.");
             _serverVote = null;
             _lastVoteHour = _probulatorClock.GetUtcNow().ToUnixTimeSeconds() / 3600;
-            EventSay("server", "Server Vote", $"{player.Name} canceled the Server Vote using God mode.");
+            EventSay("server", "Server Vote", $"{player.Name} canceled the Server Vote from World Testing.");
         }
     }
     private void BeginServerVote(DateTimeOffset now)

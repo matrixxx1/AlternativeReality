@@ -238,7 +238,7 @@ public sealed partial class RealityWorld
         if (_lastPlayerAttack.TryGetValue((playerId, weapon), out var priorAttack) && now - priorAttack < interval)
             throw new InvalidOperationException($"Your {DisplayItem(weapon)} is not ready yet.");
         var ammo = WeaponDefinition(weapon).Ammo;
-        if (!player.GodMode && ammo is not null)
+        if (PlayerConsumesAmmo(playerId) && ammo is not null)
         {
             if (!RemoveInventory(playerId, ammo, 1)) throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");
             await SaveInventoryAsync(playerId, cancellationToken);
@@ -258,7 +258,7 @@ public sealed partial class RealityWorld
             _quests[(playerId, quest.Id)] = ready;
             await _store.SaveQuestAsync(Configuration.Id, ready, cancellationToken);
         }
-        var configuredDamage = InventoryDefinition(player.EquippedWeapon).Damage;
+        var configuredDamage = InventoryDefinition(player.EquippedWeapon).Damage * PlayerDamageMultiplier(playerId);
         var appliedDamage = WeaponDamageFor(playerId, player.EquippedWeapon, Math.Max(.25, configuredDamage));
         var opportunityChance = ProgressionRules.ExtraAttackChance(StatsFor(playerId));
         if (opportunityChance > 0 && ProgressionRoll() < opportunityChance) appliedDamage *= 2;

@@ -48,19 +48,19 @@ public sealed partial class RealityWorld
             var guard = action is "Guard" or "Riposte" ? 4 : 0;
             damage += action is "Strike" or "Heavy Blow" or "Riposte" or "Wild Card" ? battle.Focus : 0;
             var poison = action == "Poison" ? 3 : battle.Poison;
-            var enemyHealth = Math.Max(0, battle.EnemyHealth - damage * ProgressionRules.Damage(StatsFor(playerId)) - (poison > 0 ? 2 : 0));
+            var enemyHealth = Math.Max(0, battle.EnemyHealth - damage * ProgressionRules.Damage(StatsFor(playerId)) * PlayerDamageMultiplier(playerId) - (poison > 0 ? 2 : 0));
             var won = enemyHealth <= 0;
             var heal = action == "Second Wind" ? 4 : 0;
             var enemyDamage = won ? 0 : Math.Max(0, (battle.Turn % 3 == 2 ? 5 : 2) - guard);
             var health = Math.Min(player.MaximumHealthHearts, player.HealthHearts + heal);
-            health = player.GodMode ? health : Math.Max(0, health - enemyDamage);
+            health = Math.Max(PlayerCanDie(player.Id) ? 0 : 1, health - enemyDamage);
             var deck = _battleDecks.GetValueOrDefault(playerId, EventCards);
             var hand = battle.Mode == "cards" ? battle.Hand.Where((c, i) => i != Array.IndexOf(battle.Hand.ToArray(), action)).Append(deck[(battle.Turn + 3) % deck.Length]).ToArray() : battle.Hand;
             var next = battle with { Poison = Math.Max(0, poison - 1), Focus = action == "Focus" ? 8 : damage > 0 ? 0 : battle.Focus, EnemyHealth = enemyHealth, Turn = battle.Turn + 1, Guard = guard, Hand = hand, Won = won,
                 Message = won ? "Boss defeated!" : $"{action}: {damage} damage, {heal} healing. Enemy dealt {enemyDamage}. Next attack: {(battle.Turn % 3 == 1 ? "heavy (5)" : "normal (2)")}." };
             dungeon = dungeon with { EventBattle = next, IsCompleted = won }; _dungeons[dungeon.Id] = dungeon;
             var updated = player with { HealthHearts = health, Version = player.Version + 1 };
-            if (health <= 0) updated = await DieAndResetPlayerAsync(updated, token);
+            if (health <= 0 && PlayerCanDie(player.Id)) updated = await DieAndResetPlayerAsync(updated, token);
             await SavePlayerAsync(updated, token);
             if (won) await CompleteEventDungeonAsync(updated, dungeon, token);
             return dungeon;

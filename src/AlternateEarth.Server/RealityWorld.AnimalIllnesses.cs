@@ -15,7 +15,7 @@ public sealed partial class RealityWorld
         await _treasureInteractionLock.WaitAsync(token);
         try
         {
-            foreach(var player in _players.Values.Where(p=>p.HealthHearts>0&&!p.GodMode).ToArray())
+            foreach(var player in _players.Values.Where(p=>p.HealthHearts>0).ToArray())
             {
                 var due=(player.Survival?.Illnesses??[]).Where(i=>i.EndsAtUtc>now&&DiseaseCall(i.Name) is not null&&i.NextCallAtUtc<=now).ToArray();if(due.Length==0)continue;
                 var updated=await SaveFixturePlayerAsync(player.Id,current=>current with{Survival=(current.Survival??new()) with{Illnesses=(current.Survival?.Illnesses??[]).Select(i=>due.Any(d=>d.Name==i.Name)?i with{NextCallAtUtc=now.AddMinutes(1),LastCallAtUtc=now,ChargeAngle=i.Name=="Mad Moose Flu"?ProgressionRoll()*Math.Tau:i.ChargeAngle,ChargeRemainingMeters=i.Name=="Mad Moose Flu"?91.44:0}:i).ToArray()}},null,token);changed.Add(updated);

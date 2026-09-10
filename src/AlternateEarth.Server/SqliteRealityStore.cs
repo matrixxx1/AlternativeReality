@@ -671,6 +671,24 @@ public sealed partial class SqliteRealityStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<PlayerTestingSettings?> LoadPlayerTestingSettingsAsync(string realityId, string playerId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM ServerSettings WHERE Key=$key";
+        command.Parameters.AddWithValue("$key", $"player-testing:{realityId}:{playerId}");
+        var json = (string?)await command.ExecuteScalarAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<PlayerTestingSettings>(json, SharedJson.Options);
+    }
+
+    public async Task SavePlayerTestingSettingsAsync(string realityId, string playerId, PlayerTestingSettings settings, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO ServerSettings (Key,Value) VALUES ($key,$value) ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value";
+        command.Parameters.AddWithValue("$key", $"player-testing:{realityId}:{playerId}");
+        command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(settings, SharedJson.Options));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<MovementConfiguration?> LoadMovementConfigurationAsync(string realityId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();

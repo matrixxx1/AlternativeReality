@@ -197,7 +197,7 @@ public sealed partial class RealityWorld
         }
         var quests = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => WithQuestStage(pair.Value)).OrderBy(quest => quest.Status).ThenBy(quest => quest.Title).ToArray();
         var homeStorageMoney = canEditHome && homeAccount is not null ? _homeCash.GetValueOrDefault(homeAccount) : 0;
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage, Quests: quests, CanEditHome: canEditHome, HomeStorageMoneyCents: homeStorageMoney, LearnedRecipes: _learnedRecipes.Keys.Where(key => key.Player == playerId).Select(key => key.Recipe).OrderBy(id => id).ToArray(), CraftingSkill: GetCraftingSkill(playerId), Progression: GetProgression(playerId), Inversions: GetInversionView(playerId), Achievements: GetAchievements(playerId), MapleSyrupUntilUtc: _mapleBoosts.TryGetValue(playerId, out var syrupUntil) ? syrupUntil : null, OwnedVehicles: VehicleItems.Where(item => playerIsGod(playerId) || InventoryQuantity(playerId, item) > 0).OrderBy(item => item).ToArray(), GodModeLoadout: GetGodModeLoadout(playerId), RecipeBook: GetRecipeBook(playerId), HomeWorkshop: WorkshopView(playerId), Casino: GetCasinoMapLocation());
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage, Quests: quests, CanEditHome: canEditHome, HomeStorageMoneyCents: homeStorageMoney, LearnedRecipes: _learnedRecipes.Keys.Where(key => key.Player == playerId).Select(key => key.Recipe).OrderBy(id => id).ToArray(), CraftingSkill: GetCraftingSkill(playerId), Progression: GetProgression(playerId), Inversions: GetInversionView(playerId), Achievements: GetAchievements(playerId), MapleSyrupUntilUtc: _mapleBoosts.TryGetValue(playerId, out var syrupUntil) ? syrupUntil : null, OwnedVehicles: VehicleItems.Where(item => playerIsGod(playerId) || InventoryQuantity(playerId, item) > 0).OrderBy(item => item).ToArray(), GodModeLoadout: GetGodModeLoadout(playerId), RecipeBook: GetRecipeBook(playerId), HomeWorkshop: WorkshopView(playerId), Casino: GetCasinoMapLocation(), PlayerTesting: TestingSettings(playerId));
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
@@ -695,7 +695,7 @@ public sealed partial class RealityWorld
             player = player with { TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Version = player.Version + 1 };
             await SavePlayerAsync(player, cancellationToken);
         }
-        if (!player.GodMode && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
+        if (PlayerConsumesVehicleFuel(player.Id) && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
         {
             var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
             await SavePlayerAsync(stopped, cancellationToken);
@@ -717,7 +717,7 @@ public sealed partial class RealityWorld
         var distance = player.Position.Distance2D(next);
         var dirtBikeGas = player.DirtBikeGasGallons;
         var motorcycleGas = player.MotorcycleGasGallons;
-        if (!player.GodMode && distance > .001)
+        if (PlayerConsumesVehicleFuel(player.Id) && distance > .001)
         {
             if (player.TravelMode == TravelMode.DirtBike) dirtBikeGas = FuelAfterTravel(dirtBikeGas, distance, DirtBikeMilesPerGallon);
             if (player.TravelMode == TravelMode.Motorcycle) motorcycleGas = FuelAfterTravel(motorcycleGas, distance, MotorcycleMilesPerGallon);
@@ -1188,7 +1188,7 @@ public sealed partial class RealityWorld
         if (_dungeons.GetValueOrDefault(player.LocationId)?.EventBattle is not null) throw new InvalidOperationException("Use the event battle controls.");
         var weapon = _transformedWeapons.ContainsKey(playerId) ? "zombieBite" : BestUsableWeapon(playerId, player.EquippedWeapon, player.GodMode);
         var (range, baseDamage, ammo) = WeaponDefinition(weapon);
-        baseDamage = WeaponDamageFor(playerId, weapon, baseDamage);
+        baseDamage = WeaponDamageFor(playerId, weapon, baseDamage) * PlayerDamageMultiplier(playerId);
         var distance = player.Position.Distance2D(targetPosition);
         if (distance > range) throw new InvalidOperationException($"{targetName} is beyond the {range:0.#}-meter range of your {DisplayItem(weapon)}.");
         var ranged = weapon is not ("fist" or "knife" or "sword" or "hockeyStick" or "iceSkate" or "zombieBite");
@@ -1204,7 +1204,7 @@ public sealed partial class RealityWorld
         if (_lastPlayerAttack.TryGetValue((playerId, weapon), out var priorAttack) && now - priorAttack < attackInterval)
             throw new InvalidOperationException($"Your {DisplayItem(weapon)} is not ready yet.");
         var shotCount = weapon == "ar15" && player.Ar15FireMode == "burst" ? 3 : 1;
-        if (!player.GodMode && ammo is not null && !RemoveInventory(playerId, ammo, shotCount)) throw new InvalidOperationException($"You need {shotCount} {DisplayItem(ammo)}{(shotCount == 1 ? "" : "s")}.");
+        if (PlayerConsumesAmmo(playerId) && ammo is not null && !RemoveInventory(playerId, ammo, shotCount)) throw new InvalidOperationException($"You need {shotCount} {DisplayItem(ammo)}{(shotCount == 1 ? "" : "s")}.");
         if (weapon == "flamethrower" && !player.GodMode)
         {
             if (player.FlamethrowerGasGallons < .2) throw new InvalidOperationException("The flamethrower needs at least 0.2 gallon of gas.");
@@ -1226,7 +1226,7 @@ public sealed partial class RealityWorld
         if (shieldDeflected) Array.Fill(shotHits, false);
         var hit = shotHits.Any(value => value);
         var damage = hit ? (playerTarget is null ? baseDamage : ShieldReducedDamage(playerTarget, baseDamage, weapon)) * shotHits.Count(value => value) : 0;
-        var died = hit && !((playerTarget?.GodMode) ?? false) && targetHealth - damage <= 0;
+        var died = hit && (playerTarget is null || PlayerCanDie(playerTarget.Id)) && targetHealth - damage <= 0;
         if (busTarget is not null && hit)
         {
             ReactVehicleOccupants(playerId, busTarget.State.Id, busTarget.State.Position);
@@ -1271,12 +1271,12 @@ public sealed partial class RealityWorld
         PlayerState? updatedTarget = null;
         if (playerTarget is not null && hit)
         {
-            var remaining = playerTarget.GodMode ? Math.Max(1, targetHealth - damage) : Math.Max(0, targetHealth - damage);
+            var remaining = Math.Max(PlayerCanDie(playerTarget.Id) ? 0 : 1, targetHealth - damage);
             updatedTarget = died ? await DieAndResetPlayerAsync(playerTarget with { HealthHearts = 0 }, cancellationToken) : playerTarget with { HealthHearts = remaining, Version = playerTarget.Version + 1 };
             await SavePlayerAsync(updatedTarget, cancellationToken);
             if (died) await RewardPlayerKillAsync(playerId, playerTarget, cancellationToken);
         }
-        if (!player.GodMode && ammo is not null) await SaveInventoryAsync(playerId, cancellationToken);
+        if (PlayerConsumesAmmo(playerId) && ammo is not null) await SaveInventoryAsync(playerId, cancellationToken);
         var nextWeapon = _transformedWeapons.ContainsKey(playerId) || player.GodMode ? weapon : BestUsableWeapon(playerId, weapon, false);
         var updatedAttacker = player.EquippedWeapon == nextWeapon ? player : player with { EquippedWeapon = nextWeapon, Version = player.Version + 1 };
         if (!ReferenceEquals(updatedAttacker, player)) await SavePlayerAsync(updatedAttacker, cancellationToken);
@@ -1310,7 +1310,7 @@ public sealed partial class RealityWorld
             foreach (var target in _players.Values.Where(target => !IsProbulatorAbducted(target.Id) && target.Id != player.Id && target.Id != request.TargetId && target.LocationId == player.LocationId && target.Position.Distance2D(targetPosition) <= radius).ToArray())
             {
                 var blastDistance = target.Position.Distance2D(targetPosition); var splash = ShieldReducedDamage(target, Math.Max(1, baseDamage - (baseDamage - 1) * blastDistance / radius), weapon);
-                var remaining = target.GodMode ? Math.Max(1, target.HealthHearts - splash) : Math.Max(0, target.HealthHearts - splash); var blastKilled = remaining <= 0;
+                var remaining = Math.Max(PlayerCanDie(target.Id) ? 0 : 1, target.HealthHearts - splash); var blastKilled = remaining <= 0;
                 var blastTarget = blastKilled ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { HealthHearts = remaining, Version = target.Version + 1 };
                 await SavePlayerAsync(blastTarget, cancellationToken);
                 if (blastKilled) await RewardPlayerKillAsync(player.Id, target, cancellationToken);
@@ -1418,7 +1418,7 @@ public sealed partial class RealityWorld
     {
         if (player.TravelMode == TravelMode.Swim) return player.SwimExhausted || player.Stamina <= 0 ? 0 : 1.5;
         var modeModifier = _movementConfiguration.TravelModeSpeedModifiersMph.GetValueOrDefault(player.TravelMode);
-        var staminaScale = player.GodMode ? 1 : Math.Clamp(staminaFraction ?? (player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina), 0, 1);
+        var staminaScale = PlayerConsumesStamina(player) ? Math.Clamp(staminaFraction ?? (player.MaximumStamina <= 0 ? 0 : player.Stamina / player.MaximumStamina), 0, 1) : 1;
         if (player.TravelMode is TravelMode.Run or TravelMode.Bike or TravelMode.Skateboard)
             modeModifier *= staminaScale;
         var mph = _movementConfiguration.BaseSpeedMph
@@ -1427,8 +1427,8 @@ public sealed partial class RealityWorld
         foreach (var itemType in ActiveMovementItems(player, magicHikingShoes, magicRunningShoes))
             if (_itemConfigurations.TryGetValue(itemType, out var item)) mph += (item.SpeedModifierMph ?? 0) * (itemType is "bike" or "skateboard" ? staminaScale : 1);
         mph = Math.Max(.1, mph);
-        var loadMultiplier = player.GodMode ? 1 : Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / (MaximumBackpackWeightPounds * 2), .5, 1);
-        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * (player.GodMode ? 5 : 1) * EnergyDrinkSpeedMultiplier(player) * (MapleBoostActive(player.Id) ? 1.25 : 1) * (ProbedActive(player) ? .5 : 1) * (StandingInMapleSyrup(player) ? .5 : 1) * loadMultiplier * (player.TravelMode == TravelMode.Ufo ? .5 : 1);
+        var loadMultiplier = PlayerObeysBackpackWeight(player) ? Math.Clamp(1 - GetInventoryState(player.Id).WeightPounds / (MaximumBackpackWeightPounds * 2), .5, 1) : 1;
+        return WorldNavigation.MilesPerHour(mph) * (player.Water <= 0 ? .5 : 1) * PlayerTestingSpeedMultiplier(player) * EnergyDrinkSpeedMultiplier(player) * (MapleBoostActive(player.Id) ? 1.25 : 1) * (ProbedActive(player) ? .5 : 1) * (StandingInMapleSyrup(player) ? .5 : 1) * loadMultiplier * (player.TravelMode == TravelMode.Ufo ? .5 : 1);
     }
 
     private static bool EnergyDrinkBoostActive(PlayerState player, DateTimeOffset? at = null) => player.EnergyDrinkBoostUntilUtc is { } boostUntil && boostUntil > (at ?? DateTimeOffset.UtcNow);
@@ -1462,7 +1462,7 @@ public sealed partial class RealityWorld
 
     public async Task<ItemConfiguration> UpdateItemConfigurationAsync(string playerId, UpdateItemConfigurationRequest request, CancellationToken cancellationToken = default)
     {
-        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to change server configuration.");
+        if (!CanUseWorldTesting(playerId)) throw new InvalidOperationException("Join the server before changing server configuration.");
         if (!_itemConfigurations.TryGetValue(request.ItemType, out var current)) throw new InvalidOperationException("Unknown inventory item.");
         if (!double.IsFinite(request.Damage) || request.Damage is < 0 or > 100) throw new InvalidOperationException("Damage must be between 0 and 100 hearts.");
         if (!double.IsFinite(request.RangeMeters) || request.RangeMeters is < 0 or > 2000) throw new InvalidOperationException("Range must be between 0 and 2,000 meters.");
@@ -1479,7 +1479,7 @@ public sealed partial class RealityWorld
 
     public async Task<MovementConfiguration> UpdateMovementConfigurationAsync(string playerId, UpdateMovementConfigurationRequest request, CancellationToken cancellationToken = default)
     {
-        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to change server configuration.");
+        if (!CanUseWorldTesting(playerId)) throw new InvalidOperationException("Join the server before changing server configuration.");
         if (!double.IsFinite(request.BaseSpeedMph) || request.BaseSpeedMph is < .1 or > 200) throw new InvalidOperationException("Base speed must be between 0.1 and 200 mph.");
         if (!double.IsFinite(request.BaseVisibilityMeters) || request.BaseVisibilityMeters is < 1 or > 5000) throw new InvalidOperationException("Base visibility must be between 1 and 5,000 meters.");
         var terrain = Enum.GetValues<TerrainType>().ToDictionary(value => value, value => ValidateSpeedModifier(request.TerrainSpeedModifiersMph.GetValueOrDefault(value)));
@@ -1494,7 +1494,7 @@ public sealed partial class RealityWorld
 
     public async Task<ServerEventConfiguration> UpdateServerEventConfigurationAsync(string playerId, UpdateServerEventsRequest request, CancellationToken cancellationToken = default)
     {
-        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to change server events.");
+        if (!CanUseWorldTesting(playerId)) throw new InvalidOperationException("Join the server before changing server events.");
         static int InRange(int value, int minimum, int maximum, string name)
         {
             if (value < minimum || value > maximum) throw new InvalidOperationException($"{name} must be between {minimum} and {maximum}.");
@@ -1847,7 +1847,7 @@ public sealed partial class RealityWorld
             {
                 if (IsFireproof(target)) { _burningTargets.TryRemove(pair.Key, out _); continue; }
                 var burnDamage = ShieldReducedDamage(target, 2, "fire");
-                var health = target.GodMode ? Math.Max(1, target.HealthHearts - burnDamage) : Math.Max(0, target.HealthHearts - burnDamage); var died = health <= 0;
+                var health = Math.Max(PlayerCanDie(target.Id) ? 0 : 1, target.HealthHearts - burnDamage); var died = health <= 0;
                 var updated = died ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { HealthHearts = health, Version = target.Version + 1 };
                 if (!await SavePlayerAsync(updated, cancellationToken)) continue;
                 if (died) await RewardPlayerKillAsync(burning.OwnerId, target, cancellationToken);
@@ -1916,7 +1916,7 @@ public sealed partial class RealityWorld
             if (playerVictim is not null)
             {
                 var defendedDamage = ShieldReducedDamage(playerVictim, attack.Damage);
-                var died = !playerVictim.GodMode && playerVictim.HealthHearts <= defendedDamage; var health = playerVictim.GodMode ? Math.Max(1, playerVictim.HealthHearts - defendedDamage) : Math.Max(0, playerVictim.HealthHearts - defendedDamage);
+                var died = PlayerCanDie(playerVictim.Id) && playerVictim.HealthHearts <= defendedDamage; var health = Math.Max(PlayerCanDie(playerVictim.Id) ? 0 : 1, playerVictim.HealthHearts - defendedDamage);
                 var updated = died ? await DieAndResetPlayerAsync(playerVictim with { HealthHearts = 0, Version = playerVictim.Version + 1 }, cancellationToken) : playerVictim with { HealthHearts = health, Version = playerVictim.Version + 1 }; await SavePlayerAsync(updated, cancellationToken); changedPlayers.Add(updated);
                 combat.Add(new CombatEvent(predator.Id, playerVictim.Id, attack.Weapon, predator.Position, playerVictim.Position, true, defendedDamage, died, $"{predator.Name} {attack.Description} {playerVictim.Name} for {defendedDamage:0.##} hearts.", updated.HealthHearts));
             }
@@ -2004,7 +2004,7 @@ public sealed partial class RealityWorld
             if (shieldDeflected) hit = false;
             var weaponDamage = (weaponConfiguration?.Damage ?? .5) * WeaponQualityMultiplier(actor.WeaponQuality);
             var damage = hit ? ShieldReducedDamage(player, Math.Clamp(weaponDamage + Math.Min(2, hostility * .25), .25, 50)) : 0;
-            var health = player.GodMode ? Math.Max(1, player.HealthHearts - damage) : Math.Max(0, player.HealthHearts - damage);
+            var health = Math.Max(PlayerCanDie(player.Id) ? 0 : 1, player.HealthHearts - damage);
             var died = hit && health <= 0; var updated = died ? await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, cancellationToken) : player with { HealthHearts = health, Version = player.Version + 1 };
             if (!await SavePlayerAsync(updated, cancellationToken)) continue;
             if (hit && !died && weapon == "iceSkate") { await ApplyIceSkateHitAsync(actor.Id, player.Id, actor.Position, player.LocationId, cancellationToken); updated = _players.GetValueOrDefault(player.Id, updated); }
@@ -2258,7 +2258,7 @@ public sealed partial class RealityWorld
         var items = GetInventoryItems(playerId);
         var carried = items.Where(item => item.CarriedInBackpack).ToArray();
         return new InventoryState(playerId, items,
-            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), playerIsGod(playerId) ? null : PlayerCarryingCapacity(playerId),
+            Math.Round(carried.Sum(item => item.UnitWeightPounds * item.Quantity), 3), PlayerObeysBackpackWeight(playerId) ? PlayerCarryingCapacity(playerId) : null,
             carried.Count(item => item.Category == InventoryCategory.Weapon), null,
             carried.Count(item => item.Category == InventoryCategory.Quest), null,
             carried.Count(item => item.Category == InventoryCategory.Other && !item.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)), null);
@@ -2266,7 +2266,7 @@ public sealed partial class RealityWorld
 
     private bool CanAddToBackpack(string playerId, IEnumerable<ItemStack> additions, out string message)
     {
-        if (playerIsGod(playerId)) { message = string.Empty; return true; }
+        if (!PlayerObeysBackpackWeight(playerId)) { message = string.Empty; return true; }
         var combined = GetInventoryItems(playerId).ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
         foreach (var addition in additions.Where(item => item.Quantity > 0)) combined[addition.ItemType] = combined.GetValueOrDefault(addition.ItemType) + addition.Quantity;
         var items = combined.Select(pair => InventoryStack(pair.Key, pair.Value)).Where(item => item.CarriedInBackpack).ToArray();

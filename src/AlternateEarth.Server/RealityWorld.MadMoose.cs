@@ -9,7 +9,7 @@ public sealed partial class RealityWorld
         await _treasureInteractionLock.WaitAsync(token);
         try
         {
-            foreach(var original in _players.Values.Where(p=>p.HealthHearts>0&&!p.GodMode).ToArray())
+            foreach(var original in _players.Values.Where(p=>p.HealthHearts>0).ToArray())
             {
                 var illness=original.Survival?.Illnesses?.FirstOrDefault(i=>i.Name=="Mad Moose Flu"&&i.EndsAtUtc>now);if(illness is null)continue;
                 var player=original;
@@ -30,7 +30,7 @@ public sealed partial class RealityWorld
                     if(collided){remaining=0;break;}position=next;meters-=step;remaining=Math.Max(0,remaining-step);
                 }
                 if(player.LocationId=="outdoor")position=position with{Z=Navigation.ElevationAt(position.X,position.Y)};
-                var updated=await SaveFixturePlayerAsync(player.Id,current=>current with{Position=position,TravelMode=TravelMode.Run,RidingBusId=null,WaitingAtBusStopId=null,SpeedMetersPerSecond=remaining>0?12*SyrupSlow(position,current.LocationId):0,HealthHearts=Math.Max(0,current.HealthHearts-(collided?3:0)),Survival=current.Survival! with{Illnesses=current.Survival!.Illnesses!.Select(i=>i.Name=="Mad Moose Flu"?i with{ChargeRemainingMeters=remaining}:i).ToArray()}},null,token);
+                var updated=await SaveFixturePlayerAsync(player.Id,current=>current with{Position=position,TravelMode=TravelMode.Run,RidingBusId=null,WaitingAtBusStopId=null,SpeedMetersPerSecond=remaining>0?12*SyrupSlow(position,current.LocationId):0,HealthHearts=Math.Max(PlayerCanDie(current.Id)?0:1,current.HealthHearts-(collided?3:0)),Survival=current.Survival! with{Illnesses=current.Survival!.Illnesses!.Select(i=>i.Name=="Mad Moose Flu"?i with{ChargeRemainingMeters=remaining}:i).ToArray()}},null,token);
                 if(collided){combat.Add(new(player.Id,player.Id,"mooseCharge",player.Position,position,true,3,updated.HealthHearts<=0,"Charge collided with an obstacle: 3 damage.",updated.HealthHearts));}
                 if(updated.HealthHearts<=0){updated=await DieAndResetPlayerAsync(updated,token);await SavePlayerAsync(updated,token);}changed.Add(updated);
             }
@@ -54,7 +54,7 @@ public sealed partial class RealityWorld
         if(!items.TryGetValue(empty,out var container)||container.Quantity<1)throw new InvalidOperationException("Collecting this syrup needs an empty jar or bottle in your backpack. Jars are used first.");
         if(container.Quantity==1)items.Remove(empty);else items[empty]=container with{Quantity=container.Quantity-1};
         var full=jar?"jarOfMapleSyrup":"bottleOfMapleSyrup";items[full]=items.TryGetValue(full,out var prior)?prior with{Quantity=prior.Quantity+1}:InventoryStack(full,1);var next=inventory with{Items=items.Values.ToArray()};
-        if(!playerIsGod(id)&&next.Items.Where(i=>i.CarriedInBackpack).Sum(i=>i.UnitWeightPounds*i.Quantity)>PlayerCarryingCapacity(id)+.0001)throw new InvalidOperationException("Make room in your backpack before collecting syrup.");
+        if(PlayerObeysBackpackWeight(id)&&next.Items.Where(i=>i.CarriedInBackpack).Sum(i=>i.UnitWeightPounds*i.Quantity)>PlayerCarryingCapacity(id)+.0001)throw new InvalidOperationException("Make room in your backpack before collecting syrup.");
         await _store.CollectPersistentLootAsync(loot.Id,next,token);_inventories[id]=items.ToDictionary(i=>i.Key,i=>i.Value.Quantity);_loot.TryRemove(loot.Id,out _);
         return new(_players[id],null,$"Collected a {(jar?"jar":"bottle")} of maple syrup.");
     }

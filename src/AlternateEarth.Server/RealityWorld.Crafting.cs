@@ -118,7 +118,7 @@ public sealed partial class RealityWorld
                     var current = _homeItemStorage[access.AccountId];
                     Dictionary<string, int> next;
                     lock (current) next = new(current, StringComparer.OrdinalIgnoreCase);
-                    foreach (var ingredient in recipe.Ingredients)
+                    if (PlayerMustMeetCraftingMaterials(playerId)) foreach (var ingredient in recipe.Ingredients)
                     {
                         var required = checked(ingredient.Quantity * request.Quantity);
                         if ((long)next.GetValueOrDefault(ingredient.ItemType) + nextBackpack.GetValueOrDefault(ingredient.ItemType) < required)
@@ -135,12 +135,15 @@ public sealed partial class RealityWorld
                         var usedHome=new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
                         foreach (var ingredient in recipe.Ingredients)
                         {
-                            var fromHome=Math.Min(ingredient.Quantity,next.GetValueOrDefault(ingredient.ItemType));
+                            var fromHome=PlayerConsumesCraftingMaterials(playerId)?Math.Min(ingredient.Quantity,Math.Max(0,next.GetValueOrDefault(ingredient.ItemType))):0;
                             usedHome[ingredient.ItemType]=fromHome;
-                            next[ingredient.ItemType]=next.GetValueOrDefault(ingredient.ItemType)-fromHome;
-                            nextBackpack[ingredient.ItemType]=nextBackpack.GetValueOrDefault(ingredient.ItemType)-(ingredient.Quantity-fromHome);
+                            if(PlayerConsumesCraftingMaterials(playerId))
+                            {
+                                next[ingredient.ItemType]=Math.Max(0,next.GetValueOrDefault(ingredient.ItemType)-fromHome);
+                                nextBackpack[ingredient.ItemType]=Math.Max(0,nextBackpack.GetValueOrDefault(ingredient.ItemType)-Math.Min(ingredient.Quantity-fromHome,Math.Max(0,nextBackpack.GetValueOrDefault(ingredient.ItemType))));
+                            }
                         }
-                        if (!NutritionCatalog.IsBasicCook(recipe)&&ProgressionRoll() >= chance) { failed = true; break; }
+                        if (PlayerCanFailCrafting(playerId)&&!NutritionCatalog.IsBasicCook(recipe)&&ProgressionRoll() >= chance) { failed = true; break; }
                         succeeded++;
                         if (bonuses.Quantity > 0 && ProgressionRoll() < bonuses.Quantity) bonusOutput++;
                         if (bonuses.Materials > 0 && ProgressionRoll() < bonuses.Materials)
@@ -148,7 +151,7 @@ public sealed partial class RealityWorld
                             {
                                 var savedQuantity=Math.Max(1,(int)Math.Floor(ingredient.Quantity*.2));
                                 var returnHome=Math.Min(savedQuantity,usedHome[ingredient.ItemType]);
-                                next[ingredient.ItemType]+=returnHome;nextBackpack[ingredient.ItemType]+=savedQuantity-returnHome;savedMaterials+=savedQuantity;
+                                next[ingredient.ItemType]=next.GetValueOrDefault(ingredient.ItemType)+returnHome;nextBackpack[ingredient.ItemType]=nextBackpack.GetValueOrDefault(ingredient.ItemType)+savedQuantity-returnHome;savedMaterials+=savedQuantity;
                             }
                     }
                     var output = checked(recipe.OutputQuantity * succeeded + bonusOutput);
@@ -176,9 +179,9 @@ public sealed partial class RealityWorld
                         _homeFurniture[access.AccountId] = furniture!;
                         RefreshHome(access.AccountId, _baseEntities[_baseBuildings[access.AccountId]]);
                         var now = _probulatorClock.GetUtcNow();
-                        damaged = await SaveFixturePlayerAsync(playerId, current => ApplyFailedCraftExperienceBoost(current with { HealthHearts = Math.Max(0, current.HealthHearts - 1) }, now), null, cancellationToken);
+                        damaged = await SaveFixturePlayerAsync(playerId, current => ApplyFailedCraftExperienceBoost(current with { HealthHearts = Math.Max(PlayerCanDie(playerId) ? 0 : 1, current.HealthHearts - 1) }, now), null, cancellationToken);
                         var health = damaged.HealthHearts;
-                        if (health <= 0) damaged = await DieAndResetPlayerAsync(damaged, cancellationToken);
+                        if (health <= 0 && PlayerCanDie(playerId)) damaged = await DieAndResetPlayerAsync(damaged, cancellationToken);
                         if (health <= 0) await SavePlayerAsync(damaged, cancellationToken);
                         explosion = new CombatEvent(playerId, playerId, "craftingExplosion", access.Table.Position, access.Table.Position, true, 1, health <= 0,
                             $"Crafting failed! The station exploded for 1 damage. {FailedCraftExperienceEffect}: +50% all XP for 5 minutes.", damaged.HealthHearts,

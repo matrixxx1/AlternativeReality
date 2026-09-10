@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=89">
+  <link rel="stylesheet" href="styles.css?v=90">
 <style>.garden-dialog{max-width:760px;width:90vw;max-height:80vh;overflow:auto;background:#263c37;color:#f1e4bd;border:2px solid #a68a51;border-radius:12px;padding:22px}.garden-dialog::backdrop{background:#0008}.garden-dialog button{margin:6px;padding:8px}.garden-build-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ffffff20;padding:6px}.garden-placement-banner{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;background:#263c37;color:#fff1c1;border:2px solid #c9ac67;padding:14px;border-radius:9px;max-width:75vw}.garden-placement-banner button{margin-left:16px}</style>
 <style>.rebuild-confirmation{max-width:min(520px,85vw);background:#18252a;color:#edf1e5;border:1px solid #829a85;border-radius:10px;padding:24px;line-height:1.5}.rebuild-confirmation::backdrop{background:#000a}.rebuild-confirmation form{display:flex;justify-content:flex-end;gap:12px}</style>
 </head>
@@ -266,10 +266,11 @@
     <div class="trade-actions"><button id="questAbandon" type="button" hidden>Abandon</button><button id="questClose" type="button">Close</button><button id="questAccept" type="button" hidden>Accept</button><button id="questComplete" type="button" hidden>Complete</button></div>
   </section>
   <section id="serverConfigWindow" class="panel server-config-window" data-collapsible="Server configuration" hidden>
-    <div class="server-config-header"><div><div class="eyebrow">GOD MODE // SERVER RULES</div><h2>World and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
+    <div class="server-config-header"><div><div class="eyebrow">TESTING // SERVER RULES</div><h2>World, player, and item configuration</h2></div><button id="serverConfigClose" type="button">Close</button></div>
     <nav class="server-config-tabs" role="tablist" aria-label="Server configuration sections">
-      <button type="button" role="tab" data-server-config-tab="god">God Mode</button>
-      <button type="button" role="tab" data-server-config-tab="vehicles" class="active">Vehicles</button>
+      <button type="button" role="tab" data-server-config-tab="world" class="active">World Testing</button>
+      <button type="button" role="tab" data-server-config-tab="player">Player Testing</button>
+      <button type="button" role="tab" data-server-config-tab="vehicles">Vehicles</button>
       <button type="button" role="tab" data-server-config-tab="weapons">Weapons</button>
       <button type="button" role="tab" data-server-config-tab="ammo">Ammo</button>
       <button type="button" role="tab" data-server-config-tab="quests">Quest Items</button>
@@ -277,10 +278,9 @@
       <button type="button" role="tab" data-server-config-tab="movement">Terrain &amp; Movement</button>
       <button type="button" role="tab" data-server-config-tab="events">Reality inversion</button>
     </nav>
-    <section class="server-config-page" data-server-config-page="god" hidden>
-      <h3>God Mode</h3>
-      <button id="godMode" type="button" aria-pressed="false">God Mode: Off</button>
-      <p>Enable God Mode to use these tools and edit server settings. Choose a placement tool, then click a location on the outdoor map. Escape or Cancel exits placement.</p>
+    <section class="server-config-page" data-server-config-page="world">
+      <h3>World Testing</h3>
+      <p>Choose a placement tool, then click a location on the outdoor map. Escape or Cancel exits placement.</p>
       <div id="godActionTools">
     <button data-test-character="npc" type="button">Place NPC</button>
     <button data-test-character="player" type="button">Place fake player</button>
@@ -288,7 +288,7 @@
     <button id="clearTestCharactersButton" type="button">Clear my test characters</button>
     <button id="teleportButton" type="button">Teleport to location</button>
       </div>
-      <fieldset id="godWorldTools" disabled><legend>World administration</legend>
+      <fieldset id="godWorldTools"><legend>World administration</legend>
         <div class="server-event-row"><strong>Server Vote</strong><span>Hourly votes choose from Random and three inversions. Each vote lasts one minute.</span><button type="button" data-world-event="vote">Trigger Server Vote · 1 minute</button><button id="cancelServerVoteButton" type="button" disabled>Cancel active Server Vote</button></div>
     <section aria-label="Reality rebuilding">
       <h3>Reality rebuilding</h3>
@@ -304,7 +304,25 @@
     </section>
       </fieldset>
     </section>
-    <section class="server-config-page" data-server-config-page="vehicles">
+    <section class="server-config-page player-testing-page" data-server-config-page="player" hidden>
+      <h3>Player Testing</h3>
+      <p>Checked is normal gameplay. Clear one rule to bypass only that system for this character. Changes are saved on the server and restored when you reconnect.</p>
+      <div id="playerTestingSettings" class="player-testing-settings">
+        <label><input type="checkbox" data-player-testing="canDie" checked><span><strong>Player can die</strong><small>Clear to stop damage from reducing health below 1.</small></span></label>
+        <label><input type="checkbox" data-player-testing="consumesAmmo" checked><span><strong>Player consumes ammo</strong><small>Clear for unlimited firearm, bow, and spear-gun ammunition.</small></span></label>
+        <label><input type="checkbox" data-player-testing="consumesCraftingMaterials" checked><span><strong>Player consumes materials when crafting</strong><small>Clear to keep ingredients after each attempt.</small></span></label>
+        <label><input type="checkbox" data-player-testing="consumesAirWhenSwimming" checked><span><strong>Player consumes air when swimming</strong><small>Clear for unlimited air underwater.</small></span></label>
+        <label><input type="checkbox" data-player-testing="consumesStaminaWhenMoving" checked><span><strong>Player consumes stamina when moving</strong><small>Clear for unlimited movement stamina.</small></span></label>
+        <label><input type="checkbox" data-player-testing="mustMeetCraftingMaterialRequirements" checked><span><strong>Player must meet material requirements to craft</strong><small>Clear to attempt recipes without all required ingredients.</small></span></label>
+        <label><input type="checkbox" data-player-testing="canFailWhenCrafting" checked><span><strong>Player has a chance to fail when crafting</strong><small>Clear to make every crafting attempt succeed.</small></span></label>
+        <label><input type="checkbox" data-player-testing="doesNormalDamage" checked><span><strong>Player doesn't do massive damage</strong><small>Clear to multiply outgoing damage by 100.</small></span></label>
+        <label><input type="checkbox" data-player-testing="getsNormalMovementSpeed" checked><span><strong>Player doesn't get a speed bonus</strong><small>Clear for five-times movement speed.</small></span></label>
+        <label><input type="checkbox" data-player-testing="consumesVehicleFuel" checked><span><strong>Player consumes vehicle fuel</strong><small>Clear for unlimited fuel and vehicle charge.</small></span></label>
+        <label><input type="checkbox" data-player-testing="obeysBackpackWeightLimit" checked><span><strong>Player obeys the backpack weight limit</strong><small>Clear to carry and collect items without a weight cap.</small></span></label>
+      </div>
+      <p id="playerTestingStatus" class="player-testing-status" role="status" aria-live="polite">Normal gameplay is active.</p>
+    </section>
+    <section class="server-config-page" data-server-config-page="vehicles" hidden>
       <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigVehicles"></div></div>
     </section>
     <section class="server-config-page" data-server-config-page="weapons" hidden>
@@ -463,6 +481,6 @@
   <script src="casino.js?v=2"></script>
   <script src="inventory-sections.js?v=2"></script>
   <script src="gardens.js?v=3"></script>
-  <script src="app.js?v=185"></script>
+  <script src="app.js?v=186"></script>
 </body>
 </html>

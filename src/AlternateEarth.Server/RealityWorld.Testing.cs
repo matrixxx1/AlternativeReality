@@ -10,8 +10,8 @@ public sealed partial class RealityWorld
 
     public TestCharacterPlacement PlaceTestCharacter(string playerId, PlaceTestCharacterRequest request)
     {
-        if (!_players.TryGetValue(playerId, out var owner) || !owner.GodMode)
-            throw new InvalidOperationException("God Mode must be enabled to place test characters.");
+        if (!_players.TryGetValue(playerId, out var owner) || owner.IsTestCharacter)
+            throw new InvalidOperationException("Join the server before placing test characters.");
         if (owner.LocationId != "outdoor") throw new InvalidOperationException("Place test characters outdoors.");
         if (request.Kind is not ("npc" or "player" or "animal")) throw new InvalidOperationException("Choose NPC, fake player, or animal.");
         if (!double.IsFinite(request.X) || !double.IsFinite(request.Y) || !IsAreaLoaded(request.X, request.Y))
@@ -42,7 +42,7 @@ public sealed partial class RealityWorld
 
     public IReadOnlyList<string> ClearTestCharacters(string playerId)
     {
-        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to clear test characters.");
+        if (!CanUseWorldTesting(playerId)) throw new InvalidOperationException("Join the server before clearing test characters.");
         lock (_testCharacterLock)
         {
             var ids = _testCharacterOwners.Where(pair => pair.Value == playerId).Select(pair => pair.Key).ToArray();

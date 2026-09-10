@@ -44,7 +44,7 @@ public sealed partial class RealityWorld
         var attackTime = _probulatorClock.GetUtcNow();
         if (_lastPlayerAttack.TryGetValue((playerId, weapon), out var prior) && attackTime - prior < TimeSpan.FromSeconds(.5)) throw new InvalidOperationException("Let your weapon recover.");
         var ammo = definition.Ammo ?? (weapon == "flamethrower" ? null : weapon);
-        if (!player.GodMode && ammo is not null && !RemoveInventory(playerId, ammo, 1)) throw new InvalidOperationException("You need ammunition for this attack.");
+        if (PlayerConsumesAmmo(playerId) && ammo is not null && !RemoveInventory(playerId, ammo, 1)) throw new InvalidOperationException("You need ammunition for this attack.");
         if (!player.GodMode && weapon == "flamethrower")
         { if (player.FlamethrowerGasGallons < .2) throw new InvalidOperationException("You need flamethrower fuel."); await SavePlayerAsync(player with { FlamethrowerGasGallons = player.FlamethrowerGasGallons - .2, Version = player.Version + 1 }, token); }
         _lastPlayerAttack[(playerId, weapon)] = attackTime;

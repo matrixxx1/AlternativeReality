@@ -303,7 +303,19 @@ public sealed record PlayerPrivateState(
     bool CanEditHome = false,
     long HomeStorageMoneyCents = 0,
     IReadOnlyList<string>? LearnedRecipes = null, CraftingSkillState? CraftingSkill = null,
-    IReadOnlyList<string>? OwnedVehicles = null, ProgressionState? Progression = null, InversionView? Inversions = null, IReadOnlyList<string>? Achievements = null, DateTimeOffset? MapleSyrupUntilUtc = null, IReadOnlyList<ItemStack>? GodModeLoadout = null, IReadOnlyList<RecipeBookEntry>? RecipeBook = null, HomeWorkshopView? HomeWorkshop = null, CasinoMapLocation? Casino = null);
+    IReadOnlyList<string>? OwnedVehicles = null, ProgressionState? Progression = null, InversionView? Inversions = null, IReadOnlyList<string>? Achievements = null, DateTimeOffset? MapleSyrupUntilUtc = null, IReadOnlyList<ItemStack>? GodModeLoadout = null, IReadOnlyList<RecipeBookEntry>? RecipeBook = null, HomeWorkshopView? HomeWorkshop = null, CasinoMapLocation? Casino = null, PlayerTestingSettings? PlayerTesting = null);
+public sealed record PlayerTestingSettings(
+    bool CanDie = true,
+    bool ConsumesAmmo = true,
+    bool ConsumesCraftingMaterials = true,
+    bool ConsumesAirWhenSwimming = true,
+    bool ConsumesStaminaWhenMoving = true,
+    bool MustMeetCraftingMaterialRequirements = true,
+    bool CanFailWhenCrafting = true,
+    bool DoesNormalDamage = true,
+    bool GetsNormalMovementSpeed = true,
+    bool ConsumesVehicleFuel = true,
+    bool ObeysBackpackWeightLimit = true);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
     WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null, bool FleeInFear = false);
 

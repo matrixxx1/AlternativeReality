@@ -207,6 +207,7 @@ public sealed partial class RealityWorld
         if (_players.Count >= Configuration.MaximumPlayers) throw new InvalidOperationException("This reality is full.");
         var name = SanitizeName(requestedName);
         var existing = await _store.LoadCharacterAsync(Configuration.Id, characterId, cancellationToken);
+        _playerTesting[characterId] = await _store.LoadPlayerTestingSettingsAsync(Configuration.Id, characterId, cancellationToken) ?? new PlayerTestingSettings();
         _progression[characterId] = await _store.LoadProgressionAsync(Configuration.Id, characterId, cancellationToken) ?? NewProgression;
         var maximumStamina = ProgressionRules.Stamina(StatsFor(characterId));
         if (!string.IsNullOrWhiteSpace(accountId) && await _store.RefreshBaseActivityAsync(accountId, Configuration.Id, DateTimeOffset.UtcNow, cancellationToken))
@@ -232,7 +233,7 @@ public sealed partial class RealityWorld
         var player = new PlayerState(characterId, name, position, (existing?.Version ?? 0) + 1,
             inside ? TerrainType.Pavement : Navigation.TerrainAt(position.X, position.Y), 0, health, 10, inside ? TravelMode.Walk : existing?.TravelMode ?? TravelMode.Walk,
             Math.Clamp(existing?.Stamina ?? maximumStamina, 0, maximumStamina), maximumStamina,
-            Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, existing?.GodMode ?? false,
+            Math.Clamp(existing?.Water ?? 10, 0, 10), 10, existing?.WalletCents ?? 0, false,
             existing?.FoodProtectedUntilUtc, existing?.WaterProtectedUntilUtc, location,
             existing?.FlashlightOn ?? false, existing?.LanternOn ?? false, existing?.LaserOn ?? false,
             existing?.MagicHikingShoesOn ?? false, existing?.MagicRunningShoesOn ?? false, existing?.HatOn ?? false,
@@ -465,7 +466,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
         if(MooseCharging(player))return new(player,false,true,false,false,false,"Mad Moose Flu: charging!");
-        if (player.TravelMode == TravelMode.Swim && !player.GodMode && (player.SwimExhausted || player.Stamina <= 0))
+        if (player.TravelMode == TravelMode.Swim && PlayerConsumesStamina(characterId) && (player.SwimExhausted || player.Stamina <= 0))
         {
             _swimAttempts[player.Id] = _probulatorClock.GetUtcNow();
             return new(player, false, true, false, false, false, "Too exhausted to swim. Rest; struggling consumes Air.");
@@ -491,13 +492,13 @@ public sealed partial class RealityWorld
         var previous = _lastMovement.AddOrUpdate(characterId, now, (_, old) => now);
         var elapsed = Math.Clamp((now - previous).TotalSeconds, 0.01, 0.15);
         var currentTerrain = TerrainFor(player);
-        if (!player.GodMode && player.TravelMode == TravelMode.Ufo && TravelFuelRange(player) <= 0)
+        if (PlayerConsumesVehicleFuel(characterId) && player.TravelMode == TravelMode.Ufo && TravelFuelRange(player) <= 0)
         {
             var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
             await SavePlayerAsync(stopped, cancellationToken);
             return new(stopped, false, true, false, false, false, "Your UFO is out of Kryptonite. Carry Kryptonite in your inventory; one powers 10 miles of flight.");
         }
-        if (!player.GodMode && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
+        if (PlayerConsumesVehicleFuel(characterId) && IsMotorized(player.TravelMode) && FuelGallons(player) <= 0)
         {
             var stopped = player with { SpeedMetersPerSecond = 0, Version = player.Version + 1 };
             await SavePlayerAsync(stopped, cancellationToken);
@@ -510,7 +511,7 @@ public sealed partial class RealityWorld
         var metersPerSecond = ConfiguredSpeedMetersPerSecond(player, currentTerrain, staminaFraction, wearingMagicHikingShoes, wearingMagicRunningShoes);
         var maximumStep = request.MaximumDistanceMeters is > 0 and < double.MaxValue ? request.MaximumDistanceMeters.Value : double.MaxValue;
         if (remainingDistance is not null) maximumStep = Math.Min(maximumStep, remainingDistance.Value);
-        if (!player.GodMode) maximumStep = Math.Min(maximumStep, TravelFuelRange(player));
+        if (PlayerConsumesVehicleFuel(characterId)) maximumStep = Math.Min(maximumStep, TravelFuelRange(player));
         var step = Math.Min(metersPerSecond * elapsed * Configuration.GameSpeed, maximumStep);
         var requested = (_loadedBounds ?? Configuration.Area.Bounds).Clamp(player.Position with
         {
@@ -527,7 +528,7 @@ public sealed partial class RealityWorld
         }
         if (player.TravelMode == TravelMode.Skateboard && !WorldNavigation.SupportsTravelMode(requestedTerrain, TravelMode.Skateboard))
         {
-            var damaged = player with { HealthHearts = player.GodMode ? Math.Max(1, player.HealthHearts - .25) : Math.Max(0, player.HealthHearts - .25), TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
+            var damaged = player with { HealthHearts = Math.Max(PlayerCanDie(player.Id) ? 0 : 1, player.HealthHearts - .25), TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0, Terrain = currentTerrain, Version = player.Version + 1 };
             if (damaged.HealthHearts <= 0)
             {
                 var reset = await DieAndResetPlayerAsync(damaged, cancellationToken);
@@ -563,7 +564,7 @@ public sealed partial class RealityWorld
         var eBikeRemaining = player.EBikeRemainingMeters;
         var ufoRemaining = player.UfoRemainingMeters;
         var kryptoniteUsed = 0;
-        if (!player.GodMode && distance > 0)
+        if (PlayerConsumesVehicleFuel(characterId) && distance > 0)
         {
             if (player.TravelMode == TravelMode.DirtBike) dirtBikeGas = FuelAfterTravel(dirtBikeGas, distance, DirtBikeMilesPerGallon);
             if (player.TravelMode == TravelMode.Motorcycle) motorcycleGas = FuelAfterTravel(motorcycleGas, distance, MotorcycleMilesPerGallon);
@@ -586,7 +587,7 @@ public sealed partial class RealityWorld
             UfoRemainingMeters = ufoRemaining,
             Version = player.Version + 1
         };
-        if (!player.GodMode && player.TravelMode == TravelMode.EBike && eBikeRemaining <= .001)
+        if (PlayerConsumesVehicleFuel(characterId) && player.TravelMode == TravelMode.EBike && eBikeRemaining <= .001)
         {
             RemoveInventory(characterId, "eBike", 1); updated = updated with { TravelMode = TravelMode.Walk, SpeedMetersPerSecond = 0 };
             await SaveInventoryAsync(characterId, cancellationToken); await SavePlayerAsync(updated, cancellationToken);
@@ -669,7 +670,7 @@ public sealed partial class RealityWorld
     public async Task<(PlayerState Player, bool Expanded)> TeleportWithAreaAsync(string characterId, TeleportRequest request, CancellationToken cancellationToken = default)
     {
         EnsureNotOnBus(characterId);
-        if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to teleport.");
+        if (!CanUseWorldTesting(characterId)) throw new InvalidOperationException("Join the server before teleporting.");
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (player.LocationId != "outdoor") throw new InvalidOperationException("Leave the dungeon or Home before teleporting.");
         return await TeleportToOutdoorPositionAsync(characterId, player, request.X, request.Y, false, cancellationToken);
@@ -779,7 +780,7 @@ public sealed partial class RealityWorld
     public IReadOnlyList<ActorState> TriggerWorldEvent(string characterId, string eventType)
     {
         if (!_players.TryGetValue(characterId, out var player)) throw new InvalidOperationException("Unknown player.");
-        if (!player.GodMode) throw new InvalidOperationException("God Mode must be enabled to trigger a Reality inversion.");
+        if (!CanUseWorldTesting(characterId)) throw new InvalidOperationException("Join the server before triggering a Reality inversion.");
         var key = (eventType ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
         var anchor = player.LocationId == "outdoor" ? player.Position : _returnPositions.GetValueOrDefault(characterId, new LocalTangentProjection(Configuration.Area.Region).Project(Configuration.Area.Center));
         var now = _probulatorClock.GetUtcNow();
@@ -1066,7 +1067,7 @@ public sealed partial class RealityWorld
 
     public async Task<WorldSnapshot> RebuildAsync(string characterId, bool godMode, CancellationToken cancellationToken = default, bool fromScratch = false)
     {
-        if (!playerIsGod(characterId)) throw new InvalidOperationException("God Mode must be enabled to rebuild this reality.");
+        if (!CanUseWorldTesting(characterId)) throw new InvalidOperationException("Join the server before rebuilding this reality.");
         await _rebuildLock.WaitAsync(cancellationToken);
         try
         {
@@ -1564,7 +1565,7 @@ public sealed partial class RealityWorld
     };
     private double StaminaAfterTravel(PlayerState player, double distance, double elapsed, DateTimeOffset now, bool magicShoes)
     {
-        if (player.GodMode || distance <= .001) return player.Stamina;
+        if (!PlayerConsumesStamina(player.Id) || distance <= .001) return player.Stamina;
         if (player.TravelMode == TravelMode.Swim) return Math.Max(0, player.Stamina - elapsed * 2 * (1 + 2 * (1 - player.Air / Math.Max(1, player.MaximumAir))));
         if (player.FoodProtectedUntilUtc > now) return player.Stamina;
         var effort = player.TravelMode switch { TravelMode.Run => 1, TravelMode.Bike => .5, TravelMode.Skateboard => .75, _ => 0 };
@@ -1596,6 +1597,8 @@ public sealed partial class RealityWorld
 
     private async Task<bool> SavePlayerAsync(PlayerState player, CancellationToken cancellationToken, int kryptoniteUsed = 0)
     {
+        if (!player.IsTestCharacter && !PlayerCanDie(player.Id) && player.HealthHearts < 1)
+            player = player with { HealthHearts = 1 };
         var saveLock = _playerSaveLocks.GetOrAdd(player.Id, _ => new SemaphoreSlim(1, 1));
         await saveLock.WaitAsync(cancellationToken);
         try

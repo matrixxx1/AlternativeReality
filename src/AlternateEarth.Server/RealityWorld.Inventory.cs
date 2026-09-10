@@ -8,6 +8,8 @@ public sealed partial class RealityWorld
 
     private async Task<PlayerState> DieAndResetPlayerAsync(PlayerState defeated, CancellationToken cancellationToken)
     {
+        if (!defeated.IsTestCharacter && !PlayerCanDie(defeated.Id))
+            return defeated with { HealthHearts = Math.Max(1, defeated.HealthHearts), Version = defeated.Version + 1 };
         _sleepUntil.TryRemove(defeated.Id, out _);
         _bleeds.TryRemove(defeated.Id, out _); _mapleBoosts.TryRemove(defeated.Id, out _);
         defeated = defeated with { AsleepUntilUtc = null };
@@ -227,7 +229,7 @@ public sealed partial class RealityWorld
 
     public async Task<ConfiguredInventoryAdjustment> ConfigureInventoryItemAsync(string playerId, ConfigureInventoryItemRequest request, CancellationToken cancellationToken = default)
     {
-        if (!playerIsGod(playerId)) throw new InvalidOperationException("God Mode must be enabled to adjust inventory from server configuration.");
+        if (!CanUseWorldTesting(playerId)) throw new InvalidOperationException("Join the server before adjusting testing inventory.");
         if (!_players.ContainsKey(playerId)) throw new InvalidOperationException("Unknown player.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
         if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");

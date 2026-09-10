@@ -164,6 +164,11 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "playerUpdated", player = godPlayer }, null, cancellationToken);
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "updatePlayerTesting":
+                        var testingRequest = root.Deserialize<UpdatePlayerTestingRequest>(SharedJson.Options)!;
+                        await _world.UpdatePlayerTestingAsync(characterId, testingRequest.Settings, cancellationToken);
+                        await connection.SendAsync(new { type = "playerTestingUpdated", privateState = _world.GetPrivateState(characterId), message = "Player testing rules saved." }, cancellationToken);
+                        break;
                     case "placeTestCharacter":
                         var placedTest = _world.PlaceTestCharacter(characterId, root.Deserialize<PlaceTestCharacterRequest>(SharedJson.Options)!);
                         if (placedTest.Player is not null) await BroadcastPlayersAsync(new[] { placedTest.Player }, cancellationToken);

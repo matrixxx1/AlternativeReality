@@ -125,7 +125,7 @@ app.MapGet("/api/diagnostics", async (HttpContext context, AccountService accoun
 {
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
     if (login is null) return Results.Unauthorized();
-    if (!state.IsGodModeEnabled(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!state.CanUseWorldTesting(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     using var process = Process.GetCurrentProcess();
     return Results.Ok(new
     {
@@ -150,7 +150,7 @@ app.MapGet("/api/reality-maintenance", async (HttpContext context, AccountServic
 {
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
     if (login is null) return Results.Unauthorized();
-    if (!state.IsGodModeEnabled(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!state.CanUseWorldTesting(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var storage = await Task.Run(() => RealityStorageInfo.Read(dataDirectory), context.RequestAborted);
     return Results.Ok(new { storage, reality = state.Configuration, loadedBlocks = state.LoadedAreaCount,
         baseEntities = state.BaseEntityCount, actors = state.ActorCount, players = state.PlayerCount,

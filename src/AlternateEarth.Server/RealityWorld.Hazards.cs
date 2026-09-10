@@ -82,7 +82,7 @@ public sealed partial class RealityWorld
             }
             var due = Math.Min(pending.Definition.DurationSeconds, Math.Max(0, (int)(now - zone.StartedAtUtc).TotalSeconds));
             var pulses = due - pending.AppliedPulses;
-            var damage = pending.Definition.DamagePerSecond * pulses * ProgressionRules.Damage(StatsFor(zone.OwnerId));
+            var damage = pending.Definition.DamagePerSecond * pulses * ProgressionRules.Damage(StatsFor(zone.OwnerId)) * (_players.ContainsKey(zone.OwnerId) ? PlayerDamageMultiplier(zone.OwnerId) : 1);
             foreach (var target in _players.Values.Where(player => !musicalFruit && player.LocationId == zone.LocationId && player.TravelMode != TravelMode.Ufo && !IsProbulatorAbducted(player.Id) && HazardTouches(zone, player.Position)).ToArray())
             {
                 var sleeps = now < zone.EndsAtUtc && pending.Definition.SleepSeconds > 0 && pending.SleepAffected.Add(target.Id);
@@ -90,7 +90,7 @@ public sealed partial class RealityWorld
                 var until = sleeps ? now.AddSeconds(pending.Definition.SleepSeconds) : target.AsleepUntilUtc;
                 if (sleeps) { until = _sleepUntil.AddOrUpdate(target.Id, until!.Value, (_, prior) => prior > until.Value ? prior : until.Value); }
                 var protectedDamage = GloveCatalog.ReduceDamage(target, damage, zone.Effect);
-                var health = target.GodMode ? Math.Max(1, target.HealthHearts - protectedDamage) : Math.Max(0, target.HealthHearts - protectedDamage);
+                var health = Math.Max(PlayerCanDie(target.Id) ? 0 : 1, target.HealthHearts - protectedDamage);
                 var died = health <= 0;
                 var updated = target with { HealthHearts = health, AsleepUntilUtc = until, SpeedMetersPerSecond = sleeps ? 0 : target.SpeedMetersPerSecond, Version = target.Version + 1 };
                 if (died) { _sleepUntil.TryRemove(target.Id, out _); updated = await DieAndResetPlayerAsync(updated with { AsleepUntilUtc = null }, cancellationToken); }

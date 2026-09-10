@@ -35,9 +35,9 @@ public sealed partial class RealityWorld
             if(player.Position.Distance2D(animal.Position)>definition.RangeMeters)throw new InvalidOperationException("That animal is out of weapon range.");
             var now=_probulatorClock.GetUtcNow();if(_lastPlayerAttack.TryGetValue((id,weapon),out var prior)&&now-prior<TimeSpan.FromSeconds(Math.Clamp(definition.AttackIntervalSeconds,.05,10)))throw new InvalidOperationException("Your weapon is not ready yet.");
             var inventory=GetInventoryState(id);var ammo=WeaponDefinition(weapon).Ammo;
-            if(!player.GodMode&&ammo is not null){if(!inventory.Items.Any(i=>i.ItemType==ammo&&i.Quantity>0))throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");inventory=inventory with{Items=inventory.Items.Select(i=>i.ItemType==ammo?i with{Quantity=i.Quantity-1}:i).Where(i=>i.Quantity>0).ToArray()};}
+            if(PlayerConsumesAmmo(id)&&ammo is not null){if(!inventory.Items.Any(i=>i.ItemType==ammo&&i.Quantity>0))throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");inventory=inventory with{Items=inventory.Items.Select(i=>i.ItemType==ammo?i with{Quantity=i.Quantity-1}:i).Where(i=>i.Quantity>0).ToArray()};}
             if(!player.GodMode&&weapon=="flamethrower"){if(player.FlamethrowerGasGallons<.2)throw new InvalidOperationException("The flamethrower needs at least 0.2 gallon of gas.");player=await SaveFixturePlayerAsync(id,current=>current with{FlamethrowerGasGallons=current.FlamethrowerGasGallons-.2},null,token);}
-            var damage=WeaponDamageFor(id,weapon,Math.Max(.25,definition.Damage));var health=double.TryParse(animal.Properties.GetValueOrDefault("healthHearts"),NumberStyles.Float,CultureInfo.InvariantCulture,out var h)?h:FarmRules.IsCow(animal)?8:2;
+            var damage=WeaponDamageFor(id,weapon,Math.Max(.25,definition.Damage))*PlayerDamageMultiplier(id);var health=double.TryParse(animal.Properties.GetValueOrDefault("healthHearts"),NumberStyles.Float,CultureInfo.InvariantCulture,out var h)?h:FarmRules.IsCow(animal)?8:2;
             var dead=health<=damage;var props=new Dictionary<string,string>(animal.Properties){["healthHearts"]=Math.Max(0,health-damage).ToString(CultureInfo.InvariantCulture)};
             if(dead){props["state"]="dead";props["productQuantity"]=FarmRules.IsCow(animal)?"3":"1";}
             var updated=animal with{Version=animal.Version+1,Properties=props};await _store.SaveEntityAsync(Configuration.Id,updated,token,[inventory]);_baseEntities[animal.Id]=updated;_inventories[id]=inventory.Items.ToDictionary(i=>i.ItemType,i=>i.Quantity);_lastPlayerAttack[(id,weapon)]=now;
@@ -78,7 +78,7 @@ public sealed partial class RealityWorld
             foreach(var reward in rewards)items[reward.ItemType]=items.TryGetValue(reward.ItemType,out var existing)?existing with {Quantity=existing.Quantity+reward.Quantity}:reward;
             var nextInventory=inventory with {Items=items.Values.ToArray()};
             var weight=nextInventory.Items.Where(i=>i.CarriedInBackpack).Sum(i=>i.UnitWeightPounds*i.Quantity);
-            if(rewards.Count>0&&!player.GodMode&&weight>PlayerCarryingCapacity(id)+.0001)throw new InvalidOperationException("Your backpack is too heavy for this. Make room and try again; your container is unchanged.");
+            if(rewards.Count>0&&PlayerObeysBackpackWeight(id)&&weight>PlayerCarryingCapacity(id)+.0001)throw new InvalidOperationException("Your backpack is too heavy for this. Make room and try again; your container is unchanged.");
             var updatedAnimal=animal with {Version=animal.Version+1,Properties=props};
             await _store.SaveEntityAsync(Configuration.Id,updatedAnimal,token,[nextInventory]);_inventories[id]=items.ToDictionary(i=>i.Key,i=>i.Value.Quantity);_baseEntities[animal.Id]=updatedAnimal;
             return(new(message,GetPrivateState(id),updatedAnimal),remark);

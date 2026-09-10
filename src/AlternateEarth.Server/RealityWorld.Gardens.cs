@@ -113,8 +113,8 @@ public sealed partial class RealityWorld
             if(player.Position.Distance2D(entity.Position)>definition.RangeMeters)throw new InvalidOperationException("That garden is out of weapon range.");
             var now=_probulatorClock.GetUtcNow();var interval=TimeSpan.FromSeconds(Math.Clamp(definition.AttackIntervalSeconds,.05,10));
             if(_lastPlayerAttack.TryGetValue((id,weapon),out var previous)&&now-previous<interval)throw new InvalidOperationException("Your weapon is not ready yet.");
-            var ammo=WeaponDefinition(weapon).Ammo;if(!player.GodMode&&ammo is not null){if(!RemoveInventory(id,ammo,1))throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");await SaveInventoryAsync(id,token);}
-            _lastPlayerAttack[(id,weapon)]=now;var damage=WeaponDamageFor(id,weapon,Math.Max(.25,definition.Damage));var updated=await DamageGardenAsync(entity,damage,token);var dead=updated.Properties.GetValueOrDefault("state")=="rubble";
+            var ammo=WeaponDefinition(weapon).Ammo;if(PlayerConsumesAmmo(id)&&ammo is not null){if(!RemoveInventory(id,ammo,1))throw new InvalidOperationException($"You need {DisplayItem(ammo)}.");await SaveInventoryAsync(id,token);}
+            _lastPlayerAttack[(id,weapon)]=now;var damage=WeaponDamageFor(id,weapon,Math.Max(.25,definition.Damage))*PlayerDamageMultiplier(id);var updated=await DamageGardenAsync(entity,damage,token);var dead=updated.Properties.GetValueOrDefault("state")=="rubble";
             var message=dead?"Garden permanently destroyed. Rubble clears in five minutes.":"Garden damaged.";
             return new WorldCrimeResult(player,GetPrivateState(id),message,updated,null,new CombatEvent(id,gardenId,weapon,player.Position,entity.Position,true,damage,dead,message));
         }

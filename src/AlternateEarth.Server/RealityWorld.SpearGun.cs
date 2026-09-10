@@ -41,8 +41,8 @@ public sealed partial class RealityWorld
             if (victim is not null && (!Configuration.PvpEnabled || ShieldDeflects(victim, true))) hit = false;
             var damage = hit ? victim is null ? shot.Damage : ShieldReducedDamage(victim, shot.Damage) : 0;
             var health = actor?.HealthHearts ?? victim?.HealthHearts ?? bus?.State.HealthHearts ?? 0;
-            var died = hit && victim?.GodMode != true && health <= damage;
-            health = hit ? Math.Max(victim?.GodMode == true ? 1 : 0, health - damage) : health;
+            var died = hit && (victim is null || PlayerCanDie(victim.Id)) && health <= damage;
+            health = hit ? Math.Max(victim is not null && !PlayerCanDie(victim.Id) ? 1 : 0, health - damage) : health;
             if (hit && actor is not null)
             {
                 _relationships[(player.Id, actor.Id)] = Math.Min(-2, Relationship(player.Id, actor.Id) - 1);
@@ -96,7 +96,7 @@ public sealed partial class RealityWorld
             if (!chase || next.Distance2D(player.Position) > 1.6 || _lastActorAttack.TryGetValue((actor.Id, player.Id), out var prior) && now - prior < TimeSpan.FromSeconds(2.5)) continue;
             _lastActorAttack[(actor.Id, player.Id)] = now;
             var damage = (chest is null ? .5 : 1) + dungeon.Difficulty * .025;
-            var health = Math.Max(player.GodMode ? 1 : 0, player.HealthHearts - damage);
+            var health = Math.Max(PlayerCanDie(player.Id) ? 0 : 1, player.HealthHearts - damage);
             var died = health <= 0;
             player = died ? await DieAndResetPlayerAsync(player with { HealthHearts = 0 }, token) : player with { HealthHearts = health, Version = player.Version + 1 };
             await SavePlayerAsync(player, token); players.Add(player);
