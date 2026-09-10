@@ -15,6 +15,9 @@
     const s=player.survival||{},hunger=Math.max(0,Math.min(100,s.hunger||0));
     const illnesses=(s.illnesses||[]).filter(i=>Date.parse(i.endsAtUtc)>now).map(i=>`${i.name} · ${Math.ceil((Date.parse(i.endsAtUtc)-now)/60000)} min`);
     const buffs=(s.buffs||[]).filter(b=>Date.parse(b.endsAtUtc)>now).map(b=>`+${b.amount} ${b.stat} (${Math.ceil((Date.parse(b.endsAtUtc)-now)/60000)} min)`);
+    const fruitEnd=Date.parse(s.musicalFruit?.endsAtUtc),fruitLeft=Math.ceil((fruitEnd-now)/1000);
+    if(fruitLeft>0)buffs.push(`Musical Fruit · ${Math.floor(fruitLeft/60)}:${String(fruitLeft%60).padStart(2,'0')}`);
+    else if(fruitEnd+20000>now)buffs.push(`Musical Fruit · Grand toot finale (${Math.ceil((fruitEnd+20000-now)/1000)}s)`);
     return {hunger,text:`${hunger.toFixed(1)} / 100${hunger>=100?' · STARVING':''}`,illnesses:illnesses.join(', ')||'Healthy',buffs:buffs.join(' · ')};
   }
   function telemetry(player){const s=status(player),h=document.getElementById('hungerValue'),ill=document.getElementById('illnessValue');if(h){h.textContent=`${s.hunger.toFixed(1)} / 100`;h.title=s.text;h.style.color=s.hunger>=80?'#ff9773':'';}if(ill){ill.textContent=String((player.survival?.illnesses||[]).filter(i=>Date.parse(i.endsAtUtc)>Date.now()).length);ill.title=s.illnesses==='Healthy'?'No diseases':s.illnesses+'. Antibiotics cure illness.';}return s;}

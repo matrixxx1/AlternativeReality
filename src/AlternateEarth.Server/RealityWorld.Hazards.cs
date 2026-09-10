@@ -74,10 +74,16 @@ public sealed partial class RealityWorld
         foreach (var pending in _areaHazards.Values.ToArray())
         {
             var zone = pending.State;
+            var musicalFruit = IsMusicalFruit(zone);
+            if (musicalFruit && now > zone.EndsAtUtc)
+            {
+                if (_areaHazards.TryRemove(zone.Id, out _)) Interlocked.Increment(ref _areaHazardRevision);
+                continue;
+            }
             var due = Math.Min(pending.Definition.DurationSeconds, Math.Max(0, (int)(now - zone.StartedAtUtc).TotalSeconds));
             var pulses = due - pending.AppliedPulses;
             var damage = pending.Definition.DamagePerSecond * pulses * ProgressionRules.Damage(StatsFor(zone.OwnerId));
-            foreach (var target in _players.Values.Where(player => player.LocationId == zone.LocationId && player.TravelMode != TravelMode.Ufo && !IsProbulatorAbducted(player.Id) && HazardTouches(zone, player.Position)).ToArray())
+            foreach (var target in _players.Values.Where(player => !musicalFruit && player.LocationId == zone.LocationId && player.TravelMode != TravelMode.Ufo && !IsProbulatorAbducted(player.Id) && HazardTouches(zone, player.Position)).ToArray())
             {
                 var sleeps = now < zone.EndsAtUtc && pending.Definition.SleepSeconds > 0 && pending.SleepAffected.Add(target.Id);
                 if (damage <= 0 && !sleeps) continue;
@@ -93,10 +99,11 @@ public sealed partial class RealityWorld
                 players.Add(updated);
                 combat.Add(HazardCombat(zone, target.Id, target.Name, target.Position, protectedDamage, updated.HealthHearts, died, sleeps, until));
             }
-            foreach (var target in ActorsAtLocation(zone.LocationId).Where(actor => actor.Subtype != "ufo" && !actor.IsPassingThroughPortal(now) && !IsProbulatorAbducted(actor.Id) && HazardTouches(zone, actor.Position)).ToArray())
+            foreach (var target in ActorsAtLocation(zone.LocationId).Where(actor => actor.LocationId == zone.LocationId && (!musicalFruit || FruitEnemy(zone.OwnerId, actor)) && actor.Subtype != "ufo" && !actor.IsPassingThroughPortal(now) && !IsProbulatorAbducted(actor.Id) && HazardTouches(zone, actor.Position)).ToArray())
             {
                 var sleeps = now < zone.EndsAtUtc && pending.Definition.SleepSeconds > 0 && pending.SleepAffected.Add(target.Id);
                 if (damage <= 0 && !sleeps) continue;
+                if (musicalFruit && pending.Reacted.Add(target.Id)) FruitSay(target.Id, target.Name, FruitEnemyLines);
                 var until = sleeps ? now.AddSeconds(pending.Definition.SleepSeconds) : target.AsleepUntilUtc;
                 if (sleeps) { until = _sleepUntil.AddOrUpdate(target.Id, until!.Value, (_, prior) => prior > until.Value ? prior : until.Value); }
                 var health = Math.Max(0, target.HealthHearts - damage); var died = health <= 0;
@@ -125,8 +132,9 @@ public sealed partial class RealityWorld
 
 internal sealed class PendingAreaHazard(AreaHazardState state, HazardDefinition definition)
 {
-    public AreaHazardState State { get; } = state;
+    public AreaHazardState State { get; set; } = state;
     public HazardDefinition Definition { get; } = definition;
     public int AppliedPulses { get; set; }
     public HashSet<string> SleepAffected { get; } = new();
+    public HashSet<string> Reacted { get; } = new();
 }

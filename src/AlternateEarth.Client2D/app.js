@@ -33,7 +33,7 @@
     const fires=state.fireZones.map((f,i)=>({...f,id:`zone:${f.startedAt}:${f.position.x}:${f.position.y}`}));
     for(const zone of state.areaHazards.values())if(zone.effect==='napalm')fires.push({...zone,endsAt:Date.parse(zone.endsAtUtc)});
     for(const [id,endsAt]of state.burningCharacters){const entity=state.players.get(id)||actors.find(a=>a.id===id);if(entity)fires.push({id:'character:'+id,position:entity.position,locationId:entity.locationId,endsAt});}
-    return {listener:state.connectionTask?null:state.players.get(state.playerId),players,actors,buses:state.transit?.buses||[],vehicles:state.lists.vehicle||[],underwater:!!state.dungeon?.underwater,fires,patches:!state.dungeon?(state.inversions||state.privateState?.inversions)?.active?.patches||[]:[]};
+    return {listener:state.connectionTask?null:state.players.get(state.playerId),players,actors,buses:state.transit?.buses||[],vehicles:state.lists.vehicle||[],underwater:!!state.dungeon?.underwater,fires,areaHazards:[...state.areaHazards.values()],patches:!state.dungeon?(state.inversions||state.privateState?.inversions)?.active?.patches||[]:[]};
   }
   const gameAudio=GameAudio.create({getScene:gameAudioScene});
   gameAudio.bindLifecycle();
@@ -1515,10 +1515,10 @@
       const left=Date.parse(zone.endsAtUtc)-Date.now();if(left<=0||zone.locationId!==me.locationId)continue;
       if(me.locationId==='outdoor'&&Math.hypot(zone.position.x-me.position.x,zone.position.y-me.position.y)>visibleRange(me)+zone.radiusMeters)continue;
       if(state.dungeon&&!state.dungeon.isHome&&!state.dungeon.isStore&&!revealedAt(zone.position.x,zone.position.y))continue;
-      const fire=zone.effect==='napalm',radius=zone.radiusMeters,fade=Math.min(1,left/700);ctx.save();
+      const fire=zone.effect==='napalm',fruit=zone.effect.startsWith('musicalFruit'),radius=zone.radiusMeters,fade=Math.min(1,left/700);ctx.save();
       for(let i=0;i<24;i++){
-        const seed=hash(`${zone.id}:${i}`),angle=i*2.399963+hash(zone.id)*Math.PI*2+now/6000,spread=Math.sqrt((i+.5)/24)*radius*.88;
-        const point=toScreen({...zone.position,x:zone.position.x+Math.cos(angle)*spread,y:zone.position.y+Math.sin(angle)*spread}),size=Math.max(12,state.scale*(fire?.6:1.3))*(.8+.2*Math.sin(now/230+i)),lift=(fire?16:8)+Math.sin(now/450+i)*6;
+        const seed=hash(`${zone.id}:${i}`),angle=i*2.399963+hash(zone.id)*Math.PI*2+now/6000,spread=Math.sqrt(zone.effect==='musicalFruitFinale'?(now/2200+i/24)%1:(i+.5)/24)*radius*.88;
+        const point=toScreen({...zone.position,x:zone.position.x+Math.cos(angle)*spread,y:zone.position.y+Math.sin(angle)*spread}),size=(fruit?Math.max(3,state.scale*radius*.25):Math.max(12,state.scale*(fire?.6:1.3)))*(.8+.2*Math.sin(now/230+i)),lift=(fire?16:8)+Math.sin(now/450+i)*6;
         if(fire){ctx.fillStyle=`rgba(255,${90+Math.floor(seed*90)},25,${.72*fade})`;ctx.beginPath();ctx.moveTo(point.x-size*.45,point.y);ctx.quadraticCurveTo(point.x-size*.6,point.y-size,point.x+Math.sin(now/140+i)*size*.2,point.y-size*2-lift);ctx.quadraticCurveTo(point.x+size*.65,point.y-size,point.x+size*.45,point.y);ctx.fill();}
         else{const gradient=ctx.createRadialGradient(point.x,point.y-lift,0,point.x,point.y-lift,size);gradient.addColorStop(0,`rgba(151,239,68,${.36*fade})`);gradient.addColorStop(.65,`rgba(79,181,41,${.28*fade})`);gradient.addColorStop(1,'rgba(65,145,35,0)');ctx.fillStyle=gradient;ctx.beginPath();ctx.ellipse(point.x,point.y-lift,size,size*.75,0,0,Math.PI*2);ctx.fill();}
       }

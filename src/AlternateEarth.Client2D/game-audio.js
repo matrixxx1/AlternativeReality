@@ -7,6 +7,7 @@
   const loopKinds=new Set(['engine','truck','bus','motorcycle','electric','ufo']);
   durations.bus=2;
   Object.assign(durations,{whoosh:.65,thwump:.42,fart:.8,fire:3,dinoRoar:1.8,dinoBellow:1.6,dinoRasp:.9});loopKinds.add('fire');
+  Object.assign(durations,{fartSqueaker:.55,fartHonker:1.25,fartFinale:4});loopKinds.add('fartFinale');
   const dinosaurSounds={tRex:'dinoRoar',brontosaurus:'dinoBellow',stegosaurus:'dinoBellow',raptor:'dinoRasp'};
   function spatial(listener,position,locationId='outdoor',range=60){
     if(!listener||!position||(listener.locationId||'outdoor')!==locationId)return {gain:0,pan:0};
@@ -75,9 +76,12 @@
     if(!listener)return [];
     return fires.filter(f=>f.endsAt>wall&&(f.startedAt??0)<=time).map(f=>({...f,id:'fire:'+f.id,kind:'fire',range:40,rate:1,volume:.065,gain:spatial(listener,f.position,f.locationId||'outdoor',40).gain})).filter(f=>f.gain>.005).sort((a,b)=>b.gain-a.gain).slice(0,4);
   }
-  function fartSources({listener,actors=[],patches=[]},wall){
+  function fartSources({listener,actors=[],patches=[],areaHazards=[]},wall){
     if(!listener)return [];
-    return [...actors.filter(a=>Date.parse(a.fartUntilUtc)>wall).map(a=>({id:`fart:${a.id}:${a.fartUntilUtc}`,position:a.position,locationId:a.locationId||'outdoor'})),...patches.filter(p=>p.kind==='stink'&&Date.parse(p.changesAtUtc)<=wall&&Date.parse(p.endsAtUtc)>wall).map(p=>({id:'fart:'+p.id,position:p.position,locationId:'outdoor'}))].map(f=>({...f,gain:spatial(listener,f.position,f.locationId,35).gain})).filter(f=>f.gain>.005).sort((a,b)=>b.gain-a.gain);
+    return [...actors.filter(a=>Date.parse(a.fartUntilUtc)>wall).map(a=>({id:`fart:${a.id}:${a.fartUntilUtc}`,position:a.position,locationId:a.locationId||'outdoor'})),...patches.filter(p=>p.kind==='stink'&&Date.parse(p.changesAtUtc)<=wall&&Date.parse(p.endsAtUtc)>wall).map(p=>({id:'fart:'+p.id,position:p.position,locationId:'outdoor'})),...areaHazards.filter(p=>p.effect==='musicalFruit'&&Date.parse(p.startedAtUtc)<=wall&&Date.parse(p.endsAtUtc)>wall).map(p=>({id:'fart:'+p.id,position:p.position,locationId:p.locationId,kind:[...p.id].reduce((n,c)=>n+c.charCodeAt(0),0)%2?'fartSqueaker':'fartHonker'}))].map(f=>({...f,gain:spatial(listener,f.position,f.locationId,35).gain})).filter(f=>f.gain>.005).sort((a,b)=>b.gain-a.gain);
+  }
+  function fruitFinaleSources({listener,areaHazards=[]},wall){
+    return areaHazards.filter(p=>p.effect==='musicalFruitFinale'&&Date.parse(p.startedAtUtc)<=wall&&Date.parse(p.endsAtUtc)>wall&&spatial(listener,p.position,p.locationId,55).gain>.005).map(p=>({id:'finale:'+p.id,kind:'fartFinale',position:p.position,locationId:p.locationId,range:55,rate:1,volume:.85}));
   }
   function samples(kind,rate=22050){
     const duration=durations[kind]||.3,data=new Float32Array(Math.ceil(duration*rate)),tau=Math.PI*2;let random=9137,phase=0,low=0;
@@ -91,6 +95,7 @@
       else if(kind==='whoosh')v=(low*1.7+noise*.2+tone(65,t)*.12)*Math.sin(Math.PI*p)**.65;
       else if(kind==='thwump'){phase+=tau*(65+210*Math.exp(-t*16))/rate;v=(Math.sin(phase)*.65+low*.6+noise*.12)*Math.exp(-t*10);}
       else if(kind==='fart'){phase+=tau*(65+40*(1-p)+10*tone(18,t))/rate;v=(Math.sin(phase)+.35*Math.sin(phase*2)+noise*.18)*(.55+.45*tone(27,t))*.55*Math.sin(Math.PI*p)**.5;}
+      else if(kind.startsWith('fart')){const squeak=kind==='fartSqueaker',finale=kind==='fartFinale',f=squeak?240:finale?58:82;phase+=tau*(f*(1+.3*tone(finale?1:3,t))+(squeak?140:35)*(1-p))/rate;v=(Math.sin(phase)+.4*Math.sin(phase*2)+.2*Math.sin(phase*3)+noise*.2)*(.7+.3*tone(squeak?40:23,t))*.48*(finale?Math.min(1,t/.02,(duration-t)/.02):Math.sin(Math.PI*p)**.4);}
       else if(kind.startsWith('dino')){const rasp=kind==='dinoRasp',bellow=kind==='dinoBellow',f=rasp?310:bellow?55:78;phase+=tau*(f*(1+.55*Math.sin(Math.PI*p)+.06*tone(rasp?31:18,t)))/rate;v=(Math.sin(phase)*.4+Math.sin(phase*2)*.22+Math.sin(phase*3)*.12+low*(bellow?.3:1.3)+noise*(rasp?.13:.03))*(.7+.3*tone(rasp?24:11,t))*Math.sin(Math.PI*p)**.55;}
       else if(kind==='fire'){const edge=Math.min(1,t/.025,(duration-t)/.025),crackle=Math.max(0,noise-.965)*16;v=(low*.65+noise*.025+crackle)*edge;}
       else if(kind==='honk')v=(tone(220,t)+tone(277,t)*.7+tone(440,t)*.25)*.4;
@@ -154,10 +159,10 @@
       const scene=getScene?.();if(!available()||!scene?.listener){clear();return;}
       const location=scene.listener.locationId||'outdoor';if(sceneLocation!==null&&sceneLocation!==location)clear();sceneLocation=location;
       for(let i=queue.length-1;i>=0;i--)if(queue[i].due<=now()){const cue=queue.splice(i,1)[0];if(now()-cue.due<600)start(cue);}
-      const farts=fartSources(scene,wallNow());let fartCount=0;for(const fart of farts)if(!activeFarts.has(fart.id)&&fartCount++<3)play('fart',fart.position,fart.locationId,{id:fart.id,range:35,volume:.45});activeFarts=new Set(farts.map(f=>f.id));
-      const wanted=[...vehicleSources(scene),...fireSources(scene,now(),wallNow())],ids=new Set(wanted.map(v=>v.id));for(const [id,voice]of loops)if(!ids.has(id)){stopVoice(voice);loops.delete(id);}for(const id of motion.keys())if(!ids.has(id))motion.delete(id);
+      const farts=fartSources(scene,wallNow());let fartCount=0;for(const fart of farts)if(!activeFarts.has(fart.id)&&fartCount++<3)play(fart.kind||'fart',fart.position,fart.locationId,{id:fart.id,range:35,volume:.45});activeFarts=new Set(farts.map(f=>f.id));
+      const wanted=[...fruitFinaleSources(scene,wallNow()),...vehicleSources(scene),...fireSources(scene,now(),wallNow())],ids=new Set(wanted.map(v=>v.id));for(const [id,voice]of loops)if(!ids.has(id)){stopVoice(voice);loops.delete(id);}for(const id of motion.keys())if(!ids.has(id))motion.delete(id);
       for(const cue of wanted){
-        if(cue.kind!=='fire'){const movement=motorMotion(motion.get(cue.id),cue,now());motion.set(cue.id,movement);Object.assign(cue,motorMix(cue.kind,movement.speed));}
+        if(cue.kind!=='fire'&&cue.kind!=='fartFinale'){const movement=motorMotion(motion.get(cue.id),cue,now());motion.set(cue.id,movement);Object.assign(cue,motorMix(cue.kind,movement.speed));}
         let voice=loops.get(cue.id);if(voice&&voice.kind!==cue.kind){stopVoice(voice);loops.delete(cue.id);voice=null;}if(!voice){voice=start(cue,true);if(voice)loops.set(cue.id,voice);}
         if(voice){const m=mix(cue);voice.gain.gain.setTargetAtTime(m.gain*cue.volume,context.currentTime,.25);voice.pan.pan.setTargetAtTime(m.pan,context.currentTime,.1);voice.source.playbackRate.setTargetAtTime(cue.rate,context.currentTime,cue.rate>voice.source.playbackRate.value ? .18 : .4);}
       }
@@ -173,5 +178,5 @@
     }
     return {unlock,play,local,speech,combat,tick,clear,bindLifecycle,status:()=>({volume,unlocked,voices:voices.size,loops:loops.size,queued:queue.length})};
   }
-  return {create,spatial,animalSound,combatCues,vehicleSources,motorMix,motorMotion,fireSources,fartSources,samples,files,durations};
+  return {create,spatial,animalSound,combatCues,vehicleSources,motorMix,motorMotion,fireSources,fartSources,fruitFinaleSources,samples,files,durations};
 });

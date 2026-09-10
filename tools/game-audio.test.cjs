@@ -1,6 +1,18 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const audio=require('../src/AlternateEarth.Client2D/game-audio.js');
 const me={id:'me',locationId:'outdoor',position:{x:0,y:0},travelMode:'walk'};
+test('Musical Fruit plays each small cloud once and loops the louder finale until expiry',async()=>{
+ const h=harness();await h.engine.unlock();
+ const cloud={id:'bean-a',effect:'musicalFruit',position:{x:1,y:0},locationId:'outdoor',startedAtUtc:new Date(0).toISOString(),endsAtUtc:new Date(10000).toISOString()};
+ h.scene.areaHazards=[cloud];h.engine.tick();h.engine.tick();assert.equal(h.started.length,1);assert.equal(h.engine.status().loops,0);
+ assert.ok(['fartSqueaker','fartHonker'].includes(audio.fartSources(h.scene,0)[0].kind));
+ h.scene.areaHazards=[{...cloud,id:'finale',effect:'musicalFruitFinale',endsAtUtc:new Date(20000).toISOString()}];h.engine.tick();h.engine.tick();
+ assert.equal(h.engine.status().loops,1);assert.equal(h.started.length,2);assert.equal(h.started[1].loop,true);
+ const cue=audio.fruitFinaleSources(h.scene,0)[0];assert.ok(cue.volume>.45);assert.equal(h.started[1].buffer.duration,4);
+ h.time(19999);h.engine.tick();assert.equal(h.engine.status().loops,1);h.time(20000);h.engine.tick();assert.equal(h.engine.status().loops,0);
+ h.time(1);h.engine.tick();h.scene.listener.locationId='home';h.engine.tick();assert.equal(h.engine.status().loops,0);
+ for(const kind of ['fartSqueaker','fartHonker','fartFinale']){const data=audio.samples(kind);assert.ok(data.some(v=>Math.abs(v)>.1));assert.ok(data.every(Number.isFinite));}
+});
 test('sounds attenuate with distance, pan left/right, and never cross interiors or regions',()=>{
  assert.equal(audio.spatial(me,{x:0,y:0}).gain,1);
  assert.ok(audio.spatial(me,{x:10,y:0}).gain>audio.spatial(me,{x:30,y:0}).gain);

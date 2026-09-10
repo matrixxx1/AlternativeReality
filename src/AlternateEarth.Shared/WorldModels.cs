@@ -125,7 +125,8 @@ public sealed record PlayerState(
 
 public sealed record IllnessState(string Name, DateTimeOffset EndsAtUtc);
 public sealed record FoodBuff(string Stat, int Amount, DateTimeOffset EndsAtUtc);
-public sealed record SurvivalState(double Hunger = 0, IReadOnlyList<IllnessState>? Illnesses = null, IReadOnlyList<FoodBuff>? Buffs = null);
+public sealed record MusicalFruitState(DateTimeOffset EndsAtUtc, DateTimeOffset NextEmissionAtUtc, bool FinaleEmitted = false);
+public sealed record SurvivalState(double Hunger = 0, IReadOnlyList<IllnessState>? Illnesses = null, IReadOnlyList<FoodBuff>? Buffs = null, MusicalFruitState? MusicalFruit = null);
 public sealed record Nutrition(double Hunger, double Health, double Stamina, double Water = 0, bool Raw = false, IReadOnlyDictionary<string, int>? Bonuses = null,
     double? ParasiteChance = null, double ParasiteCureChance = 0);
 

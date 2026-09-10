@@ -1734,6 +1734,7 @@ public sealed partial class RealityWorld
         var changedActors = new Dictionary<string, ActorState>(); var changedPlayers = new List<PlayerState>(); var combat = new List<CombatEvent>(); var removedWorldObjects = new List<string>();
         var now = _probulatorClock.GetUtcNow();
         await AdvanceProbulatorAbductionsAsync(now, changedActors, changedPlayers, combat, cancellationToken);
+        await AdvanceMusicalFruitAsync(now, changedPlayers, cancellationToken);
         await AdvanceAreaHazardsAsync(now, changedActors, changedPlayers, combat, cancellationToken);
         foreach (var hit in _probulatorHits.Where(hit => hit.Value <= now).ToArray()) _probulatorHits.TryRemove(hit.Key, out _);
         foreach (var rubble in _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building && entity.Properties.GetValueOrDefault("state") == "rubble" && DateTimeOffset.TryParse(entity.Properties.GetValueOrDefault("destroyedUntilUtc"), out var until) && until <= now).ToArray())

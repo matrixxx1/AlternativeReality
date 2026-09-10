@@ -12,3 +12,7 @@ data/world-cache/
 TestResults/
 *.user
 *.suo
+artifacts/
+.codex-remote-attachments/
+tools/__pycache__/
+data/

@@ -27,7 +27,7 @@ public sealed partial class RealityWorld
         var illnesses=(state.Illnesses??[]).Where(i=>i.EndsAtUtc>now).ToArray();
         var buffs=(state.Buffs??[]).Where(b=>b.EndsAtUtc>now).ToArray();
         seconds=Math.Clamp(seconds,0,2);
-        if(player.GodMode)return player with{Survival=new(0,[],buffs)};
+        if(player.GodMode)return player with{Survival=state with{Hunger=0,Illnesses=[],Buffs=buffs}};
         var sick=illnesses.Length>0;
         var hunger=Math.Clamp(state.Hunger+seconds*(sick?.2:.05),0,100);
         var health=player.HealthHearts;var stamina=player.Stamina;
@@ -38,7 +38,7 @@ public sealed partial class RealityWorld
             stamina=Math.Max(0,stamina-starvingSeconds);
         }
         if(sick)health-=seconds*(player.Water<=0?.08:.0125);
-        return player with{Survival=new(hunger,illnesses,buffs),Stamina=stamina,HealthHearts=Math.Max(0,health)};
+        return player with{Survival=state with{Hunger=hunger,Illnesses=illnesses,Buffs=buffs},Stamina=stamina,HealthHearts=Math.Max(0,health)};
     }
 
     internal static PlayerState EatNutrition(PlayerState player, Nutrition nutrition, DateTimeOffset now, double infectionRoll, double durationRoll, double cureRoll = 1)
@@ -59,7 +59,7 @@ public sealed partial class RealityWorld
             var amount=Math.Max(bonus.Value,buffs.Where(b=>b.Stat==bonus.Key).Select(b=>b.Amount).DefaultIfEmpty().Max());
             buffs.RemoveAll(b=>b.Stat==bonus.Key);buffs.Add(new(bonus.Key,amount,now.AddMinutes(5)));
         }
-        return player with{Survival=new(Math.Max(0,state.Hunger-nutrition.Hunger),illnesses,buffs),
+        return player with{Survival=state with{Hunger=Math.Max(0,state.Hunger-nutrition.Hunger),Illnesses=illnesses,Buffs=buffs},
             HealthHearts=Math.Min(player.MaximumHealthHearts,player.HealthHearts+nutrition.Health),
             Stamina=Math.Min(player.MaximumStamina,player.Stamina+nutrition.Stamina),Water=Math.Min(player.MaximumWater,player.Water+nutrition.Water),Version=player.Version+1};
     }
@@ -74,6 +74,8 @@ public sealed partial class RealityWorld
             ? player with{Survival=(player.Survival??new()) with{Illnesses=[]},Version=player.Version+1}
             : EatNutrition(player,NutritionCatalog.Foods[itemType],now,ProgressionRoll(),ProgressionRoll(),ProgressionRoll());
         if(itemType.Equals("water",StringComparison.OrdinalIgnoreCase))updated=updated with{Water=player.MaximumWater,WaterProtectedUntilUtc=now.AddMinutes(5)};
+        if(itemType.Equals("beans",StringComparison.OrdinalIgnoreCase)||itemType.Equals("porkAndBeans",StringComparison.OrdinalIgnoreCase))
+            updated=updated with{Survival=(updated.Survival??new()) with{MusicalFruit=new(now.AddMinutes(5),now.AddSeconds(MusicalFruitInterval()))}};
         await SaveInventoryAsync(player.Id,token);await SavePlayerAsync(updated,token);return updated;
     }
 
