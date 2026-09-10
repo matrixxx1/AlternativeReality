@@ -14,7 +14,7 @@
   function status(player,now=Date.now()){
     const s=player.survival||{},hunger=Math.max(0,Math.min(100,s.hunger||0));
     const illnesses=(s.illnesses||[]).filter(i=>Date.parse(i.endsAtUtc)>now).map(i=>`${i.name} · ${Math.ceil((Date.parse(i.endsAtUtc)-now)/60000)} min`);
-    const buffs=(s.buffs||[]).filter(b=>Date.parse(b.endsAtUtc)>now).map(b=>`+${b.amount} ${b.stat} (${Math.ceil((Date.parse(b.endsAtUtc)-now)/60000)} min)`);
+    const buffs=(s.buffs||[]).filter(b=>Date.parse(b.endsAtUtc)>now).map(b=>b.stat==="If at first you don't succeed... Fail fail again"?`${b.stat}: +${b.amount}% all XP (${Math.ceil((Date.parse(b.endsAtUtc)-now)/60000)} min)`:`+${b.amount} ${b.stat} (${Math.ceil((Date.parse(b.endsAtUtc)-now)/60000)} min)`);
     if(s.gardeningBookRead)buffs.push("Gardening: permanent +5% build success");
     const fruitEnd=Date.parse(s.musicalFruit?.endsAtUtc),fruitLeft=Math.ceil((fruitEnd-now)/1000);
     if(fruitLeft>0)buffs.push(`Musical Fruit · ${Math.floor(fruitLeft/60)}:${String(fruitLeft%60).padStart(2,'0')}`);

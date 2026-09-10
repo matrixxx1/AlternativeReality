@@ -74,7 +74,8 @@ public sealed partial class RealityWorld
             var current = _progression[playerId];
             if (once is not null && current.Rewards.Contains(once, StringComparer.Ordinal)) return 0;
             var awarded = Math.Round(Math.Max(0, baseExperience) * ProgressionRules.Experience(current.Stats) *
-                (randomize ? .8 + ProgressionRoll() * .4 : 1), 2);
+                (randomize ? .8 + ProgressionRoll() * .4 : 1) *
+                (FailedCraftExperienceBoostActive(_players.GetValueOrDefault(playerId), _probulatorClock.GetUtcNow()) ? 1.5 : 1), 2);
             if (awarded <= 0) return 0;
             var next = current with { Experience = current.Experience + awarded,
                 Rewards = once is null ? current.Rewards : current.Rewards.Append(once).ToArray() };

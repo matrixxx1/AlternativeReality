@@ -5,10 +5,25 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
+    internal const string FailedCraftExperienceEffect = "If at first you don't succeed... Fail fail again";
     private readonly ConcurrentDictionary<(string Player, string Recipe), byte> _learnedRecipes = new();
     private readonly SemaphoreSlim _treasureInteractionLock = new(1, 1);
     private readonly SemaphoreSlim _craftingProgressLock = new(1, 1);
     private readonly ConcurrentDictionary<string, long> _craftingExperience = new();
+
+    internal static bool FailedCraftExperienceBoostActive(PlayerState? player, DateTimeOffset now) =>
+        player?.Survival?.Buffs?.Any(buff => buff.Stat == FailedCraftExperienceEffect && buff.EndsAtUtc > now) == true;
+
+    private long BoostCraftingExperience(string playerId, long baseExperience, bool activateBoost = false) =>
+        (long)Math.Ceiling(baseExperience * (activateBoost || FailedCraftExperienceBoostActive(_players.GetValueOrDefault(playerId), _probulatorClock.GetUtcNow()) ? 1.5 : 1));
+
+    private static PlayerState ApplyFailedCraftExperienceBoost(PlayerState player, DateTimeOffset now)
+    {
+        var survival = player.Survival ?? new();
+        var buffs = (survival.Buffs ?? []).Where(buff => buff.EndsAtUtc > now && buff.Stat != FailedCraftExperienceEffect).ToList();
+        buffs.Add(new(FailedCraftExperienceEffect, 50, now.AddMinutes(5)));
+        return player with { Survival = survival with { Buffs = buffs } };
+    }
 
     public CraftingSkillState GetCraftingSkill(string playerId)
     {
@@ -35,7 +50,7 @@ public sealed partial class RealityWorld
             var inventory = GetInventoryState(playerId);
             var next = inventory with { Items = inventory.Items.Select(item => item.ItemType.Equals("craftingSkillBook", StringComparison.OrdinalIgnoreCase) ? item with { Quantity = item.Quantity - 1 } : item).Where(item => item.Quantity > 0).ToArray() };
             // Adding this level's entire cost advances exactly one level and retains earned XP.
-            var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + GetCraftingSkill(playerId).RequiredForNextLevel);
+            var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + BoostCraftingExperience(playerId, GetCraftingSkill(playerId).RequiredForNextLevel));
             await _store.SaveInventoryAndCraftingProgressAsync(next, Configuration.Id, playerId, experience, cancellationToken);
             RemoveInventory(playerId, "craftingSkillBook", 1);
             _craftingExperience[playerId] = experience;
@@ -141,7 +156,10 @@ public sealed partial class RealityWorld
                     if(succeeded>0&&FarmCatalog.ReturnedContainer(recipe.Id) is { } empty)next[empty]=checked(next.GetValueOrDefault(empty)+succeeded);
                     var saved = new InventoryState(HomeItemStorageOwnerId(access.AccountId), next.Where(item => item.Value > 0).Select(item => InventoryStack(item.Key, item.Value, HomeItemStorageOwnerId(access.AccountId))).ToArray());
                     var attemptedBatches = succeeded + (failed ? 1 : 0);
-                    var craftingExperienceGained = checked(attemptedBatches * CraftingCatalog.ExperienceForCraft(recipe));
+                    var experiencePerBatch = CraftingCatalog.ExperienceForCraft(recipe);
+                    var successfulExperience = BoostCraftingExperience(playerId, succeeded * experiencePerBatch);
+                    var failedExperience = failed ? BoostCraftingExperience(playerId, 2 * experiencePerBatch, activateBoost: true) : 0;
+                    var craftingExperienceGained = checked(successfulExperience + failedExperience);
                     var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + craftingExperienceGained);
                     var furniture = failed ? _homeFurniture[access.AccountId].Where(item => item.Id != request.FurnitureId).ToList() : null;
                     var savedBackpack=backpack with {Items=backpack.Items.Where(i=>nextBackpack.GetValueOrDefault(i.ItemType)>0).Select(i=>i with {Quantity=nextBackpack[i.ItemType]}).ToArray()};
@@ -157,13 +175,14 @@ public sealed partial class RealityWorld
                     {
                         _homeFurniture[access.AccountId] = furniture!;
                         RefreshHome(access.AccountId, _baseEntities[_baseBuildings[access.AccountId]]);
-                        var player = _players[playerId];
-                        var health = Math.Max(0, player.HealthHearts - 1);
-                        damaged = player with { HealthHearts = health, Version = player.Version + 1 };
+                        var now = _probulatorClock.GetUtcNow();
+                        damaged = await SaveFixturePlayerAsync(playerId, current => ApplyFailedCraftExperienceBoost(current with { HealthHearts = Math.Max(0, current.HealthHearts - 1) }, now), null, cancellationToken);
+                        var health = damaged.HealthHearts;
                         if (health <= 0) damaged = await DieAndResetPlayerAsync(damaged, cancellationToken);
-                        await SavePlayerAsync(damaged, cancellationToken);
+                        if (health <= 0) await SavePlayerAsync(damaged, cancellationToken);
                         explosion = new CombatEvent(playerId, playerId, "craftingExplosion", access.Table.Position, access.Table.Position, true, 1, health <= 0,
-                            "Crafting failed! The station exploded for 1 damage.", damaged.HealthHearts);
+                            $"Crafting failed! The station exploded for 1 damage. {FailedCraftExperienceEffect}: +50% all XP for 5 minutes.", damaged.HealthHearts,
+                            StatusEffect: FailedCraftExperienceEffect, StatusEffectUntilUtc: now.AddMinutes(5));
                     }
                     if (!failed)
                     {
@@ -173,7 +192,7 @@ public sealed partial class RealityWorld
                     await AwardExperienceAsync(playerId, succeeded * (4 + recipe.RequiredLevel / 10d) + (failed ? 1 : 0),
                         failed ? "Crafting practice and a failed experiment" : "Crafted " + recipe.Name, cancellationToken: cancellationToken);
                     var message = failed
-                        ? $"Craft failed! The station exploded and dealt 1 damage. Lost the failed batch's materials; {succeeded} earlier batch(es) succeeded. Unattempted materials remain in your backpack and Home storage. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}."
+                        ? $"Craft failed! The station exploded and dealt 1 damage. Lost the failed batch's materials; {succeeded} earlier batch(es) succeeded. Unattempted materials remain in your backpack and Home storage. Failed batches grant double crafting XP. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}. {FailedCraftExperienceEffect}: +50% all XP for 5 minutes."
                         : $"Crafted {output} × {recipe.Name} into Home storage. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}.";
                     if(bonusOutput>0) message += $" Upgrades added {bonusOutput} free bonus item(s).";
                     if(savedMaterials>0) message += $" Garage upgrades saved {savedMaterials} ingredient item(s).";

@@ -37,7 +37,7 @@ public sealed partial class RealityWorld
     {
         var prior = GetRecipeStudy(playerId, recipe.Id);
         var study = prior is null ? CreateRecipeStudy(recipe) with { Count = quantity } : prior with { Count = checked(prior.Count + quantity) };
-        var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + quantity * CraftingCatalog.ExperiencePerNewRecipe);
+        var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + BoostCraftingExperience(playerId, quantity * CraftingCatalog.ExperiencePerNewRecipe));
         await _store.SaveRecipeStudyAsync(Configuration.Id, playerId, study, experience, consumedInventory, token);
         _recipeStudies[(playerId, recipe.Id)] = study;
         _learnedRecipes[(playerId, recipe.Id)] = 0;

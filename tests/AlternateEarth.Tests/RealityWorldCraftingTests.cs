@@ -205,12 +205,19 @@ public sealed partial class RealityWorldTests
         world.ProgressionRoll = () => 1;
 
         var result = await world.CraftItemAsync("crafter", new("craft-table", "napalmBottle"));
-        var expectedGain = CraftingCatalog.ExperienceForCraft(CraftingCatalog.Recipes.Single(item => item.Id == "napalmBottle"));
+        var expectedGain = CraftingCatalog.ExperienceForCraft(CraftingCatalog.Recipes.Single(item => item.Id == "napalmBottle")) * 3;
 
         Assert.True(result.Crafting.TableDestroyed);
         Assert.Equal(before + expectedGain, world.GetCraftingSkill("crafter").Experience);
         Assert.Equal(before + expectedGain, await store.LoadCraftingExperienceAsync(world.Configuration.Id, "crafter"));
         Assert.Contains($"+{expectedGain} crafting XP", result.Message);
+        Assert.Contains("Failed batches grant double crafting XP", result.Message);
+        var boost = Assert.Single(result.Player!.Survival!.Buffs!, buff => buff.Stat == RealityWorld.FailedCraftExperienceEffect);
+        Assert.InRange((boost.EndsAtUtc - DateTimeOffset.UtcNow).TotalSeconds, 295, 301);
+        Assert.True(RealityWorld.FailedCraftExperienceBoostActive(result.Player, DateTimeOffset.UtcNow));
+        Assert.False(RealityWorld.FailedCraftExperienceBoostActive(result.Player, boost.EndsAtUtc));
+        Assert.Equal(15, await world.AwardExperienceAsync("crafter", 10, "boost test", randomize: false));
+        Assert.Contains((await store.LoadCharacterAsync(world.Configuration.Id, "crafter"))!.Survival!.Buffs!, buff => buff.Stat == RealityWorld.FailedCraftExperienceEffect);
     }
 
     [Fact]
