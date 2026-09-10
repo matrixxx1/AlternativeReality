@@ -68,6 +68,26 @@ public static class GardenGenerator
         }
         return result;
     }
+    public static IReadOnlyList<CanonicalEntity> GenerateLivestock(IReadOnlyList<CanonicalEntity> features,WorldBounds bounds)
+    {
+        var result=new List<CanonicalEntity>();
+        foreach(var farm in features.Where(e=>GardenRules.IsGarden(e)&&e.Properties.GetValueOrDefault("farm")=="true").Select(e=>e.Properties["buildingId"]).Distinct().Order(StringComparer.Ordinal))
+        {
+            var house=features.FirstOrDefault(e=>e.Id==farm);if(house is null)continue;
+            for(var n=0;n<5;n++)
+            {
+                var id=$"farm-animal:{farm}:{n}";if(features.Any(e=>e.Id==id))continue;
+                var cow=n<2;var placed=false;
+                for(var radius=12;radius<=42&&!placed;radius+=5)for(var angle=0;angle<24&&!placed;angle++)
+                {
+                    var a=(angle+n*3)*Math.PI/12;var spot=house.Position with {X=house.Position.X+Math.Cos(a)*radius,Y=house.Position.Y+Math.Sin(a)*radius};
+                    if(!Clear(spot,bounds,features.Concat(result),cow?3:1.6,2))continue;
+                    result.Add(FarmRules.Create(id,spot,farm,cow));placed=true;
+                }
+            }
+        }
+        return result;
+    }
     private static double DistanceToHouse(WorldPosition p,CanonicalEntity h){var minX=h.Geometry.Min(v=>v.X);var maxX=h.Geometry.Max(v=>v.X);var minY=h.Geometry.Min(v=>v.Y);var maxY=h.Geometry.Max(v=>v.Y);return Math.Sqrt(Math.Pow(Math.Max(0,Math.Max(minX-p.X,p.X-maxX)),2)+Math.Pow(Math.Max(0,Math.Max(minY-p.Y,p.Y-maxY)),2));}
     public static IReadOnlyList<CanonicalEntity> GenerateHoses(IReadOnlyList<CanonicalEntity> features,WorldBounds bounds,int seed)
     {

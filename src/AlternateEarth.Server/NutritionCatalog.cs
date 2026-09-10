@@ -41,6 +41,7 @@ internal static class NutritionCatalog
             ["salt"] = new(0,0,.1), ["pepper"] = new(0,.05,.15), ["water"] = new(0,2,0,10,ParasiteChance:.05),
             ["bottledWater"] = new(0,2,0,10,ParasiteChance:0,ParasiteCureChance:.1), ["jarOfWater"] = new(0,10,0,50,ParasiteChance:0,ParasiteCureChance:.5),
             ["dirtyWater"] = new(0,2,0,10,ParasiteChance:.9), ["purifiedWater"] = new(0,2,0,10,ParasiteChance:0,ParasiteCureChance:.1),
+            ["bottleOfMilk"] = new(12,.6,1.2,3), ["jarOfMilk"] = new(60,3,6,15),
             ["cheese"] = new(18,.8,1.6), ["milk"] = new(12,.6,1.2,3), ["egg"] = new(10,.25,.9,Raw:true)
         };
         for(var i=0;i<Produce.Length;i++)
@@ -67,7 +68,7 @@ internal static class NutritionCatalog
         (n.ParasiteCureChance>0?$" {n.ParasiteCureChance:P0} chance to remove parasites.":"") +
         (n.Bonuses is null?"":" " + string.Join(", ",n.Bonuses.Select(b=>$"+{b.Value} {b.Key} for 5 minutes")));
     public static IEnumerable<ItemConfiguration> Items => Foods.Where(f=>f.Key is not ("food" or "fish" or "water" or "flour" or "cookingOil" or "sugar" or "salt" or "pepper")).Select(f=>new ItemConfiguration(f.Key,
-        f.Key=="rawCow"?"Raw beef":f.Key=="rawPig"?"Raw pork":System.Text.RegularExpressions.Regex.Replace(f.Key,"([a-z])([A-Z])","$1 $2"),Description(f.Value),0,0,50,800,ForSale:f.Key is not ("dirtyWater" or "purifiedWater" or "bottledWater" or "jarOfWater"),WeightPounds:f.Key=="jarOfWater"?6:f.Key=="bottledWater"?1.3:f.Key is "dirtyWater" or "purifiedWater"?1.1:.4,Nutrition:f.Value)).Concat([
+        f.Key=="rawCow"?"Raw beef":f.Key=="rawPig"?"Raw pork":System.Text.RegularExpressions.Regex.Replace(f.Key,"([a-z])([A-Z])","$1 $2"),Description(f.Value),0,0,50,800,ForSale:f.Key is not ("dirtyWater" or "purifiedWater" or "bottledWater" or "jarOfWater" or "bottleOfMilk" or "jarOfMilk"),WeightPounds:f.Key is "jarOfWater" or "jarOfMilk"?6:f.Key is "bottledWater" or "bottleOfMilk"?1.3:f.Key is "dirtyWater" or "purifiedWater"?1.1:.4,Nutrition:f.Value)).Concat([
         new("antibiotics","Antibiotics","Cures all game diseases and illnesses, including parasites",0,0,1200,2400,WeightPounds:.05),
         new("medicinalCulture","Medicinal culture","Fictional antibiotic crafting ingredient",0,0,250,500,WeightPounds:.1),
         new("medicalBinder","Medical binder","Fictional antibiotic crafting ingredient",0,0,150,350,WeightPounds:.1),

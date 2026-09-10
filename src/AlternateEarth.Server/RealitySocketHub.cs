@@ -389,6 +389,12 @@ public sealed class RealitySocketHub
                         await BroadcastAsync(new { type = "actorRemoved", actorId = root.Deserialize<CaptureQuestPetRequest>(SharedJson.Options)!.ActorId }, null, cancellationToken);
                         await connection.SendAsync(new { type = "questUpdated", privateState = capturedPet.PrivateState, quest = capturedPet.Quest, message = capturedPet.Message }, cancellationToken);
                         break;
+                    case "useFarmAnimal":
+                        var farmAction=await _world.UseFarmAnimalAsync(characterId,root.GetProperty("entityId").GetString()!,root.GetProperty("action").GetString()!,cancellationToken);
+                        if(farmAction.Result.Entity is not null)await BroadcastAsync(new {type="worldObjectUpdated",entity=farmAction.Result.Entity},null,cancellationToken);
+                        if(farmAction.Remark is not null)await BroadcastAsync(new {type="chatSaid",chat=farmAction.Remark},null,cancellationToken);
+                        await connection.SendAsync(new {type="gardenResult",privateState=farmAction.Result.PrivateState,message=farmAction.Result.Message},cancellationToken);
+                        break;
                     case "drinkHose":
                         var hoseDrink=await _world.DrinkHoseAsync(characterId,root.GetProperty("entityId").GetString()!,cancellationToken);
                         await BroadcastAsync(new {type="playerUpdated",player=hoseDrink.Player},null,cancellationToken);

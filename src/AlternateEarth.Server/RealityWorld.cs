@@ -1227,7 +1227,7 @@ public sealed partial class RealityWorld
         {
             if (_removedBaseEntityIds.ContainsKey(entity.Id)) continue;
             if (_realityEntities.TryRemove(entity.Id, out var persistedOverride)) _baseEntities[entity.Id] = persistedOverride;
-            else _baseEntities[entity.Id] = entity;
+            else _baseEntities[entity.Id] = FarmRules.IsAnimal(entity) && _baseEntities.TryGetValue(entity.Id,out var liveAnimal) && liveAnimal.Version>entity.Version ? liveAnimal : entity;
             var loaded = _baseEntities[entity.Id];
             if (loaded.Kind is EntityKind.Building or EntityKind.PointOfInterest && FoodBusinesses.OffersDelivery(loaded.Properties))
                 _baseEntities[entity.Id] = loaded with { Properties = new Dictionary<string, string>(loaded.Properties) { ["merchantCategory"] = "food" } };

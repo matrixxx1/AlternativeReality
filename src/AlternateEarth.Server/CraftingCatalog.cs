@@ -18,7 +18,7 @@ internal static class CraftingCatalog
         new("water", "Water", "water", 1, [new("cloth",1),new("dirtyWater",3)], "stove"),
         new("purifiedWater", "Purified water", "purifiedWater", 1, [new("paper",1),new("cloth",1),new("water",3)], "stove"),
         new("gunpowder", "Gunpowder", "gunpowder", 1,
-            [new("powderBase", 1), new("sparkBinder", 1)]),
+            [new("powderBase", 1), new("sparkBinder", 1), new("potassiumNitrate", 1)]),
         new("molotovCocktail", "Molotov cocktail", "molotovCocktail", 1,
             [new("emberGel", 1), new("emptyGlassBottle", 1), new("cloth", 1)]),
         new("bullet", "Bullets", "bullet", 6, [new("metal", 1), new("gunpowder", 1)]),
@@ -46,6 +46,7 @@ internal static class CraftingCatalog
         new("hat", "Hat", "hat", 1, [new("cloth", 2)]),
         new("tShirt", "T-shirt", "tShirt", 1, [new("cloth", 3)]),
         .. NutritionCatalog.Recipes,
+        .. FarmCatalog.Recipes,
         new("food", "Food rations", "food", 2, [new("flour", 2), new("cookingOil", 1), new("water", 1)]),
         new("skateboard", "Skateboard", "skateboard", 1, [new("wood", 6), new("plastic", 4), new("metal", 2), new("rubber", 2)]),
         new("rocketLauncher", "Rocket launcher", "rocketLauncher", 1, [new("metal", 20), new("weaponParts", 12), new("mechanicalParts", 8), new("powerCore", 2)]),
@@ -76,6 +77,7 @@ internal static class CraftingCatalog
             "rocketLauncher" => 50,
             "motorcycle" => 100,
             "ufo" => 5_000,
+            _ when FarmCatalog.Recipes.Any(r=>r.Id==recipe.Id) => 1,
             _ when NutritionCatalog.Recipes.Any(r=>r.Id==recipe.Id) => 1,
             _ => throw new InvalidOperationException($"Assign a crafting level to {recipe.Id}.")
         };

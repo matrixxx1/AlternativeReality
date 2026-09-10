@@ -9,7 +9,7 @@ public sealed partial class RealityWorld
     private DateTimeOffset _nextGardenTick;
     private CanonicalEntity? Garden(string id) => _baseEntities.GetValueOrDefault(id) is { } b && GardenRules.IsGarden(b) ? b : _realityEntities.GetValueOrDefault(id) is { } r && GardenRules.IsGarden(r) ? r : null;
     private void PutGarden(CanonicalEntity entity) { _realityEntities.TryRemove(entity.Id,out _); _baseEntities[entity.Id]=entity; }
-    private void RestoreGardens() { foreach(var entity in _realityEntities.Values.Where(GardenRules.IsGarden).ToArray()) PutGarden(entity); }
+    private void RestoreGardens() { foreach(var entity in _realityEntities.Values.Where(e=>GardenRules.IsGarden(e)||FarmRules.IsAnimal(e)).ToArray()) PutGarden(entity); }
     private PlayerState GardenPlayer(string id)
     {
         EnsureNotProbulatorAbducted(id);

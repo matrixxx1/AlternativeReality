@@ -44,9 +44,9 @@ public sealed partial class RealityWorld
         {
             EnsureNotProbulatorAbducted(id);if(IsGasAsleep(id))throw new InvalidOperationException("You cannot drink while asleep.");
             var player=_players[id];var inventory=GetInventoryState(id);var items=inventory.Items.ToDictionary(i=>i.ItemType);
-            if(!items.TryGetValue(item,out var full)||full.Quantity<1)throw new InvalidOperationException("You do not have that water container.");
+            if(!items.TryGetValue(item,out var full)||full.Quantity<1)throw new InvalidOperationException("You do not have that filled container.");
             if(full.Quantity==1)items.Remove(item);else items[item]=full with {Quantity=full.Quantity-1};
-            var empty=item=="jarOfWater"?"emptyGlassJar":"emptyGlassBottle";items[empty]=items.TryGetValue(empty,out var prior)?prior with {Quantity=prior.Quantity+1}:InventoryStack(empty,1);
+            var empty=item.StartsWith("jarOf",StringComparison.Ordinal)?"emptyGlassJar":"emptyGlassBottle";items[empty]=items.TryGetValue(empty,out var prior)?prior with {Quantity=prior.Quantity+1}:InventoryStack(empty,1);
             var next=inventory with {Items=items.Values.ToArray()};
             return await SaveFixturePlayerAsync(id,current=>EatNutrition(current,NutritionCatalog.Foods[item],_probulatorClock.GetUtcNow(),1,1,ProgressionRoll()),next,token);
         }

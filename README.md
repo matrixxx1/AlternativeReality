@@ -176,3 +176,13 @@ Garden construction starts at 25% at crafting level 5 with default stats, gains 
 Every Home receives a built-in **Kitchen sink** when its furniture loads. Within four meters, the owner can drink directly for purified-water benefits without using supplies, or fill one empty glass bottle/jar from their backpack. A bottle provides the usual purified-water benefits (2 health, 10 water, and a 10% parasite-cure chance); a jar provides five times those benefits (10 health, 50 water, and a 50% cure chance), subject to stat caps. Consuming either returns the corresponding empty container. Filling is deterministic and does not require a crafting level or other ingredients.
 
 Up to 5% of houses in newly generated blocks receive a permanent faucet and garden hose near the front door, clear of the door, driveway, and other objects. Within four meters, Actions offers **Drink from garden hose**. Each drink has a 75% chance of dirty water that always causes parasites and triggers one of thirteen disgusted player remarks. Clean hose water provides purified-water benefits. Hoses cannot be harvested or destroyed.
+
+### Farm livestock
+
+Farms receive two cows and three chickens where clear grass is available. Existing cached farms gain the same deterministic livestock when loaded, without resetting gardens or their harvest timers. Livestock stay beside their farm and have idle animations. Click an animal to collect its visible eggs/fertilizer or milk a cow within four meters.
+
+Each animal checks once per minute while a living outdoor player is within 50 meters: a 30% chance to add one fertilizer (cow) or egg (chicken), capped at five waiting products. Piles and production timers persist and are shared by everyone; no offline accumulation is simulated.
+
+Milking has 80% success, consumes one backpack jar first (otherwise a bottle), and starts a shared five-minute cow cooldown. Failure breaks that container. Of successful attempts, 15% produce fertilizer or urine instead (equally likely), accompanied by “Well... I screwed that up!”. A jar has five times a bottle's contents. Drinking milk restores nutrition and returns the matching empty container.
+
+Farm conversion recipes follow the existing recipe study/crafting system. Process urine into potassium nitrate, unpack fertilizer, or decant milk for cooking; successful batches return their empty containers to Home storage with the output. Urine/fertilizer conversions use the crafting table; milk for cooking uses the stove. These are abstract inventory conversions. Gunpowder now also requires the potassium nitrate game item alongside its fictional powder base and spark binder.

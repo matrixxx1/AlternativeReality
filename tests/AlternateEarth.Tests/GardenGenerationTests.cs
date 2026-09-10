@@ -34,6 +34,12 @@ public sealed class GardenGenerationTests
         var features=Neighborhood(100);var bounds=new WorldBounds(0,0,1000,1000);var hoses=GardenGenerator.GenerateHoses(features,bounds,42);Assert.Equal(5,hoses.Count);
         foreach(var hose in hoses){Assert.True(GardenGenerator.Clear(hose.Position,bounds,features,1,1.2));var door=features.Single(e=>e.Id==hose.Properties["doorId"]);Assert.True(hose.Position.Y<door.Position.Y);Assert.True(hose.Position.Distance2D(door.Position)>2);}
     }
+    [Fact] public void FarmLivestockIsDeterministicClearAndDoesNotDuplicate()
+    {
+        var house=House("farm",1500,1500);var bounds=new WorldBounds(0,0,3000,3000);var features=new[]{house,GardenRules.Create("plot",house.Position with{X=1520},"corn",house.Id,true)};
+        var animals=GardenGenerator.GenerateLivestock(features,bounds);Assert.Equal(2,animals.Count(FarmRules.IsCow));Assert.Equal(3,animals.Count(e=>!FarmRules.IsCow(e)));Assert.All(animals,e=>Assert.True(GardenGenerator.Clear(e.Position,bounds,features, FarmRules.IsCow(e)?3:1.6,2)));
+        Assert.Equal(animals.Select(e=>e.Position),GardenGenerator.GenerateLivestock(features,bounds).Select(e=>e.Position));Assert.Empty(GardenGenerator.GenerateLivestock(features.Concat(animals).ToArray(),bounds));
+    }
     [Fact] public void GardenStatsAndBookImproveChancesWithoutExceedingYieldLimits()
     {
         Assert.Equal(0,GardenRules.BuildChance(4,new(),true));Assert.True(GardenRules.BuildChance(10,new(),false)>GardenRules.BuildChance(5,new(),false));Assert.Equal(.05,GardenRules.BuildChance(5,new(),true)-GardenRules.BuildChance(5,new(),false),6);

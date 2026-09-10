@@ -138,6 +138,7 @@ public sealed partial class RealityWorld
                     }
                     var output = checked(recipe.OutputQuantity * succeeded + bonusOutput);
                     if (output > 0) next[recipe.OutputItemType] = checked(next.GetValueOrDefault(recipe.OutputItemType) + output);
+                    if(succeeded>0&&FarmCatalog.ReturnedContainer(recipe.Id) is { } empty)next[empty]=checked(next.GetValueOrDefault(empty)+succeeded);
                     var saved = new InventoryState(HomeItemStorageOwnerId(access.AccountId), next.Where(item => item.Value > 0).Select(item => InventoryStack(item.Key, item.Value, HomeItemStorageOwnerId(access.AccountId))).ToArray());
                     var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + (succeeded + (failed ? 1 : 0)) * CraftingCatalog.ExperiencePerBatch);
                     var furniture = failed ? _homeFurniture[access.AccountId].Where(item => item.Id != request.FurnitureId).ToList() : null;

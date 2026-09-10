@@ -52,7 +52,7 @@ public sealed class DeterministicWorldGenerator
                 {
                     var cachedJson = await File.ReadAllTextAsync(cachePath, cancellationToken);
                     var cached = JsonSerializer.Deserialize<GeographicDataset>(cachedJson, SharedJson.Options);
-                    if (cached is not null) return cached;
+                    if (cached is not null) return cached with {Features=cached.Features.Concat(GardenGenerator.GenerateLivestock(cached.Features,reality.Area.Bounds)).ToArray()};
                 }
                 catch (JsonException)
                 {
@@ -83,6 +83,7 @@ public sealed class DeterministicWorldGenerator
                 Features = withDriveways.Concat(doors).Concat(propertyFences).Concat(trees).Concat(bushes).Concat(vehicles).Concat(streetLights).Concat(actors).Concat(gardens).Concat(hoses).ToArray(),
                 CachedAtUtc = DateTimeOffset.UtcNow
             };
+            generated=generated with {Features=generated.Features.Concat(GardenGenerator.GenerateLivestock(generated.Features,reality.Area.Bounds)).ToArray()};
             if (cachePath is not null)
             {
                 var temporaryPath = $"{cachePath}.{Guid.NewGuid():N}.tmp";
