@@ -305,7 +305,7 @@
     if (moving && player.speedMetersPerSecond > .01) state.movingUntil.set(player.id, performance.now() + 250);
     if (player.id === state.playerId) {if(old?.locationId!==player.locationId){state.path=[];state.target=null;state.followCommand=null;state.moveInFlight=false;send({type:'requestPrivateState'});}if(player.locationId==='outdoor')state.lastOutdoorPosition=player.position;updateMode(player.travelMode);syncGodControls(player);renderEquipment(player);if(state.privateState?.inventory)renderInventory(state.privateState.inventory); }
   }
-  function syncGodControls(player){if(!player)return;if(state.godTogglePending!==null&&!!player.godMode!==state.godTogglePending){ui.god.disabled=true;ui.serverConfigButton.disabled=false;ui.performancePanel.hidden=true;ui.rebuild.disabled=true;syncGodConfigTab(player);return;}state.godTogglePending=null;ui.god.disabled=false;ui.god.setAttribute('aria-pressed',String(!!player.godMode));ui.god.textContent=player.godMode?'God Mode: On':'God Mode: Off';ui.serverConfigButton.disabled=false;ui.serverConfigButton.title='Server configuration';syncGodConfigTab(player);ui.performancePanel.hidden=!player.godMode;if(!player.godMode)cancelGodPlacement();ui.rebuild.disabled=!player.godMode||state.rebuildPending;if(!ui.actionMenu.hidden)updateActionMenu();}
+  function syncGodControls(player){if(!player)return;if(state.godTogglePending!==null&&!!player.godMode!==state.godTogglePending){ui.god.disabled=true;ui.serverConfigButton.disabled=false;ui.rebuild.disabled=true;syncGodConfigTab(player);return;}state.godTogglePending=null;ui.god.disabled=false;ui.god.setAttribute('aria-pressed',String(!!player.godMode));ui.god.textContent=player.godMode?'God Mode: On':'God Mode: Off';ui.serverConfigButton.disabled=false;ui.serverConfigButton.title='Server configuration';syncGodConfigTab(player);if(!player.godMode)cancelGodPlacement();ui.rebuild.disabled=!player.godMode||state.rebuildPending;if(!ui.actionMenu.hidden)updateActionMenu();}
   function stopTravel(message,automatic=false) {
     clearTimeout(primaryClickTimer);primaryClickTimer=null;
     PlayerCommands.cancel(state);setWorldTask(null);if(!automatic)state.postureSuppressedUntil=performance.now()+2000;
@@ -414,7 +414,7 @@
         try{handle.releasePointerCapture(event.pointerId);}catch{}
       };
       handle.addEventListener('pointerdown',event=>{
-        if(event.button!==0||panel.ownerDocument!==document||panel.classList.contains('panel-collapsed'))return;
+        if(event.button!==0||panel.ownerDocument!==document)return;
         const rect=panel.getBoundingClientRect();
         drag={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,clientX:event.clientX,clientY:event.clientY,offsetX:event.clientX-rect.left,offsetY:event.clientY-rect.top,rect,active:false,wasFloating:panel.classList.contains('floating-panel')};
         handle.setPointerCapture(event.pointerId);
@@ -1632,6 +1632,11 @@
     for(const stop of MapMarkers.nearby(state.transit?.stops||[],origin,4,100))plot(stop.position,'#73d7ff','B',3,'Bus stop',`${stop.name} · ${stop.direction}`);
     for(const bus of state.transit?.buses||[])plot(bus.position,'#f9ce56','B',5,'Bus',`Bus · ${bus.routeName} · ${bus.status}`);
     for(const store of MapMarkers.nearby(state.miniMapStores.filter(s=>s.properties?.merchantCategory!=='casino'),origin,6,110)){const category=title(store.properties?.merchantCategory||'general'),name=store.properties?.name||store.properties?.brand||`${category} store`;plot(store.position,'#f2ce65','◆',4,'Store',`${category} store · ${name}`);}
+    const gardens=state.base.filter(entity=>entity.kind==='resourceNode'&&entity.properties?.subtype==='garden'&&entity.properties?.state!=='rubble');
+    const farmIds=[...new Set(gardens.filter(entity=>entity.properties?.farm==='true').map(entity=>entity.properties?.buildingId).filter(Boolean))];
+    const farms=farmIds.map(id=>state.baseById.get(id)||gardens.find(entity=>entity.properties?.buildingId===id)).filter(Boolean);
+    for(const farm of MapMarkers.nearby(farms,origin,6,90))plot(farm.position,'#f0a85a','F',5,'Farm',`Farm · ${farm.properties?.name||farm.properties?.address||'house and ten gardens'}`);
+    for(const garden of MapMarkers.nearby(gardens.filter(entity=>entity.properties?.farm!=='true'),origin,12,18))plot(garden.position,'#8ee56f','✿',4,'Garden',`${title(garden.properties?.itemType)} garden`);
     const casino=state.privateState?.casino||state.miniMapStores.find(s=>s.properties?.merchantCategory==='casino');
     if(casino)plot(casino.position,'#68e0bb','C',6,'Casino',`Casino · ${casino.name||casino.properties?.name||'Casino'}`);
     for(const actor of MapMarkers.nearby([...state.actors.values()].filter(a=>a.kind==='npc'&&a.isQuestGiver&&(a.locationId||'outdoor')==='outdoor'),origin,4,110))plot(actor.position,'#63ee81','$',3,'Quest giver',`Quest giver · ${actor.name}`);
@@ -1938,7 +1943,7 @@ function movementLoop(time){const me=state.players.get(state.playerId);if(me&&!c
     $('#collectDirtyWaterButton').hidden=!state.dungeon?.underwater&&!['shallowWater','deepWater'].includes(me?.terrain);
     const type=furniture?.properties?.objectType,energy=energyDrinkPhase(me),probed=probedPhase(me);ui.useFurniture.hidden=!['bed','wardrobe','storageChest','kitchenSink','craftingTable','stove','garageWorkbench','weaponsBench'].includes(type);ui.openHomeShop.hidden=type!=='homeShopCounter';ui.openHomeShop.textContent=state.privateState?.canEditHome?'Manage Home shop':'Browse Home shop';ui.useFurniture.textContent=type==='bed'&&energy?.phase==='boost'?`Too energized to sleep · ${countdown(energy.until)}`:type==='bed'?'Take a nap':type==='wardrobe'?'Change characters':type==='storageChest'?'Open storage chest':type==='kitchenSink'?'Use kitchen sink':['craftingTable','stove','garageWorkbench','weaponsBench'].includes(type)?'Review recipes & craft':'Use item';ui.useFurniture.disabled=type==='bed'&&energy?.phase==='boost';ui.useFurniture.title=ui.useFurniture.disabled?'Sleep becomes available when the energy-drink boost ends.':type==='bed'&&probed?'Take a nap to clear Probed.':type==='bed'&&energy?.phase==='crash'?'Take a nap to clear the energy-drink crash.':'';ui.moveFurniture.hidden=!furniture||!state.privateState?.canEditHome;ui.rotateFurniture.hidden=!furniture||!state.privateState?.canEditHome;ui.storeFurniture.hidden=!furniture||!state.privateState?.canEditHome;ui.storeFurniture.disabled=furniture?.properties?.builtIn==='true'&&['fireplace','storageChest','kitchenSink'].includes(type);ui.noActions.hidden=!!(door||canTeleport||actor||furniture||feature||worldObject||postal||!state.dungeon);
   }
-  function toggleGodMode(){const player=state.players.get(state.playerId);if(!player||ui.god.disabled)return;const enabled=!player.godMode;state.godTogglePending=enabled;ui.god.disabled=true;ui.serverConfigButton.disabled=false;ui.performancePanel.hidden=true;ui.rebuild.disabled=true;send({type:'setGodMode',enabled});showToast(enabled?'Enabling God Mode…':'Disabling God Mode…');updateActionMenu();clearTimeout(state.godToggleTimer);state.godToggleTimer=setTimeout(()=>{state.godTogglePending=null;syncGodControls(state.players.get(state.playerId));},3000);}
+  function toggleGodMode(){const player=state.players.get(state.playerId);if(!player||ui.god.disabled)return;const enabled=!player.godMode;state.godTogglePending=enabled;ui.god.disabled=true;ui.serverConfigButton.disabled=false;ui.rebuild.disabled=true;send({type:'setGodMode',enabled});showToast(enabled?'Enabling God Mode…':'Disabling God Mode…');updateActionMenu();clearTimeout(state.godToggleTimer);state.godToggleTimer=setTimeout(()=>{state.godTogglePending=null;syncGodControls(state.players.get(state.playerId));},3000);}
   ui.god.addEventListener('click',toggleGodMode);
   document.querySelectorAll('[data-world-event]').forEach(button=>button.addEventListener('click',()=>{const player=state.players.get(state.playerId);if(!player?.godMode){showToast('Enable God Mode before triggering world events.');return;}showToast('Starting Server Vote…');send({type:'startServerVote'});}));
   ui.equipmentGloves.addEventListener('click',()=>send({type:'setEquipment',slot:'gloves',itemType:null}));ui.equipmentHat.addEventListener('click',()=>send({type:'setEquipment',slot:'hat',itemType:null}));
@@ -1961,13 +1966,13 @@ function movementLoop(time){const me=state.players.get(state.playerId);if(me&&!c
     const layout=saved?.floating?saved:{width,left:Math.max(8,(viewportWidth()-width)/2),top:Math.max(8,(innerHeight-Math.min(panel.scrollHeight,innerHeight-32))/2)};
     if(wasHidden)floatPanel(panel,layout,false);else panel.style.zIndex=String(++floatingPanelZ);
     opener.setAttribute('aria-expanded','true');
-    (panel.id==='chatPanel'?ui.chatInput:panel.querySelector('.popup-close')).focus({preventScroll:true});
+    const focusTarget=panel.classList.contains('panel-collapsed')?panel.querySelector('.panel-collapse-button'):panel.id==='chatPanel'?ui.chatInput:panel.querySelector('.popup-close');focusTarget?.focus({preventScroll:true});
   }
   function closePanelPopup(panel,opener){
     savePanelLayout(panel);panel.hidden=true;opener.setAttribute('aria-expanded','false');opener.focus({preventScroll:true});
   }
   function initializePanelPopups(){
-    for(const [panelId,openId,closeId] of [['inventoryPanel','openInventoryButton','closeInventoryButton'],['chatPanel','openChatButton','closeChatButton']]){
+    for(const [panelId,openId,closeId] of [['inventoryPanel','openInventoryButton','closeInventoryButton'],['chatPanel','openChatButton','closeChatButton'],['performancePanel','openPerformanceButton','closePerformanceButton'],['adventurePanel','openErrandsButton','closeErrandsButton']]){
       const panel=$('#'+panelId),opener=$('#'+openId);
       opener.addEventListener('click',()=>openPanelPopup(panel,opener));
       $('#'+closeId).addEventListener('click',()=>closePanelPopup(panel,opener));

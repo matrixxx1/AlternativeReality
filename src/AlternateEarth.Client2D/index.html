@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=88">
+  <link rel="stylesheet" href="styles.css?v=89">
 <style>.garden-dialog{max-width:760px;width:90vw;max-height:80vh;overflow:auto;background:#263c37;color:#f1e4bd;border:2px solid #a68a51;border-radius:12px;padding:22px}.garden-dialog::backdrop{background:#0008}.garden-dialog button{margin:6px;padding:8px}.garden-build-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #ffffff20;padding:6px}.garden-placement-banner{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;background:#263c37;color:#fff1c1;border:2px solid #c9ac67;padding:14px;border-radius:9px;max-width:75vw}.garden-placement-banner button{margin-left:16px}</style>
 <style>.rebuild-confirmation{max-width:min(520px,85vw);background:#18252a;color:#edf1e5;border:1px solid #829a85;border-radius:10px;padding:24px;line-height:1.5}.rebuild-confirmation::backdrop{background:#000a}.rebuild-confirmation form{display:flex;justify-content:flex-end;gap:12px}</style>
 </head>
@@ -56,6 +56,12 @@
       <button id="openChatButton" type="button" title="Chat" aria-label="Chat" aria-controls="chatPanel" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-9l-6 4v-4H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M7 8h10M7 12h7"/></svg>
       </button>
+      <button id="openErrandsButton" type="button" title="Questionable Errands" aria-label="Questionable Errands" aria-controls="adventurePanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 4h10a2 2 0 0 1 2 2v15H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2"/><path d="M9 2h6v4H9zM8 10l2 2 4-4m-6 9h8"/></svg>
+      </button>
+      <button id="openPerformanceButton" type="button" title="Performance" aria-label="Performance" aria-controls="performancePanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="17" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="19" cy="12" r="2"/><path d="m6.5 15.5 4-7m3.3-.2 3.4 2.5M7 17h10"/></svg>
+      </button>
     </div>
     <div id="dungeonComplete" hidden>Dungeon complete · Grand treasure unlocked</div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
@@ -74,9 +80,9 @@
     <div id="activeEventsList" class="active-events-list" aria-live="polite"></div>
   </section>
   <section id="miniMapPanel" class="panel minimap-panel" data-collapsible="Mini map">
-    <canvas id="miniMap" width="372" height="220" aria-label="Stores, casino, live buses, players, graves, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
+    <canvas id="miniMap" width="372" height="220" aria-label="Stores, farms, gardens, casino, live buses, players, graves, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
     <div id="miniMapTooltip" class="minimap-tooltip" role="tooltip" hidden></div>
-    <div class="minimap-legend" role="group" aria-label="Minimap visibility"><label class="you"><input type="checkbox" data-minimap-filter="you" checked>● You</label><label class="store"><input type="checkbox" data-minimap-filter="store" checked>◆ Store</label><label class="casino" style="color:#68e0bb"><input type="checkbox" data-minimap-filter="casino" checked>C Casino</label><label class="bus" style="color:#f9ce56"><input type="checkbox" data-minimap-filter="bus" checked>B Buses</label><label class="player"><input type="checkbox" data-minimap-filter="player" checked>● Player</label><label class="grave"><input type="checkbox" data-minimap-filter="grave" checked>✝ Grave</label><label class="flag"><input type="checkbox" data-minimap-filter="flag" checked>⚑ Flags</label><label class="home"><input type="checkbox" data-minimap-filter="home" checked>⌂ Home</label></div>
+    <div class="minimap-legend" role="group" aria-label="Minimap visibility"><label class="you"><input type="checkbox" data-minimap-filter="you" checked>● You</label><label class="store"><input type="checkbox" data-minimap-filter="store" checked>◆ Store</label><label class="farm"><input type="checkbox" data-minimap-filter="farm" checked>F Farm</label><label class="garden"><input type="checkbox" data-minimap-filter="garden" checked>✿ Garden</label><label class="casino" style="color:#68e0bb"><input type="checkbox" data-minimap-filter="casino" checked>C Casino</label><label class="bus" style="color:#f9ce56"><input type="checkbox" data-minimap-filter="bus" checked>B Buses</label><label class="player"><input type="checkbox" data-minimap-filter="player" checked>● Player</label><label class="grave"><input type="checkbox" data-minimap-filter="grave" checked>✝ Grave</label><label class="flag"><input type="checkbox" data-minimap-filter="flag" checked>⚑ Flags</label><label class="home"><input type="checkbox" data-minimap-filter="home" checked>⌂ Home</label></div>
     <div class="minimap-actions" role="group" aria-label="Map actions">
       <button id="miniMapTeleportHomeButton" class="minimap-home-button" type="button" title="Teleport Home" aria-label="Teleport Home" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/></svg>
@@ -95,17 +101,6 @@
       <div id="destinationGpsRow" class="gps-row" hidden><span>Destination GPS</span><strong id="destinationGpsValue">—</strong></div>
     <div id="destinationDistanceRow" hidden><span>Distance</span><strong id="distanceValue">—</strong></div>
     </div>
-  </section>
-  <section id="performancePanel" class="panel performance-panel" data-collapsible="Performance" hidden>
-    <strong>Performance</strong>
-    <div class="performance-tasks-row"><span>Active tasks</span><ul id="performanceActivity" class="performance-task-list" aria-live="polite"><li>Starting…</li></ul></div>
-    <div><span>Browser</span><strong id="performanceFps">—</strong></div>
-    <div><span>Frame work</span><strong id="performanceFrame">—</strong></div>
-    <div><span>World objects</span><strong id="performanceEntities">—</strong></div>
-    <div><span>Map blocks</span><strong id="performanceBlocks">—</strong></div>
-    <div><span>Network</span><strong id="performanceNetwork">—</strong></div>
-    <div><span>Server memory</span><strong id="performanceServer">—</strong></div>
-    <div><span>Last map load</span><strong id="performanceLoad">—</strong></div>
   </section>
   <section id="travelPanel" class="panel travel-panel" aria-label="Behavior" data-collapsible="Behavior">
     <strong id="posturingLabel">Posturing</strong>
@@ -405,6 +400,17 @@
       <button type="submit">Say</button>
     </form>
   </section>
+  <section id="performancePanel" class="panel performance-panel panel-popup" data-popup="Performance" data-collapsible="Performance" role="dialog" aria-labelledby="performanceTitle" hidden>
+    <div class="window-header"><strong id="performanceTitle">Performance</strong><button id="closePerformanceButton" class="popup-close" type="button" aria-label="Close Performance" title="Close Performance">×</button></div>
+    <div class="performance-tasks-row"><span>Active tasks</span><ul id="performanceActivity" class="performance-task-list" aria-live="polite"><li>Starting…</li></ul></div>
+    <div><span>Browser</span><strong id="performanceFps">—</strong></div>
+    <div><span>Frame work</span><strong id="performanceFrame">—</strong></div>
+    <div><span>World objects</span><strong id="performanceEntities">—</strong></div>
+    <div><span>Map blocks</span><strong id="performanceBlocks">—</strong></div>
+    <div><span>Network</span><strong id="performanceNetwork">—</strong></div>
+    <div><span>Server memory</span><strong id="performanceServer">—</strong></div>
+    <div><span>Last map load</span><strong id="performanceLoad">—</strong></div>
+  </section>
 
   <div id="actorTooltip" class="actor-tooltip" hidden></div>
   <section id="accountSetup" class="account-setup">
@@ -448,7 +454,7 @@
   <script src="scuba.js?v=5"></script>
   <script src="retro-battles.js?v=1"></script>
   <script src="northern-exposure.js?v=2"></script>
-  <script src="inversions.js?v=5"></script>
+  <script src="inversions.js?v=6"></script>
   <script src="home-workshop.js?v=1"></script>
   <script src="garage.js?v=2"></script>
   <script src="recipe-book.js?v=3"></script>
@@ -457,6 +463,6 @@
   <script src="casino.js?v=2"></script>
   <script src="inventory-sections.js?v=2"></script>
   <script src="gardens.js?v=3"></script>
-  <script src="app.js?v=184"></script>
+  <script src="app.js?v=185"></script>
 </body>
 </html>

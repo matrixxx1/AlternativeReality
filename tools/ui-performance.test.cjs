@@ -116,6 +116,23 @@ test('God Mode tools are in server configuration and its gear is beside stats',(
  assert.equal((html.match(/id="godMode"/g)||[]).length,1);
 });
 
+test('Performance and Questionable Errands launch as floating minimizable windows beside Chat',()=>{
+ const html=fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8'),css=fs.readFileSync('src/AlternateEarth.Client2D/styles.css','utf8');
+ const actions=html.slice(html.indexOf('<div class="character-actions"'),html.indexOf('<div id="dungeonComplete"'));
+ assert.ok(actions.indexOf('id="openChatButton"')<actions.indexOf('id="openErrandsButton"'));
+ assert.ok(actions.indexOf('id="openErrandsButton"')<actions.indexOf('id="openPerformanceButton"'));
+ assert.match(html,/id="performancePanel"[^>]*panel-popup[^>]*data-popup="Performance"[^>]*data-collapsible="Performance"/);
+ assert.match(source,/\['performancePanel','openPerformanceButton','closePerformanceButton'\]/);
+ assert.match(source,/\['adventurePanel','openErrandsButton','closeErrandsButton'\]/);
+ assert.doesNotMatch(source,/panel\.classList\.contains\('panel-collapsed'\)\)return/);
+ assert.match(css,/\.panel-popup\.panel-collapsed > \.panel-drag-handle[^}]*display:flex !important/);
+});
+
+test('server configuration gear matches the surrounding stats buttons',()=>{
+ const css=fs.readFileSync('src/AlternateEarth.Client2D/styles.css','utf8');
+ assert.match(css,/#serverConfigButton \{ width:38px;height:38px;padding:6px/);
+});
+
 test('God Mode button changes its indicator only after acknowledgement and blocks duplicate requests',()=>{
  const me={godMode:false},state={playerId:'me',players:new Map([['me',me]]),godTogglePending:null},sent=[];
  const node=()=>({setAttribute(k,v){this[k]=v;}}),ui={god:node(),serverConfigButton:node(),performancePanel:node(),rebuild:node(),actionMenu:{hidden:true}};

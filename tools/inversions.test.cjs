@@ -18,7 +18,7 @@ test('public vote panel keeps ballots but no administrative cancel control, incl
 
 test('adventure updates preserve drag and minimize controls outside the changing content',()=>{
  const {api,state,nodes}=fixture(),panel=nodes.get('adventurePanel'),handle={},minimize={};
- panel.children.push(handle,minimize);assert.equal(panel.dataset.collapsible,'Questionable errands');
+ panel.children.push(handle,minimize);assert.equal(panel.dataset.collapsible,'Questionable Errands');assert.equal(panel.dataset.popup,'Questionable Errands');assert.equal(panel.hidden,true);
  state.privateState.achievements=['Reality Check'];api.tick();
  state.privateState.inventory={items:[{itemType:'metal',quantity:1}]};api.tick();
  assert.ok(panel.children.includes(handle));assert.ok(panel.children.includes(minimize));

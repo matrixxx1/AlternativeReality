@@ -4,7 +4,7 @@ const source=fs.readFileSync(require.resolve('../src/AlternateEarth.Client2D/app
 function implementation(name){const start=source.indexOf(`  function ${name}(`);return source.slice(start,source.indexOf('\n  function ',start+1));}
 test('minimap categories and individual quest choices survive reload',()=>{
  let saved=null;const storage={getItem:()=>saved,setItem:(key,value)=>saved=value},prefs=MapMarkers.preferences(storage);
- for(const category of ['You','Store','Player','Grave','Flag','Home'])assert.equal(MapMarkers.categoryVisible(prefs,category),true);
+ for(const category of ['You','Store','Farm','Garden','Player','Grave','Flag','Home'])assert.equal(MapMarkers.categoryVisible(prefs,category),true);
  prefs.categories.store=false;prefs.categories.you=false;prefs.quests.a=false;MapMarkers.savePreferences(storage,prefs);
  const restored=MapMarkers.preferences(storage);assert.equal(MapMarkers.categoryVisible(restored,'Store'),false);assert.equal(MapMarkers.categoryVisible(restored,'Home'),true);
  assert.equal(MapMarkers.questVisible(restored,'a'),false);assert.equal(MapMarkers.questVisible(restored,'b'),true);
@@ -12,13 +12,14 @@ test('minimap categories and individual quest choices survive reload',()=>{
 });
 test('unchecked categories and quests disappear from both rendered markers and hit targets',()=>{
  const me={id:'me',name:'Me',locationId:'outdoor',position:{x:0,y:0}};
- const state={lastMiniMapDraw:-Infinity,playerId:'me',mapPreferences:{categories:{},quests:{}},miniMapStores:[{id:'store',position:{x:50,y:0}}],
+ const base=[{id:'farm-house',kind:'building',position:{x:70,y:0},properties:{name:'Test farm'}},{id:'farm-plot',kind:'resourceNode',position:{x:72,y:0},properties:{subtype:'garden',farm:'true',buildingId:'farm-house',itemType:'corn'}},{id:'garden',kind:'resourceNode',position:{x:80,y:0},properties:{subtype:'garden',farm:'false',itemType:'raspberry'}}];
+ const state={lastMiniMapDraw:-Infinity,playerId:'me',mapPreferences:{categories:{},quests:{}},miniMapStores:[{id:'store',position:{x:50,y:0}}],base,baseById:new Map(base.map(item=>[item.id,item])),
   privateState:{base:{position:{x:10,y:0}},quests:[{id:'q',title:'Quest',status:'active'}]},actors:new Map(),players:new Map([['me',me],['other',{id:'other',position:{x:20,y:0}}]]),
   graves:new Map([['grave',{position:{x:30,y:0}}]]),reality:new Map([['flag',{position:{x:40,y:0},properties:{objectType:'personalFlag',owner:'me'}}]])};
  const ctx=new Proxy({},{get:(o,k)=>o[k]||(()=>{}),set:(o,k,v)=>(o[k]=v,true)});
  const c=vm.createContext({state,MapMarkers,miniMapCtx:ctx,miniMapCanvas:{width:372,height:220},performance:{now:()=>1000},ui:{miniMapTeleportHome:{}},Inversions:{insideSmug:()=>false},title:s=>s,questStage:()=>({position:{x:60,y:0},location:'outdoor',name:'Target'}),updateMiniMapTooltip:()=>{}});
- vm.runInContext(implementation('drawMiniMap'),c);c.drawMiniMap(me);assert.equal(state.miniMapMarkers.length,7);
- for(const category of ['You','Store','Player','Grave','Flag','Home']){
+ vm.runInContext(implementation('drawMiniMap'),c);c.drawMiniMap(me);assert.equal(state.miniMapMarkers.length,9);assert.ok(state.miniMapMarkers.some(marker=>marker.type==='Farm'&&marker.label.includes('Test farm')));assert.ok(state.miniMapMarkers.some(marker=>marker.type==='Garden'&&marker.label.includes('raspberry')));
+ for(const category of ['You','Store','Farm','Garden','Player','Grave','Flag','Home']){
   state.mapPreferences.categories[category.toLowerCase()]=false;state.lastMiniMapDraw=-Infinity;c.drawMiniMap(me);
   assert.ok(!state.miniMapMarkers.some(marker=>marker.type===category));
  }

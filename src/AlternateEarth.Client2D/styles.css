@@ -19,6 +19,9 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .panel-collapsed { width:28px !important; min-width:28px !important; max-width:28px !important; height:26px !important; min-height:26px !important; max-height:26px !important; padding:0 !important; overflow:hidden !important; }
 .panel-collapsed > :not(.panel-collapse-button) { display:none !important; }
 .panel-collapsed .panel-collapse-button { top:3px; right:3px; }
+.panel-popup.panel-collapsed { width:min(240px,calc(100vw - 16px)) !important; min-width:min(240px,calc(100vw - 16px)) !important; max-width:calc(100vw - 16px) !important; height:30px !important; min-height:30px !important; max-height:30px !important; }
+.panel-popup.panel-collapsed > .panel-drag-handle { position:absolute; display:flex !important; inset:3px 25px 3px 3px; min-height:22px; margin:0; padding:2px 6px; }
+.panel-popup.panel-collapsed > .panel-drag-handle small { display:none; }
 .panel-drag-handle { min-height:22px; margin:-4px 22px 7px -2px; padding:3px 7px; display:flex; align-items:center; justify-content:space-between; gap:10px; color:#f2d889; background:rgba(8,18,13,.5); border:1px solid rgba(217,181,92,.3); border-radius:2px; cursor:grab; touch-action:none; user-select:none; font:700 10px/1.2 monospace; letter-spacing:.04em; text-transform:uppercase; }
 .panel-drag-handle::before { content:'⠿'; color:#9e8751; font-size:14px; }
 .panel-drag-handle span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -155,7 +158,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .minimap-home-button { width:100%; margin-top:8px; color:#dfffe4; background:#284b32; border-color:#8fcf8e; }
 .minimap-home-button:hover:not(:disabled),.minimap-home-button:focus-visible { color:#fff9bf; background:#376541; }
 .minimap-legend { display:flex; flex-wrap:wrap; gap:5px 12px; margin-top:7px; color:#bfcabd; font:700 9px monospace; }
-.minimap-legend .you { color:#fff5a6; }.minimap-legend .store { color:#f2ce65; }.minimap-legend .player { color:#65d9ef; }.minimap-legend .grave { color:#d7d0c4; }.minimap-legend .flag { color:#ef6258; }.minimap-legend .home { color:#8ff09f; }
+.minimap-legend .you { color:#fff5a6; }.minimap-legend .store { color:#f2ce65; }.minimap-legend .farm { color:#f0a85a; }.minimap-legend .garden { color:#8ee56f; }.minimap-legend .player { color:#65d9ef; }.minimap-legend .grave { color:#d7d0c4; }.minimap-legend .flag { color:#ef6258; }.minimap-legend .home { color:#8ff09f; }
 .home-money-storage { display:grid; grid-template-columns:auto 1fr 92px auto auto; gap:7px; align-items:center; margin:8px 0 12px; padding:8px; border:1px solid rgba(225,202,118,.3); background:rgba(5,14,10,.42); }
 .home-money-storage input { min-width:0; width:100%; }
 .postal-window { max-height:72vh; overflow:auto; }
@@ -368,6 +371,9 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .panel-popup .panel-drag-handle{margin:0 38px 8px 0;}
 .panel-popup .inventory-header,.panel-popup .window-header{margin-bottom:10px;padding-right:30px;}
 .panel-popup .popup-close{position:absolute;top:8px;right:8px;width:28px;height:28px;padding:0;font:700 22px/1 monospace;}
+.panel-popup.collapsible-panel:not(.panel-collapsed) .panel-drag-handle{margin-right:68px;}
+.panel-popup.collapsible-panel:not(.panel-collapsed) .popup-close{right:38px;}
+.panel-popup.collapsible-panel:not(.panel-collapsed) .window-header{padding-right:60px;}
 .panel-popup button:focus-visible{outline:2px solid #fff0a0;outline-offset:2px;}
 .inventory-panel .equipment-layout{grid-template-columns:180px minmax(0,1fr);gap:12px;align-items:start;}
 .inventory-panel .equipment-doll{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;height:auto;min-height:0;padding:5px;}
@@ -500,7 +506,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 #godMode { display:inline-flex;align-items:center;gap:8px; }
 #godMode::before { content:'';width:9px;height:9px;border-radius:50%;background:#8b938c;border:1px solid #b9c1b8; }
 #godMode[aria-pressed="true"]::before { background:#79f394;border-color:#b0ffc2;box-shadow:0 0 6px #58d87b; }
-#serverConfigButton { width:34px;height:34px;padding:0;font-size:24px;line-height:1; }
+#serverConfigButton { width:38px;height:38px;padding:6px;font-size:22px;line-height:1; }
 
 #godWorldTools{margin-top:20px;border:1px solid #49615e;padding:16px;min-width:0;}
 .rebuild-confirmation{max-width:min(520px,85vw);background:#18252a;color:#edf1e5;border:1px solid #829a85;border-radius:10px;padding:24px;line-height:1.5}.rebuild-confirmation::backdrop{background:#000a}.rebuild-confirmation form{display:flex;justify-content:flex-end;gap:12px}
