@@ -5,7 +5,7 @@ const markers=require('../src/AlternateEarth.Client2D/map-markers.js');
 
 test('bus hull targeting and stopped door-side boarding work at every heading',()=>{
   for(let h=0;h<Math.PI*2;h+=Math.PI/4){
-    const bus={position:{x:20,y:30},headingRadians:h,healthHearts:100,speedMetersPerSecond:0};
+    const bus={position:{x:20,y:30},headingRadians:h,healthHearts:100,status:'out of service',speedMetersPerSecond:0};
     const player={locationId:'outdoor',healthHearts:10,position:{x:20+Math.sin(h)*2,y:30-Math.cos(h)*2}};
     assert.ok(transit.canBoard(player,bus));
     const p=transit.attackPoint(bus,player.position);assert.ok(Math.abs(Math.hypot(p.x-player.position.x,p.y-player.position.y)-.75)<1e-8);
@@ -73,4 +73,30 @@ test('route preview fits full itinerary without loading or moving the world came
   const path=[{x:-10000,y:0},{x:10000,y:0},{x:10000,y:5000}],project=transit.routeProjection(path,800,480);
   for(const p of path){const v=project(p);assert.ok(v.x>=35&&v.x<=765);assert.ok(v.y>=35&&v.y<=445);}
   assert.ok(project(path[2]).y<project(path[1]).y);
+});
+
+
+test('boarding approach walks around either end of the physical bus at every heading',()=>{
+ for(let heading=0;heading<Math.PI*2;heading+=Math.PI/8)for(const [along,right] of [[0,-7],[-9,-3],[9,-3],[0,8],[-10,2],[10,2]]){
+  const dx=Math.cos(heading),dy=Math.sin(heading),bus={position:{x:20,y:30},headingRadians:heading,healthHearts:100,status:'out of service',speedMetersPerSecond:0};
+  const player={locationId:'outdoor',healthHearts:10,position:{x:20+dx*along+dy*right,y:30+dy*along-dx*right}};
+  assert.ok(transit.canApproachBoarding(player,bus));assert.equal(transit.canBoard(player,bus),false);
+  let ready=false;
+  for(let step=0;step<300;step++){
+   const plan=transit.boardingPlan(player,bus);if(plan.ready){ready=true;break;}
+   assert.ok(plan.destination);const from=player.position,to=plan.destination,length=Math.hypot(to.x-from.x,to.y-from.y),fraction=Math.min(1,.15/length);
+   player.position={x:from.x+(to.x-from.x)*fraction,y:from.y+(to.y-from.y)*fraction};
+   const x=player.position.x-20,y=player.position.y-30,a=x*dx+y*dy,r=x*dy-y*dx;
+   assert.ok(Math.abs(a)>4.85||Math.abs(r)>1.6,'approach never intersects the player-expanded bus hull');
+  }
+  assert.ok(ready,'approach reaches a valid boarding location');
+ }
+});
+test('boarding rejects active buses even while stopped and unavailable players or wrecks',()=>{
+ const player={locationId:'outdoor',healthHearts:10,position:{x:0,y:8}},bus={position:{x:0,y:0},headingRadians:0,healthHearts:100,speedMetersPerSecond:2};
+ assert.deepEqual(transit.boardingPlan(player,bus),{unavailable:true});
+ for(const status of ['driving','boarding','dropping off','yielding','blocked','pulling over','waiting for safe pull-over','rejoining route'])assert.equal(transit.canApproachBoarding(player,{...bus,status,speedMetersPerSecond:0}),false);
+ Object.assign(bus,{status:'out of service',speedMetersPerSecond:0});assert.equal(transit.canApproachBoarding(player,bus),true);
+ for(const changes of [{locationId:'home'},{ridingBusId:'bus'},{waitingAtBusStopId:'stop'},{healthHearts:0},{abduction:{}}])assert.equal(transit.canApproachBoarding({...player,...changes},bus),false);
+ assert.equal(transit.canApproachBoarding(player,{...bus,healthHearts:0}),false);
 });

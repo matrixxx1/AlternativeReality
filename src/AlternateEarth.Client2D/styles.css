@@ -40,6 +40,10 @@ h1 { margin: 3px 0 4px; font-size: 20px; }
 .telemetry-panel > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
 .telemetry-panel span { color: #c8c6a8; }
 .telemetry-panel strong { text-align: right; }
+.telemetry-panel > .status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 12px; padding:6px 0; border-bottom:0; }
+.telemetry-panel .status-grid > div { display:flex; justify-content:space-between; align-items:baseline; gap:6px; min-width:0; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.08); }
+.telemetry-panel .status-grid span { font-size:11px; }
+.telemetry-panel .status-grid strong { min-width:0; font-size:11px; font-variant-numeric:tabular-nums; letter-spacing:0; overflow-wrap:anywhere; }
 .telemetry-panel .gps-row { display: block; padding: 5px 0; }
 .performance-panel { padding:10px 12px; font-size:11px; }
 .performance-panel > strong { display:block; margin-bottom:5px; color:#f1d574; text-transform:uppercase; letter-spacing:.05em; }
@@ -346,9 +350,18 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 
 
 /* Sidebar groups and on-demand game windows. */
-.minimap-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin-top:9px;}
+.minimap-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:9px;}
 .minimap-actions button{display:grid;place-items:center;min-width:0;min-height:36px;margin:0;padding:6px;}
 .minimap-actions svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
+.telemetry-panel .character-actions{display:flex;justify-content:flex-start;gap:8px;margin:8px 0;}
+.character-actions button{position:relative;display:grid;place-items:center;width:38px;height:38px;padding:6px;}
+.character-actions svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
+#openProgression.points-available::after{content:'';position:absolute;inset:-4px;border:2px solid #ffe36d;border-radius:7px;pointer-events:none;animation:stat-points-pulse 1.2s ease-in-out infinite;}
+@keyframes stat-points-pulse{0%,100%{opacity:.25;box-shadow:0 0 2px #ffe36d;}50%{opacity:1;box-shadow:0 0 9px #ffe36d;}}
+@media(prefers-reduced-motion:reduce){#openProgression.points-available::after{animation:none;opacity:1;}}
+.minimap-legend label,.quest-map-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;}
+.minimap-legend input,.quest-map-toggle input{width:14px;height:14px;margin:0;accent-color:#e6cc72;flex-shrink:0;}
+.quest-map-toggle{margin:8px 0;font-weight:700;}
 .travel-panel .admin-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;padding-top:8px;border-top:1px solid rgba(255,255,255,.14);font-size:12px;}
 .panel-popup[hidden],.quest-log[hidden]{display:none !important;}
 .panel.panel-popup{position:fixed;z-index:40;left:8px;top:8px;right:auto;bottom:auto;width:min(680px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;padding:12px;}
@@ -363,7 +376,7 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .inventory-panel .backpack{margin-top:0;min-height:0;padding:10px 8px 8px;border-width:2px;border-radius:6px;}
 .inventory-panel .backpack-handle,.inventory-panel .backpack::before{display:none;}
 .inventory-panel .backpack small{min-height:0;margin:5px 0;}
-.inventory-panel .backpack-tabs{grid-template-columns:repeat(4,minmax(0,1fr));}
+.inventory-panel .backpack-tabs{grid-template-columns:repeat(auto-fit,minmax(80px,1fr));}
 .inventory-panel .weapon-loadout{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:5px;padding:4px 5px;font-size:11px;}
 .inventory-panel .weapon-side,.inventory-panel .weapon-ammo{gap:4px;}
 .inventory-panel .item-art{width:28px;height:28px;flex-basis:28px;}
@@ -465,5 +478,26 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 #serverVotePanel { order:-10;border:2px solid #ff6258; }
 .vote-option { display:grid;grid-template-columns:1fr auto;gap:6px;padding:10px 0;border-bottom:1px solid #475148; }
 .vote-option small { grid-column:1/-1;overflow-wrap:anywhere; }
-#eventBattlePanel button,#adventurePanel button { margin:4px;min-height:34px; }
+#eventBattlePanel button:not(.panel-collapse-button),#adventureContent button { margin:4px;min-height:34px; }
+#adventurePanel:not(.panel-collapsed) { padding:9px 10px; }
 #eventBattlePanel select { max-width:48%;margin:3px; }
+
+.recipes-window{width:min(680px,calc(100vw - 24px));max-height:85vh;overflow:auto}
+.recipe-book-tabs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
+.recipe-book-tabs .active{background:#b79b48;color:#15241b}
+.recipe-book-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;border-bottom:1px solid #847444;padding:9px 0}
+.recipe-book-row .item-art{width:36px;height:36px}.recipe-book-row strong,.recipe-book-row small{display:block}.recipe-book-row small{margin-top:3px;color:#d4cfb3}.recipe-book-row button{white-space:nowrap}
+
+.home-upgrades-window{width:min(740px,calc(100vw - 24px));max-height:85vh;overflow:auto}
+.home-upgrade-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border-bottom:1px solid #847444;padding:10px 0}.home-upgrade-row small,.home-upgrade-row strong{display:block}.home-upgrade-row small{margin-top:4px;color:#d4cfb3}.home-upgrade-row button{white-space:nowrap}.purifier-controls{display:flex;gap:8px;flex-wrap:wrap;padding:12px;background:#223b35}.purifier-controls span{flex-basis:100%}
+
+.panel.recipes-window,.panel.home-upgrades-window{padding:14px;box-sizing:border-box}
+#recipeBookRows,#homeUpgradeRows{max-height:55vh;overflow:auto;padding-right:6px;margin-bottom:12px}
+
+
+.god-controls { flex-wrap:nowrap; }
+.god-controls button { flex:0 0 auto; }
+#godMode { display:inline-flex;align-items:center;gap:8px; }
+#godMode::before { content:'';width:9px;height:9px;border-radius:50%;background:#8b938c;border:1px solid #b9c1b8; }
+#godMode[aria-pressed="true"]::before { background:#79f394;border-color:#b0ffc2;box-shadow:0 0 6px #58d87b; }
+#serverConfigButton { width:34px;height:34px;padding:0;font-size:24px;line-height:1; }

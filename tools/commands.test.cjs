@@ -22,8 +22,8 @@ function harness(mode='neutral'){
  const sent=[],routes=[],toasts=[];
  const me={id:'me',position:{x:0,y:0},equippedWeapon:'rifle',locationId:'outdoor'};
  const target={id:'npc',name:'NPC',position:{x:10,y:0},healthHearts:5,locationId:'outdoor'};
- const state={scale:1,playerId:'me',players:new Map([['me',me]]),probulatorBeams:new Map(),baseById:new Map(),keys:new Set(),path:[],pathSequence:7,actionMode:mode,chests:new Map(),loot:new Map(),followCommand:null};
- const context={Inversions:{click:()=>false,canvasClick:()=>false},state,QuestNavigation:require('../src/AlternateEarth.Client2D/quest-navigation.js'),toScreen:p=>p,PlayerCommands:commands,ui:{actionMenu:{}},sent,routes,toasts,me,target,
+ const state={scale:1,playerId:'me',players:new Map([['me',me]]),probulatorBeams:new Map(),facings:new Map(),baseById:new Map(),keys:new Set(),path:[],pathSequence:7,actionMode:mode,chests:new Map(),loot:new Map(),followCommand:null};
+ const context={BusTransit:require('../src/AlternateEarth.Client2D/transit.js'),Scuba:require('../src/AlternateEarth.Client2D/scuba.js'),Inversions:{click:()=>false,canvasClick:()=>false},state,QuestNavigation:require('../src/AlternateEarth.Client2D/quest-navigation.js'),toScreen:p=>p,PlayerCommands:commands,ui:{actionMenu:{}},sent,routes,toasts,me,target,
   send:m=>sent.push(m),stopTravel:()=>commands.cancel(state),showToast:m=>toasts.push(m),
   clearActionChoices:()=>{},actionTargetsAt:()=>[],isSleeping:()=>false,hazardWeaponTypes:new Set(['gasBottle']),clickedOwnUfo:()=>false,
   dungeonFeatureAt:()=>null,postOfficeAt:()=>null,combatTargets:()=>[target],nearPoint:items=>items[0],questForActor:()=>null,
@@ -31,7 +31,7 @@ function harness(mode='neutral'){
   navigateTo:p=>{routes.push(p);state.target=p;},setActionMode:m=>{commands.cancel(state);state.actionMode=m;},
   followTargetById:()=>target,equippedWeaponRange:()=>50,equippedAttackInterval:()=>400};
  vm.createContext(context);
- for(const name of ['actorAtScreen','busStopAt','beginFollowCommand','maintainFollowCommand','handlePrimaryClick'])vm.runInContext(implementation(name),context);
+ for(const name of ['actorAtScreen','busStopAt','beginFollowCommand','maintainScubaAttack','beginBusBoarding','maintainBusBoarding','maintainFollowCommand','maintainTreasurePickup','beginScubaTreasure','handlePrimaryClick'])vm.runInContext(implementation(name),context);
  return context;
 }
 test('new intent clears every pending interaction, held keys and late route generation',()=>{
@@ -120,6 +120,42 @@ test('a crowded attack click opens choices instead of attacking the first charac
 });
 
 function block(name){const start=source.indexOf(`  function ${name}(`);return source.slice(start,source.indexOf('\n  function ',start+1));}
+
+test('scuba target clicks pursue and line up before shooting regardless of posture',()=>{
+ for(const mode of ['neutral','defensive','timid','attackReady']){
+  const c=harness(mode);c.state.dungeon={underwater:{},width:180,height:20};
+  c.me.locationId=c.target.locationId='dive';c.me.equippedWeapon='spearGun';c.me.position={x:5,y:3};c.target.position={x:100,y:9};
+  c.actionTargetsAt=()=>[{kind:'actor',entity:c.target}];
+  c.handlePrimaryClick(c.target.position,100,9);assert.equal(c.state.followCommand.targetId,'npc');
+  c.maintainFollowCommand(1000,c.me);assert.equal(c.sent.length,0);assert.equal(c.routes[0].y,9);assert.equal(c.routes[0].x,61);
+  c.me.position={x:61,y:8};c.maintainFollowCommand(2000,c.me);assert.equal(c.sent.length,0);
+  c.me.position={x:61,y:9};c.maintainFollowCommand(2200,c.me);assert.equal(c.sent[0].type,'attack');assert.equal(c.sent[0].targetId,'npc');assert.equal(c.state.target,null);
+  c.maintainFollowCommand(2300,c.me);assert.equal(c.sent.length,1);
+  c.target.position.y=11;c.maintainFollowCommand(3000,c.me);assert.equal(c.sent.length,1);assert.equal(c.routes.at(-1).y,11);
+  commands.cancel(c.state);c.maintainFollowCommand(4000,c.me);assert.equal(c.sent.length,1);
+ }
+});
+
+test('scuba treasure clicks swim into range and open each source exactly once',()=>{
+ for(const kind of ['loot','chest']){
+  const c=harness();c.state.dungeon={underwater:{},width:180,height:20};c.me.locationId='dive';
+  const item={id:'treasure',position:{x:50,y:6}};c.state[kind==='loot'?'loot':'chests'].set(item.id,item);
+  c.actionTargetsAt=()=>[{kind,entity:item}];c.handlePrimaryClick(item.position,50,6);
+  assert.equal(c.sent.length,0);assert.equal(c.routes[0],item.position);
+  c.maintainTreasurePickup(c.me);assert.equal(c.sent.length,0);
+  c.me.position={x:48,y:6};c.maintainTreasurePickup(c.me);c.maintainTreasurePickup(c.me);
+  assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,kind==='loot'?'openLoot':'openChest');
+  assert.equal(c.state.pendingLoot,null);assert.equal(c.state.pendingChest,null);
+ }
+});
+
+test('scuba treasure already in range opens immediately and canceled pursuit takes nothing',()=>{
+ const c=harness();c.state.dungeon={underwater:{},width:180,height:20};
+ const item={id:'treasure',position:{x:2,y:0}};c.state.loot.set(item.id,item);c.actionTargetsAt=()=>[{kind:'loot',entity:item}];
+ c.handlePrimaryClick(item.position,2,0);assert.equal(c.sent[0].type,'openLoot');assert.equal(c.routes.length,0);
+ item.position.x=50;c.handlePrimaryClick(item.position,50,0);commands.cancel(c.state);c.me.position=item.position;c.maintainTreasurePickup(c.me);
+ assert.equal(c.sent.length,1);
+});
 test('defeated dungeon actors are removed from follow targets and action choices',()=>{
  const state={actors:new Map([['dead',{id:'dead'}]]),dungeon:{actors:[{id:'dead'},{id:'alive'}]},actionActor:{id:'dead'},actionChoices:{targets:[{id:'dead'},{id:'alive'}]}};
  const remove=vm.runInNewContext(`(${block('removeCombatTarget')})`,{state});remove('dead');
@@ -135,4 +171,28 @@ test('incoming fear never clears held movement keys or repeatedly restarts an es
   const receive=vm.runInNewContext(`(${block('receiveCombatFear')})`,{state,stopTravel:()=>assert.fail('Movement canceled')});
   receive({targetId:'me',fleeInFear:true});assert.equal(state.keys.size,moving?1:0);
  }
+});
+
+
+test('Board command approaches a parked bus, cancels if activated, boards once, and respects new intent',()=>{
+ const c=harness();Object.assign(c.me,{healthHearts:10,equippedWeapon:'none',travelMode:'walk',position:{x:0,y:7}});
+ Object.assign(c.target,{routeId:'route',headingRadians:0,position:{x:0,y:0},speedMetersPerSecond:0,status:'out of service'});
+ c.beginBusBoarding(c.target);c.maintainFollowCommand(1000,c.me);
+ assert.equal(c.state.followCommand.mode,'boardBus');assert.equal(c.sent.length,0);assert.equal(c.routes.length,1);
+ c.target.status='boarding';c.maintainFollowCommand(2000,c.me);assert.equal(c.state.target,null);assert.equal(c.state.followCommand,null);assert.equal(c.sent.length,0);
+ c.target.status='out of service';c.beginBusBoarding(c.target);
+ c.target.speedMetersPerSecond=0;c.me.position={x:0,y:-2.4};c.maintainFollowCommand(3000,c.me);c.maintainFollowCommand(4000,c.me);
+ assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'boardBus');assert.equal(c.state.followCommand,null);
+ c.me.position={x:0,y:7};c.beginBusBoarding(c.target);c.stopTravel();c.maintainFollowCommand(5000,c.me);assert.equal(c.sent.length,1);
+ c.beginBusBoarding(c.target);c.target.healthHearts=0;c.maintainFollowCommand(6000,c.me);assert.equal(c.state.followCommand,null);assert.equal(c.sent.length,1);
+});
+
+test('UFO Attack enables the Probulator immediately, including when its visible state is stale',()=>{
+ for(const active of [false,true])for(const mode of ['neutral','attackReady']){
+  const c=harness(mode);c.me.travelMode='ufo';c.me.equippedWeapon='probulator';c.target.position.x=100;
+  if(active)c.state.probulatorBeams.set('me',{});
+  c.beginFollowCommand('attack',c.target);assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'toggleProbulator');assert.equal(c.sent[0].enabled,true);assert.equal(c.state.followCommand.targetId,c.target.id);
+ }
+ const c=harness();c.me.travelMode='ufo';c.beginFollowCommand('stalk',c.target);assert.equal(c.sent.length,0);
+ c.me.travelMode='walk';c.beginFollowCommand('attack',c.target);assert.equal(c.sent.length,0);
 });

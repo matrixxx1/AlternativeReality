@@ -1,0 +1,93 @@
+[
+  {
+    "file": "cow.mp3",
+    "author": "GoombaGuy",
+    "source": "https://freesound.org/people/GoombaGuy/sounds/243343/",
+    "download": "https://cdn.freesound.org/previews/243/243343_2073169-hq.mp3",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "chicken.mp3",
+    "author": "JhennaSide",
+    "source": "https://freesound.org/people/JhennaSide/sounds/455905/",
+    "download": "https://cdn.freesound.org/previews/455/455905_2468652-hq.mp3",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "swing.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "original": "knifeSlice.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "cloth.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "original": "cloth1.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "chop.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "original": "chop.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "coins.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "original": "handleCoins.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "paper.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "original": "bookFlip1.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "door.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "original": "doorOpen_1.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "metal.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "original": "impactMetal_medium_000.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "hit.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "original": "impactSoft_medium_000.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "glass.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "original": "impactGlass_medium_000.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "step-grass.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "original": "footstep_grass_000.ogg",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "step-hard.ogg",
+    "author": "Kenney",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "original": "footstep_concrete_000.ogg",
+    "license": "CC0-1.0"
+  }
+]

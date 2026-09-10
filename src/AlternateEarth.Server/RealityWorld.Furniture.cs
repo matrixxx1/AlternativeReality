@@ -55,6 +55,9 @@ public sealed partial class RealityWorld
             // that are no longer safe in the canonical Home layout.
             if (RepairFurniturePlacements(accountId, building, loaded))
                 await _store.SaveHomeFurnitureAsync(accountId, Configuration.Id, loaded, cancellationToken);
+            var beforeStations=loaded.Count;
+            AddHomeStations(accountId,building,loaded);
+            if(loaded.Count!=beforeStations)await _store.SaveHomeFurnitureAsync(accountId,Configuration.Id,loaded,cancellationToken);
             _homeFurniture[accountId] = loaded;
         }
         finally { _homeFurnitureLock.Release(); }
@@ -125,6 +128,7 @@ public sealed partial class RealityWorld
         var width = layout.Width; var height = layout.Height;
         const double doorway = 2.2;
         var walls = layout.ExteriorWalls.ToList();
+        var garage = AddGarage(width,height,walls);
         var exteriorWallCount = walls.Count;
         var rooms = new List<DungeonRoom>();
         // The account/building-specific seed makes each acquired Home layout different,
@@ -142,8 +146,9 @@ public sealed partial class RealityWorld
         else if (rectangular && width >= 12) rooms.AddRange([new(0, 0, splitX, height), new(splitX, 0, width - splitX, height)]);
         else if (rectangular && height >= 12) rooms.AddRange([new(0, 0, width, splitY), new(0, splitY, width, height - splitY)]);
         else rooms.Add(new DungeonRoom(0, 0, width, height));
-        var home = new DungeonState(id, building.Id, width, height, rooms, walls, layout.Exit, Array.Empty<ActorState>(), Array.Empty<TreasureChestState>(), Array.Empty<string>(), true, furnishings,
-            layout.Footprint, exteriorWallCount, Doorway: layout.Doorway, SessionId: id);
+        rooms.Add(garage.Room);
+        var home = new DungeonState(id, building.Id, garage.Room.X+garage.Room.Width, Math.Max(height,garage.Room.Y+garage.Room.Height), rooms, walls, layout.Exit, Array.Empty<ActorState>(), Array.Empty<TreasureChestState>(), Array.Empty<string>(), true, furnishings,
+            layout.Footprint, exteriorWallCount, Doorway: layout.Doorway, SessionId: id, Garage: garage);
         if (InteriorPositionIsSafe(home.Exit, home)) return home;
         WorldPosition? safeEntry = Enumerable.Range(1, Math.Max(1, (int)Math.Floor(height * 2) - 1))
             .SelectMany(y => Enumerable.Range(1, Math.Max(1, (int)Math.Floor(width * 2) - 1)).Select(x => new WorldPosition(building.Position.Region, x / 2d, y / 2d)))
@@ -171,12 +176,22 @@ public sealed partial class RealityWorld
     private static bool FurniturePlacementValid(DungeonState home, CanonicalEntity furniture, double x, double y, double rotation, IReadOnlyList<CanonicalEntity> existing)
     {
         var size = FurnitureSize(furniture, rotation); const double clearance = .18;
+        var station=furniture.Properties.GetValueOrDefault("objectType");
+        if(station is "garageWorkbench" or "weaponsBench" && !InsideGarage(home.Garage,x,y))return false;
+        if(station is "stove" or "craftingTable" && InsideGarage(home.Garage,x,y))return false;
+        if(home.Garage is { } garage)
+        {
+            var entryY=(garage.Passage[0].Y+garage.Passage[^1].Y)/2;
+            var entryLeft=garage.Passage.Min(p=>p.X)-1;
+            if(x+size.Width/2>entryLeft && x-size.Width/2<garage.Room.X+1 && Math.Abs(y-entryY)<size.Depth/2+1.2)return false;
+            if(station is "garageWorkbench" or "weaponsBench" && (!InsideGarage(garage,x-size.Width/2-.35,y-size.Depth/2-.35)||!InsideGarage(garage,x+size.Width/2+.35,y+size.Depth/2+.35)))return false;
+        }
         if (x - size.Width / 2 < .35 || y - size.Depth / 2 < .35 || x + size.Width / 2 > home.Width - .35 || y + size.Depth / 2 > home.Height - .35) return false;
         if (home.Footprint is { Count: >= 3 } footprint)
         {
             var halfWidth = size.Width / 2 + .35; var halfDepth = size.Depth / 2 + .35;
             if (!new[] { new GeometryPoint(x - halfWidth, y - halfDepth), new GeometryPoint(x + halfWidth, y - halfDepth), new GeometryPoint(x + halfWidth, y + halfDepth), new GeometryPoint(x - halfWidth, y + halfDepth) }
-                .All(point => PointInsideFootprint(point, footprint))) return false;
+                .All(point => HomeFloorContains(home, point))) return false;
         }
         var exitDx = x - home.Exit.X; var exitDy = y - home.Exit.Y;
         if (Math.Sqrt(exitDx * exitDx + exitDy * exitDy) < Math.Max(2.2, Math.Max(size.Width, size.Depth))) return false;
@@ -185,7 +200,7 @@ public sealed partial class RealityWorld
             var otherSize = FurnitureSize(other);
             if (Math.Abs(x - other.Position.X) < (size.Width + otherSize.Width) / 2 + clearance && Math.Abs(y - other.Position.Y) < (size.Depth + otherSize.Depth) / 2 + clearance) return false;
         }
-        foreach (var wall in home.Walls.Skip(home.ExteriorWallCount))
+        foreach (var wall in home.Walls)
         {
             var vertical = Math.Abs(wall.X1 - wall.X2) < .01;
             if (vertical && Math.Abs(x - wall.X1) < size.Width / 2 + clearance && y + size.Depth / 2 > Math.Min(wall.Y1, wall.Y2) && y - size.Depth / 2 < Math.Max(wall.Y1, wall.Y2))

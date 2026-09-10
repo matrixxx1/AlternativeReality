@@ -32,7 +32,7 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
     private async Task<GeographicDataset> ReadAreaAsync(GeographicArea area, bool fresh, CancellationToken cancellationToken)
     {
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            FormattableString.Invariant($"v6:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
+            FormattableString.Invariant($"v7:{area.Center.Latitude:F6}:{area.Center.Longitude:F6}:{area.SizeMeters}"))))[..16];
         var canonicalCachePath = Path.Combine(_legacyCacheDirectory, $"area-{cacheKey}.json");
         if (!fresh && File.Exists(canonicalCachePath))
         {
@@ -54,7 +54,7 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
         }
         else
         {
-            rawJson = await DownloadOverpassAsync(BuildQuery(area), cancellationToken);
+            rawJson = await DownloadAreaAsync(area, cancellationToken);
         }
 
         var features = ParseFeatures(rawJson, area);
@@ -78,14 +78,49 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
         catch (UnauthorizedAccessException) { }
     }
 
+    private async Task<string> DownloadAreaAsync(GeographicArea area, CancellationToken cancellationToken)
+    {
+        try { return await DownloadOverpassAsync(BuildQuery(area), cancellationToken); }
+        catch (HttpRequestException) when (area.SizeMeters >= 1000 && !cancellationToken.IsCancellationRequested)
+        {
+            return await DownloadSectionsAsync(area, cancellationToken);
+        }
+    }
+
+    private async Task<string> DownloadSectionsAsync(GeographicArea area, CancellationToken cancellationToken)
+    {
+        // Dense blocks can exceed a public server's query time limit. Fetch four
+        // smaller overlapping sections and merge source objects before parsing;
+        // this still preserves complete building and water polygons.
+        var elements = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var offsetLatitude = area.SizeMeters / 4 / 111_320.0;
+        var offsetLongitude = offsetLatitude / Math.Cos(area.Center.Latitude * Math.PI / 180.0);
+        foreach (var north in new[] { -1, 1 })
+            foreach (var east in new[] { -1, 1 })
+            {
+                var section = new GeographicArea(new GeoCoordinate(area.Center.Latitude + north * offsetLatitude,
+                    area.Center.Longitude + east * offsetLongitude), area.SizeMeters / 2);
+                using var document = JsonDocument.Parse(await DownloadAreaAsync(section, cancellationToken));
+                foreach (var element in document.RootElement.GetProperty("elements").EnumerateArray())
+                {
+                    var key = $"{element.GetProperty("type").GetString()}:{element.GetProperty("id").GetInt64()}";
+                    if (!elements.TryGetValue(key, out var previous) ||
+                        element.TryGetProperty("tags", out _) && !previous.TryGetProperty("tags", out _))
+                        elements[key] = element.Clone();
+                }
+            }
+        return JsonSerializer.Serialize(new { elements = elements.Values });
+    }
+
     private async Task<string> DownloadOverpassAsync(string query, CancellationToken cancellationToken)
     {
         var configured = new Uri(_httpClient.BaseAddress ?? new Uri("https://overpass-api.de/"), "api/interpreter");
         var endpoints = new[]
         {
             configured,
-            new Uri("https://overpass.kumi.systems/api/interpreter"),
-            new Uri("https://overpass.nchc.org.tw/api/interpreter")
+            new Uri("https://overpass.private.coffee/api/interpreter"),
+            new Uri("https://maps.mail.ru/osm/tools/overpass/api/interpreter"),
+            new Uri("https://overpass-api.de/api/interpreter")
         }.Distinct().ToArray();
         var errors = new List<string>();
         foreach (var endpoint in endpoints)
@@ -95,10 +130,19 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
                 using var content = new FormUrlEncodedContent(new Dictionary<string, string> { ["data"] = query });
                 using var response = await _httpClient.PostAsync(endpoint, content, cancellationToken);
                 if (response.IsSuccessStatusCode)
-                    return await response.Content.ReadAsStringAsync(cancellationToken);
+                {
+                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    using var document = JsonDocument.Parse(json);
+                    // Overpass can return HTTP 200 with a timeout and only partial data.
+                    // Never replace a saved map with that incomplete response.
+                    if (!document.RootElement.TryGetProperty("remark", out var remark) || string.IsNullOrWhiteSpace(remark.GetString()))
+                        return json;
+                    errors.Add($"{endpoint.Host}: {remark.GetString()}");
+                    continue;
+                }
                 errors.Add($"{endpoint.Host}: {(int)response.StatusCode}");
             }
-            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException && !cancellationToken.IsCancellationRequested)
             {
                 errors.Add($"{endpoint.Host}: {exception.GetType().Name}");
             }
@@ -206,16 +250,18 @@ public sealed partial class OverpassGeographicProvider : IGeographicProvider
                 continue;
             }
 
+            var wholePolygon = kind is EntityKind.Water or EntityKind.Building;
             var geometry = way.Nodes
-                .Where(nodeId => nodes.ContainsKey(nodeId) && (kind == EntityKind.Water || RegionId.FromGeo(nodes[nodeId]) == area.Region))
-                .Select(nodeId => kind == EntityKind.Water ? projection.ProjectGeometry(nodes[nodeId]) : projection.Project(nodes[nodeId]))
-                .Where(position => kind is EntityKind.Road or EntityKind.Sidewalk or EntityKind.Water || area.Bounds.Contains(position.X, position.Y))
+                .Where(nodeId => nodes.ContainsKey(nodeId) && (wholePolygon || RegionId.FromGeo(nodes[nodeId]) == area.Region))
+                .Select(nodeId => wholePolygon ? projection.ProjectGeometry(nodes[nodeId]) : projection.Project(nodes[nodeId]))
+                .Where(position => wholePolygon || kind is EntityKind.Road or EntityKind.Sidewalk || area.Bounds.Contains(position.X, position.Y))
                 .Select(position => new GeometryPoint(position.X, position.Y, position.Z))
                 .ToArray();
-            if (geometry.Length < 2 || kind == EntityKind.Water && (!OverlapsArea(geometry, area.Bounds) || way.Nodes.Any(id => !nodes.ContainsKey(id))))
+            if (geometry.Length < 2 || wholePolygon && (!OverlapsArea(geometry, area.Bounds) || way.Nodes.Any(id => !nodes.ContainsKey(id))))
             {
                 continue;
             }
+            if (kind == EntityKind.Building && (way.Nodes.Length < 4 || way.Nodes[0] != way.Nodes[^1] || !ValidBuildingFootprint(geometry))) continue;
 
             var centerX = geometry.Average(point => point.X);
             var centerY = geometry.Average(point => point.Y);

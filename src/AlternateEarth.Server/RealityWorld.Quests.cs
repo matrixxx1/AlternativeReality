@@ -232,7 +232,7 @@ public sealed partial class RealityWorld
         if (!player.GodMode && !OwnsWeapon(playerId, weapon)) throw new InvalidOperationException("You no longer have that weapon.");
         var now = DateTimeOffset.UtcNow;
         var interval = TimeSpan.FromSeconds(Math.Clamp(InventoryDefinition(weapon).AttackIntervalSeconds, .05, 10) *
-            (weapon is "fist" or "knife" or "sword" ? 1 : ProgressionRules.ShootingInterval(StatsFor(playerId))));
+            (weapon is "fist" or "knife" or "sword" ? 1 : ProgressionRules.ShootingInterval(StatsFor(playerId)) * GloveCatalog.ShootingInterval(player)));
         if (_lastPlayerAttack.TryGetValue((playerId, weapon), out var priorAttack) && now - priorAttack < interval)
             throw new InvalidOperationException($"Your {DisplayItem(weapon)} is not ready yet.");
         var ammo = WeaponDefinition(weapon).Ammo;

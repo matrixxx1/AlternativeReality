@@ -40,11 +40,12 @@ public sealed partial class SqliteRealityStore
     }
 
     public async Task SaveCraftAttemptAsync(string realityId, string playerId, InventoryState inventory, long craftingExperience,
-        string accountId, IReadOnlyList<CanonicalEntity>? furniture, CancellationToken token)
+        string accountId, IReadOnlyList<CanonicalEntity>? furniture, CancellationToken token, InventoryState? backpack = null)
     {
         await using var connection = await OpenAsync(token);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token);
         await WriteInventoryAsync(connection, transaction, inventory, token);
+        if (backpack is not null) await WriteInventoryAsync(connection, transaction, backpack, token);
         var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "INSERT INTO CraftingProgress (RealityId,PlayerId,Experience) VALUES ($r,$p,$xp) ON CONFLICT(RealityId,PlayerId) DO UPDATE SET Experience=excluded.Experience";
         command.Parameters.AddWithValue("$r", realityId); command.Parameters.AddWithValue("$p", playerId); command.Parameters.AddWithValue("$xp", craftingExperience);

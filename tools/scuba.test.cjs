@@ -19,6 +19,14 @@ test('underwater allows every melee weapon and only the spear gun at range',()=>
   for(const weapon of ['fist','knife','sword','hockeyStick','iceSkate','zombieBite','spearGun'])assert.ok(scuba.canAttack(weapon));
   for(const weapon of ['rifle','pistol','crossbow','rock','grenade','rocketLauncher','flamethrower','napalmBottle'])assert.equal(scuba.canAttack(weapon),false);
 });
+
+test('seabed rises continuously to solid shores and navigation stays above it',()=>{
+ const dungeon={width:180,height:20,underwater:{westShore:true,eastShore:true}};
+ for(const [x,y] of [[.5,19.5],[9.5,10],[18.5,.5],[90,.5],[161.5,.5],[170.5,10],[179.5,19.5]])assert.equal(scuba.floorHeight(dungeon,x),y);
+ for(let x=-10;x<=190;x+=.25){const point=scuba.clampPosition(dungeon,{x,y:-10});assert.ok(point.x>=1&&point.x<=179);assert.ok(point.y>=scuba.floorHeight(dungeon,point.x)+.35-1e-9);assert.ok(point.y<=19.5);}
+ dungeon.underwater.westShore=false;assert.equal(scuba.floorHeight(dungeon,-100),.5);
+ dungeon.underwater.eastShore=false;assert.equal(scuba.floorHeight(dungeon,300),.5);
+});
 test('side view has reversible coordinates and a visible top surface at every viewport size',()=>{
   for(const [width,height]of [[1200,900],[600,600],[1800,1100]])for(const scale of [3,28,70]){
     const camera={x:53,y:18};

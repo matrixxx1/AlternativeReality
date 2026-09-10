@@ -88,6 +88,7 @@ public sealed partial class RealityWorld
                 _itemConfigurations[item.ItemType] = item with
                 {
                     Nutrition = defaults.Nutrition,
+                    StorageSection = defaults.StorageSection,
                     SpeedModifierMph = item.ItemType.Equals("ufo", StringComparison.OrdinalIgnoreCase) && Math.Abs((item.SpeedModifierMph ?? 56.5) - 56.5) < .001
                         ? defaults.SpeedModifierMph
                         : item.SpeedModifierMph ?? defaults.SpeedModifierMph,
@@ -117,6 +118,7 @@ public sealed partial class RealityWorld
         await _store.ReleaseExpiredBaseClaimsAsync(Configuration.Id, DateTimeOffset.UtcNow, cancellationToken);
         foreach (var claim in await _store.LoadPublicBaseClaimsAsync(Configuration.Id, cancellationToken))
             _publicBaseClaims[claim.BuildingId] = claim;
+        await _store.InitializeCasinoAsync(cancellationToken);
         RestoreBuriedChests();
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
         _loadedAreas["0:0"] = Configuration.Area.Bounds;
@@ -261,6 +263,13 @@ public sealed partial class RealityWorld
                 await _store.SaveRecipeStudyAsync(Configuration.Id, characterId, study, _craftingExperience[characterId], token: cancellationToken);
                 _recipeStudies[(characterId, recipeId)] = study;
             }
+        }
+        if (!_learnedRecipes.ContainsKey((characterId, "water")))
+        {
+            var study = new RecipeStudy("water", 1, .5);
+            await _store.SaveRecipeStudyAsync(Configuration.Id, characterId, study, _craftingExperience[characterId], token: cancellationToken);
+            _recipeStudies[(characterId, "water")] = study;
+            _learnedRecipes[(characterId, "water")] = 0;
         }
         var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
         RestorePhotographs(inventory.Items);
@@ -469,7 +478,7 @@ public sealed partial class RealityWorld
             TravelMode.Skateboard => "skateboard", TravelMode.Bike => "bike", TravelMode.EBike => "eBike",
             TravelMode.DirtBike => "dirtBike", TravelMode.Motorcycle => "motorcycle", TravelMode.Raft => "inflatableRaft", TravelMode.Ufo => "ufo", TravelMode.Scuba => "scubaGear", TravelMode.Swim => InventoryQuantity(characterId, "scubaGear") > 0 ? "scubaGear" : "swimmies", _ => null
         };
-        if (vehicle is not null && (!player.GodMode || player.TravelMode == TravelMode.Ufo) && InventoryQuantity(characterId, vehicle) <= 0)
+        if (vehicle is not null && !player.GodMode && InventoryQuantity(characterId, vehicle) <= 0)
         {
             var stopped = await SetTravelModeAsync(characterId, TravelMode.Walk, cancellationToken);
             return new(stopped, false, false, false, false, false, "That vehicle is no longer in an inventory you own. Switched to walking.");
@@ -620,15 +629,15 @@ public sealed partial class RealityWorld
         if (!player.GodMode && mode == TravelMode.EBike && InventoryQuantity(characterId, "eBike") <= 0) throw new InvalidOperationException("You need an e-bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.DirtBike && InventoryQuantity(characterId, "dirtBike") <= 0) throw new InvalidOperationException("You need a dirt bike in your inventory.");
         if (!player.GodMode && mode == TravelMode.Motorcycle && InventoryQuantity(characterId, "motorcycle") <= 0) throw new InvalidOperationException("You need a motorcycle in your inventory.");
-        if (mode == TravelMode.Ufo && InventoryQuantity(characterId, "ufo") <= 0) throw new InvalidOperationException("You need a UFO in your inventory.");
+        if (!player.GodMode && mode == TravelMode.Ufo && InventoryQuantity(characterId, "ufo") <= 0) throw new InvalidOperationException("You need a UFO in your inventory.");
         if (mode == TravelMode.Raft)
         {
             if (!player.GodMode && InventoryQuantity(characterId, "inflatableRaft") <= 0) throw new InvalidOperationException("You need an inflatable raft.");
-            if (player.LocationId == "outdoor" && TerrainFor(player) != TerrainType.ShallowWater && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed from shallow water.");
+            if (player.LocationId == "outdoor" && !RaftTerrainOnly(TerrainFor(player)) && player.TravelMode != TravelMode.Raft) throw new InvalidOperationException("A raft can only be deployed in shallow or deep water.");
         }
         if (mode == TravelMode.Swim)
         {
-            if (InventoryQuantity(characterId, "swimmies") <= 0) throw new InvalidOperationException("Find Swimmies before swimming.");
+            if (!player.GodMode && InventoryQuantity(characterId, "swimmies") <= 0) throw new InvalidOperationException("Find Swimmies before swimming.");
             if (!IsWater(TerrainFor(player))) throw new InvalidOperationException("Swimmies can only be used in water.");
         }
         var landing = player.Position;
@@ -731,7 +740,11 @@ public sealed partial class RealityWorld
         if (!_players.TryGetValue(characterId, out var player)) return (new(false, Array.Empty<WorldPosition>(), "Unknown player."), false);
         if (player.LocationId != "outdoor" && _dungeons.TryGetValue(player.LocationId, out var dungeon))
         {
-            if (dungeon.Underwater is not null) request = request with { X = Math.Clamp(request.X, .5, dungeon.Width - .5), Y = Math.Clamp(request.Y, .5, dungeon.Height - .5) };
+            if (dungeon.Underwater is not null)
+            {
+                var waterTarget = ScubaGeometry.ClampPosition(dungeon.Width, dungeon.Height, dungeon.Underwater, player.Position with { X = request.X, Y = request.Y });
+                request = request with { X = waterTarget.X, Y = waterTarget.Y };
+            }
             if (request.X < .5 || request.Y < .5 || request.X > dungeon.Width - .5 || request.Y > dungeon.Height - .5) return (new(false, Array.Empty<WorldPosition>(), dungeon.IsHome ? "That point is outside Home." : "That point is outside the dungeon."), false);
             var target = player.Position with { X = request.X, Y = request.Y, Z = 0 };
             if (dungeon.Walls.Any(wall => CrossesDungeonWall(player.Position, target, wall))) return (new(false, Array.Empty<WorldPosition>(), dungeon.IsHome ? "A wall in Home blocks that route. Move through a doorway." : "A dungeon wall blocks that route. Move through a doorway."), false);
@@ -755,7 +768,10 @@ public sealed partial class RealityWorld
                 ? (waterRoute, expanded)
                 : (new(false, Array.Empty<WorldPosition>(), "No continuous water route to that destination was found."), expanded);
         }
-        return (Navigation.FindPath(player.Position, request.X, request.Y, terrain => ConfiguredSpeedMetersPerSecond(player, terrain), cancellationToken: cancellationToken), expanded);
+        // Swimmers can cross deep water and reach shore, where movement switches to walking.
+        // The default walking route excludes deep water; collision checks still apply here.
+        Func<TerrainType, bool>? terrainAllowed = player.TravelMode == TravelMode.Swim ? _ => true : null;
+        return (Navigation.FindPath(player.Position, request.X, request.Y, terrain => ConfiguredSpeedMetersPerSecond(player, terrain), terrainAllowed, cancellationToken), expanded);
     }
 
     public IReadOnlyList<ActorState> TriggerWorldEvent(string characterId, string eventType)
@@ -1215,6 +1231,7 @@ public sealed partial class RealityWorld
             if (loaded.Kind is EntityKind.Building or EntityKind.PointOfInterest && FoodBusinesses.OffersDelivery(loaded.Properties))
                 _baseEntities[entity.Id] = loaded with { Properties = new Dictionary<string, string>(loaded.Properties) { ["merchantCategory"] = "food" } };
         }
+        EnsureCasinoBuilding();
         foreach (var sample in generated.Elevation) _elevationSamples[$"{sample.X:F1}:{sample.Y:F1}"] = sample;
         var bounds = generated.Area.Bounds;
         _loadedBounds = _loadedBounds is null ? bounds : new WorldBounds(Math.Min(_loadedBounds.MinimumX, bounds.MinimumX), Math.Min(_loadedBounds.MinimumY, bounds.MinimumY), Math.Max(_loadedBounds.MaximumX, bounds.MaximumX), Math.Max(_loadedBounds.MaximumY, bounds.MaximumY));
@@ -1512,6 +1529,11 @@ public sealed partial class RealityWorld
         }
         return actor.Subtype switch
         {
+            "cow" => "Mooooo!",
+            "chicken" => "Cluck cluck!",
+            "pig" => "Oink!",
+            "sheep" => "Baaaa!",
+            "goat" => "Meeeeh!",
             "bird" => _actorRandom.Next(2) == 0 ? "squeak!" : "kaaaw!",
             "cat" => "meow!",
             "dog" => "bark!",

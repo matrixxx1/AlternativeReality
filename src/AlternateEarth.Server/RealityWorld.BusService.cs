@@ -15,6 +15,8 @@ public sealed partial class RealityWorld
                 throw new InvalidOperationException("You cannot board a bus right now.");
             if (bus.State.HealthHearts <= 0) throw new InvalidOperationException("This bus is disabled by damage.");
             if (bus.State.SpeedMetersPerSecond > .1) throw new InvalidOperationException("Wait until the bus stops.");
+            if (bus.State.Status != "out of service")
+                throw new InvalidOperationException("Only a parked, out-of-service bus can be boarded directly. Wait at a bus stop for a bus already in service.");
             var point = TransitGeometry.ClosestPoint(bus.State, player.Position);
             var dx = Math.Cos(bus.State.HeadingRadians); var dy = Math.Sin(bus.State.HeadingRadians);
             var right = (player.Position.X-bus.State.Position.X)*dy-(player.Position.Y-bus.State.Position.Y)*dx;

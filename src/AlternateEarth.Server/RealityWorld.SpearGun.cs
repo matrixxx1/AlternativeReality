@@ -90,6 +90,7 @@ public sealed partial class RealityWorld
             var next = distance < .01 ? actor.Position : actor.Position with
             { X = Math.Clamp(actor.Position.X + (destination.X - actor.Position.X) / distance * step, 1, dungeon.Width - 1),
               Y = Math.Clamp(actor.Position.Y + (destination.Y - actor.Position.Y) / distance * step, 1, dungeon.Height - 2) };
+            next = ScubaGeometry.ClampPosition(dungeon.Width, dungeon.Height, dungeon.Underwater!, next);
             var updated = actor with { Position = next, Facing = next.X < actor.Position.X ? "west" : "east", IsMoving = true, Version = actor.Version + 1 };
             SetActor(dungeon.Id, updated); changed.Add(updated);
             if (!chase || next.Distance2D(player.Position) > 1.6 || _lastActorAttack.TryGetValue((actor.Id, player.Id), out var prior) && now - prior < TimeSpan.FromSeconds(2.5)) continue;

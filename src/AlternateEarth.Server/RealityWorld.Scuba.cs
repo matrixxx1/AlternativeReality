@@ -16,7 +16,7 @@ public sealed partial class RealityWorld
         if (IsSubmerged(player)) return player;
         if (player.LocationId != "outdoor" || !IsWater(TerrainFor(player)))
             throw new InvalidOperationException("Activate scuba gear while in water or on a raft in water.");
-        if (InventoryQuantity(player.Id, "scubaGear") <= 0) throw new InvalidOperationException("You need scuba gear to submerge.");
+        if (!player.GodMode && InventoryQuantity(player.Id, "scubaGear") <= 0) throw new InvalidOperationException("You need scuba gear to submerge.");
         var water = _baseEntities.Values.FirstOrDefault(e => e.Kind == EntityKind.Water && WaterGeometry.Contains(e, player.Position.X, player.Position.Y));
         var bounds = view ?? new WorldBounds(player.Position.X - 250, player.Position.Y - 250, player.Position.X + 250, player.Position.Y + 250);
         ValidateMapView(bounds);
@@ -37,12 +37,13 @@ public sealed partial class RealityWorld
         var info = new UnderwaterState(water?.Properties.GetValueOrDefault("name") ?? "Submerged waters", player.Position, west, east,
             !IsWater(Navigation.TerrainAt(west - 1, player.Position.Y)) && !Navigation.IsBlocked(west - 1, player.Position.Y),
             !IsWater(Navigation.TerrainAt(east + 1, player.Position.Y)) && !Navigation.IsBlocked(east + 1, player.Position.Y), area);
+        exit = ScubaGeometry.ClampPosition(width, height, info, exit);
         var actors = new List<ActorState>(); var chests = new List<TreasureChestState>();
         var random = new Random(StableInt(id));
         void Add(string subtype, string name, double x, double y, double health, double hostility, string? faction = null)
         {
             var actorId = $"{id}:animal:{actors.Count}";
-            actors.Add(new(actorId, EntityKind.Animal, subtype, name, exit with { X = x, Y = y }, Facing: "east", HealthHearts: health,
+            actors.Add(new(actorId, EntityKind.Animal, subtype, name, ScubaGeometry.ClampPosition(width, height, info, exit with { X = x, Y = y }), Facing: "east", HealthHearts: health,
                 MaximumHealthHearts: health, FriendRating: hostility, TravelMode: TravelMode.Scuba, LocationId: id, FactionId: faction));
             _relationships[(player.Id, actorId)] = hostility;
         }
@@ -57,7 +58,8 @@ public sealed partial class RealityWorld
         }
         for (var i = 0; i < 1 + difficulty / 30; i++)
         {
-            var chest = new TreasureChestState($"{id}:chest:{i}", exit with { X = width * (i + 1) / (2 + difficulty / 30), Y = 2 }, id, IsGrand: true);
+            var chest = new TreasureChestState($"{id}:chest:{i}", ScubaGeometry.ClampPosition(width, height, info,
+                exit with { X = width * (i + 1) / (2 + difficulty / 30), Y = 2 }), id, IsGrand: true);
             chests.Add(chest);
             Add(i % 2 == 0 ? "largeShark" : "largeOctopus", i % 2 == 0 ? "Treasure guardian · Large shark" : "Treasure guardian · Giant octopus",
                 chest.Position.X + 1, 3, 15 + difficulty * 1.2, -5 - difficulty * .06, chest.Id);
@@ -88,19 +90,12 @@ public sealed partial class RealityWorld
         var seconds = Math.Clamp((now - prior).TotalSeconds, .01, .15);
         var step = Math.Min(3 * seconds, Math.Min(remaining ?? double.MaxValue, request.MaximumDistanceMeters is > 0 ? request.MaximumDistanceMeters.Value : double.MaxValue));
         var x = player.Position.X + dx * step; var y = player.Position.Y + dy * step;
-        if (x <= .5 && dungeon.Underwater!.WestShore || x >= dungeon.Width - .5 && dungeon.Underwater!.EastShore)
-        {
-            var shore = dungeon.Underwater.Origin with { X = x <= .5 ? dungeon.Underwater.WestX - 1 : dungeon.Underwater.EastX + 1 };
-            _returnPositions[player.Id] = shore;
-            var surfaced = await ExitScubaAsync(player, dungeon, shore, token);
-            return new(surfaced, true, false, false, false, false, "Reached shore. Scuba off; walking.");
-        }
-        if (y >= dungeon.Height - .5)
-        {
-            var surfaced = await ExitDungeonAsync(player.Id, token);
-            return new(surfaced, true, false, false, false, false, "Surfaced. Scuba off.");
-        }
-        var next = player.Position with { X = Math.Clamp(x, .5, dungeon.Width - .5), Y = Math.Clamp(y, .5, dungeon.Height - .5) };
+        // Movement stays underwater, including at the waterline and shoreline. Surface explicitly.
+        var next = ScubaGeometry.ClampPosition(dungeon.Width, dungeon.Height, dungeon.Underwater!, player.Position with { X = x, Y = y });
+        var distance = player.Position.Distance2D(next);
+        if (distance > step && player.Position.Y >= ScubaGeometry.FloorHeight(dungeon.Width, dungeon.Height, dungeon.Underwater!, player.Position.X) + .35)
+            next = player.Position with { X = player.Position.X + (next.X - player.Position.X) * step / distance,
+                Y = player.Position.Y + (next.Y - player.Position.Y) * step / distance };
         var updated = player with { Position = next, SpeedMetersPerSecond = player.Position.Distance2D(next) / seconds, Version = player.Version + 1 };
         await SavePlayerAsync(updated, token); await RevealAsync(updated, dungeon, token);
         return new(updated, true, false, false, false, false, null);
@@ -110,7 +105,7 @@ public sealed partial class RealityWorld
     {
         var terrain = Navigation.TerrainAt(destination.X, destination.Y);
         var updated = player with { LocationId = "outdoor", Position = destination with { Z = Navigation.ElevationAt(destination.X, destination.Y) },
-            Terrain = terrain, TravelMode = SurfaceMode(terrain, InventoryQuantity(player.Id, "inflatableRaft") > 0),
+            Terrain = terrain, TravelMode = SurfaceMode(terrain, player.GodMode || InventoryQuantity(player.Id, "inflatableRaft") > 0),
             SpeedMetersPerSecond = 0, SwimExhausted = false, Version = player.Version + 2 };
         await SavePlayerAsync(updated, token); _returnPositions.TryRemove(player.Id, out _);
         await ResetDungeonSessionAsync(player.Id, dungeon.Id, token);

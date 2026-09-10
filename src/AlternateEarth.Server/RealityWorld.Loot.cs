@@ -34,7 +34,7 @@ public sealed partial class RealityWorld
 
             var rewards = new List<ItemStack>();
             var remaining = new List<ItemStack>();
-            foreach (var item in loot.Items)
+            foreach (var item in loot.Items.OrderByDescending(item => TreasureQualityRank(item.Quality)))
             {
                 var quantity = (int)Math.Min(item.Quantity, requested.GetValueOrDefault(item.ItemType));
                 if (quantity > 0) rewards.Add(item with { Quantity = quantity });
@@ -44,7 +44,8 @@ public sealed partial class RealityWorld
             if (rewards.Count > 0 && !CanAddToBackpack(playerId, rewards, out var capacityMessage))
                 throw new InvalidOperationException(capacityMessage + " Drop carried items or select fewer items.");
 
-            foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity, reward.Quality);
+            foreach (var reward in rewards) AddInventory(playerId, reward.ItemType, reward.Quantity,
+                reward.Quality ?? (reward.Category == InventoryCategory.Weapon ? "Common" : null));
             var updated = await CreditTreasureMoneyAsync(playerId, loot.MoneyCents, cancellationToken);
             var remainder = remaining.Count == 0 ? null : loot with { Items = remaining.ToArray(), MoneyCents = 0 };
             if (remainder is null) _loot.TryRemove(loot.Id, out _);

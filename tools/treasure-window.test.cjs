@@ -4,6 +4,9 @@ function implementation(name){const start=source.indexOf(`  function ${name}(`);
 function harness(){
   function element(){return{children:[],dataset:{},listeners:{},classList:{contains:()=>false},append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},setAttribute(){},addEventListener(type,listener){this.listeners[type]=listener;},focus(){}};}
   const heading=element(),ui={treasureItems:element(),treasureCash:element(),treasureWeight:element(),treasureWarning:element(),treasureTake:element(),treasureClose:element(),treasureWindow:{hidden:true,scrollHeight:500,classList:{contains:()=>false},querySelector:()=>heading}};
+  for(const name of ['treasureTakeAll','treasureHint','treasureColumns']){
+    assert.ok(source.includes(`${name}:$('#${name}')`),`${name} is bound to the actual control`);ui[name]=element();
+  }
   ui.treasureItems.querySelectorAll=()=>ui.treasureItems.children.map(row=>row.children.at(-1)).filter(input=>input?.dataset?.item);
   const state={players:new Map([['me',{}]]),playerId:'me',loot:new Map(),chests:new Map(),privateState:{inventory:{items:[{itemType:'rock',quantity:98,category:'weapon',unitWeightPounds:.5}],weightPounds:49,maximumWeightPounds:50}}};
   const sent=[],c=vm.createContext({ui,state,sent,document:{createElement:element},itemDisplayName:type=>type,createItemArt:element,stackWeight:item=>item.quantity*item.unitWeightPounds,weightText:w=>w+' lb',effectiveCarryingCapacity:(me,capacity)=>me?.godMode?Infinity:capacity,send:message=>sent.push(message),applyPrivate:()=>{},showToast:()=>{},innerWidth:1200,innerHeight:800,viewportWidth:()=>900,floatPanel:()=>{}});
@@ -58,6 +61,13 @@ test('Take all looting bypasses the window for both chests and loose treasure wh
     assert.equal(c.sent[0].type,kind==='loot'?'takeLootItems':'takeChestItems');
   }
 });
+test('Upgrades only delegates clicked treasure to the server without an unfiltered take',()=>{
+ const c=harness();c.state.lootingMode='upgrades';
+ c.receiveNearbyTreasure({type:'nearbyTreasureOpened',contents:{anchorId:'loot',sources:[{id:'loot',chest:false}],items:c.loot.items}});
+ assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'autoTakeNearbyTreasure');assert.equal(c.sent[0].upgradesOnly,true);
+ assert.equal(c.ui.treasureWindow.hidden,true);assert.equal(c.state.autoTreasurePending,true);
+});
+
 test('Take all looting falls back to item selection when weight is full',()=>{
   for(const limit of ['weight']){
     const c=harness();c.state.lootingMode='all';
@@ -104,10 +114,20 @@ test('one nearby selection includes all source IDs and preserves quantity after 
  c.openTreasure({...contents,items:[{...contents.items[0],quantity:1}]},null,true);assert.equal(c.ui.treasureItems.querySelectorAll()[0].value,'1');
 });
 
-test('event victory offers selectable rewards even with Take all enabled',()=>{
+test('event victory follows Auto take all when rewards fit',()=>{
  const c=harness();c.state.lootingMode='all';c.state.privateState.inventory.weightPounds=0;
  c.openTreasure({nearby:true,isEventReward:true,anchorId:'reward',sources:[{id:'reward',chest:false}],items:c.loot.items},'Event complete. Collect your treasure.',false,true);
- assert.equal(c.sent.length,0);assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.ui.treasureItems.querySelectorAll().length,1);
+ assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'takeNearbyTreasure');assert.equal(c.ui.treasureWindow.hidden,true);
+});
+
+test('Retro Auto take all waits for the pickup acknowledgement before showing the exit',()=>{
+ const c=harness();c.state.lootingMode='all';c.state.privateState.inventory.weightPounds=0;c.state.dungeon={retroBattle:{},isCompleted:true};
+ c.state.chestContents={chestId:'old'};
+ c.receiveNearbyTreasure({type:'nearbyTreasureOpened',contents:{anchorId:'reward',isEventReward:true,sources:[{id:'reward',chest:false}],items:c.loot.items}});
+ assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'takeNearbyTreasure');assert.equal(c.ui.treasureWindow.hidden,true);
+ c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{anchorId:'reward',isEventReward:true,sources:[],items:[]}});
+ assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.sent.length,1);
+ c.closeTreasure();assert.equal(c.sent[1].type,'exitDungeon');
 });
 
 test('automatic ordinary pickup does not reopen an empty window',()=>{
@@ -122,5 +142,35 @@ test('event collection leaves explicit completion feedback and closing Retro exi
  c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{anchorId:'reward',isEventReward:true,sources:[],items:[],message:'Everything collected. Your treasure is in your inventory.'}});
  assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.ui.treasureItems.querySelectorAll().length,0);
  assert.match(c.ui.treasureCash.textContent,/Everything collected/);assert.equal(c.ui.treasureTake.disabled,true);
+ assert.equal(c.ui.treasureTakeAll.disabled,true);
+ for(const name of ['treasureHint','treasureColumns','treasureWeight','treasureTakeAll','treasureTake'])assert.equal(c.ui[name].hidden,true,name);
+ assert.equal(c.ui.treasureClose.textContent,'Close & leave dungeon');assert.equal(c.sent.length,0);
  c.closeTreasure();c.closeTreasure();assert.equal(c.sent.filter(m=>m.type==='exitDungeon').length,1);
+});
+
+test('taking all remaining ordinary or event treasure closes the selection window',()=>{
+ for(const isEventReward of [false,true])for(const takeAll of [false,true]){
+  const c=harness();c.state.privateState.inventory.weightPounds=0;
+  const contents={anchorId:'reward',isEventReward,sources:[{id:'reward',chest:false}],items:c.loot.items};
+  c.receiveNearbyTreasure({type:'nearbyTreasureOpened',contents});
+  if(takeAll)c.takeAllTreasure();else{c.ui.treasureItems.querySelectorAll()[0].value='10';c.takeTreasureSelection();}
+  assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'takeNearbyTreasure');
+  c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{...contents,items:[],sources:[],message:'Everything collected.'}});
+  assert.equal(c.ui.treasureWindow.hidden,true);assert.equal(c.state.chestContents,null);
+  c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{...contents,items:[],sources:[]}});
+  assert.equal(c.ui.treasureWindow.hidden,true);assert.equal(c.sent.length,1);
+ }
+});
+
+test('partial event pickup keeps remaining rewards selectable and restores controls after completion',()=>{
+ const c=harness();c.state.dungeon={retroBattle:{},isCompleted:true};
+ const contents={anchorId:'reward',isEventReward:true,sources:[{id:'reward',chest:false}],items:c.loot.items};
+ c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{...contents,items:[],sources:[]}});
+ c.closeTreasure();c.state.dungeon=null;
+ c.receiveNearbyTreasure({type:'nearbyTreasureOpened',contents});
+ c.ui.treasureItems.querySelectorAll()[0].value='1';c.takeTreasureSelection();
+ c.receiveNearbyTreasure({type:'nearbyTreasureUpdated',contents:{...contents,items:[{...c.loot.items[0],quantity:9}]}});
+ assert.equal(c.ui.treasureWindow.hidden,false);assert.equal(c.ui.treasureItems.querySelectorAll()[0].value,'1');
+ for(const name of ['treasureHint','treasureColumns','treasureWeight','treasureTakeAll','treasureTake'])assert.equal(c.ui[name].hidden,false,name);
+ assert.equal(c.ui.treasureTakeAll.disabled,false);assert.equal(c.ui.treasureClose.textContent,'Close');
 });

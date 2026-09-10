@@ -136,7 +136,7 @@ public sealed partial class RealityWorldTests
         PhotoField<ConcurrentDictionary<(string Player,string Recipe),byte>>(world,"_learnedRecipes")[("crafter",recipe.Id)]=0;
         var supplies=PhotoField<ConcurrentDictionary<string,Dictionary<string,int>>>(world,"_homeItemStorage")["crafter-account"];
         foreach(var i in recipe.Ingredients)supplies[i.ItemType]=i.Quantity;
-        var crafted=await world.CraftItemAsync("crafter",new("craft-table","antibiotics"));
+        var crafted=await world.CraftItemAsync("crafter",new("misc-table","antibiotics"));
         Assert.Contains(crafted.PrivateState.HomeItemStorage!.Items,i=>i.ItemType=="antibiotics"&&i.Quantity==1);
         Assert.DoesNotContain(crafted.PrivateState.HomeItemStorage.Items,i=>i.ItemType=="medicinalCulture"&&i.Quantity>0);
     }

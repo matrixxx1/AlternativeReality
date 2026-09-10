@@ -445,6 +445,20 @@ public sealed class RealitySocketHub
                         await BroadcastAreaHazardsAsync(cancellationToken);
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
+                    case "buyHomeUpgrade":
+                        var upgraded = await _world.BuyHomeUpgradeAsync(characterId, root.GetProperty("upgradeId").GetString() ?? "", cancellationToken);
+                        await BroadcastAsync(new { type = "playerUpdated", player = upgraded }, null, cancellationToken);
+                        await connection.SendAsync(new { type = "homeWorkshopUpdated", privateState = _world.GetPrivateState(characterId), message = "Home upgrade permanently installed." }, cancellationToken);
+                        break;
+                    case "useWaterPurifier":
+                        var replacing = root.TryGetProperty("replaceFilter", out var filterReplacement) && filterReplacement.GetBoolean();
+                        await _world.UseWaterPurifierAsync(characterId, replacing, cancellationToken);
+                        await connection.SendAsync(new { type = "homeWorkshopUpdated", privateState = _world.GetPrivateState(characterId), message = replacing ? "New filter installed: 50 uses remaining." : "Purified water added to Home storage.", sound = replacing ? "metal" : "pour" }, cancellationToken);
+                        break;
+                    case "collectDirtyWater":
+                        await _world.CollectDirtyWaterAsync(characterId, cancellationToken);
+                        await connection.SendAsync(new { type = "dirtyWaterCollected", privateState = _world.GetPrivateState(characterId), message = "Collected dirty water." }, cancellationToken);
+                        break;
                     case "requestCrafting":
                         var craftingRequest = root.Deserialize<RequestCraftingRequest>(SharedJson.Options)!;
                         await connection.SendAsync(new { type = "craftingOpened", crafting = _world.RequestCrafting(characterId, craftingRequest.FurnitureId), privateState = _world.GetPrivateState(characterId) }, cancellationToken);
@@ -453,7 +467,7 @@ public sealed class RealitySocketHub
                         var crafted = await _world.CraftItemAsync(characterId, root.Deserialize<CraftItemRequest>(SharedJson.Options)!, cancellationToken);
                         if (crafted.Player is not null) await BroadcastAsync(new { type = "playerUpdated", player = crafted.Player }, null, cancellationToken);
                         if (crafted.Explosion is not null) await BroadcastCombatAsync(new[] { crafted.Explosion }, cancellationToken);
-                        await connection.SendAsync(new { type = "craftingUpdated", crafting = crafted.Crafting, privateState = crafted.PrivateState, message = crafted.Message }, cancellationToken);
+                        await connection.SendAsync(new { type = "craftingUpdated", crafting = crafted.Crafting, privateState = crafted.PrivateState, message = crafted.Message, sound = crafted.Sound }, cancellationToken);
                         break;
                     case "openChest":
                         var chestRequest = root.Deserialize<OpenChestRequest>(SharedJson.Options)!;
@@ -465,6 +479,19 @@ public sealed class RealitySocketHub
                         var nearbyTaken = await _world.TakeNearbyTreasureAsync(characterId, root.Deserialize<TakeNearbyTreasureRequest>(SharedJson.Options)!, cancellationToken);
                         await BroadcastNearbyTreasureAsync(nearbyTaken, cancellationToken);
                         await connection.SendAsync(new { type = "nearbyTreasureUpdated", contents = nearbyTaken, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
+                        break;
+                    case "autoTakeNearbyTreasure":
+                        NearbyTreasureState? automaticTreasure = null;
+                        try
+                        {
+                            automaticTreasure = await _world.AutoTakeNearbyTreasureAsync(characterId,
+                                root.GetProperty("sourceId").GetString() ?? string.Empty, root.GetProperty("chest").GetBoolean(), cancellationToken,
+                                root.TryGetProperty("upgradesOnly", out var upgradesOnly) && upgradesOnly.GetBoolean());
+                            await BroadcastNearbyTreasureAsync(automaticTreasure, cancellationToken);
+                        }
+                        catch (InvalidOperationException) { } // Moving away or another player collecting first is normal.
+                        await connection.SendAsync(new { type = "autoTreasureUpdated", contents = automaticTreasure,
+                            privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "takeChestItems":
                         var chestTake = await _world.TakeChestItemsAsync(characterId, root.Deserialize<TakeChestItemsRequest>(SharedJson.Options)!, cancellationToken);
@@ -588,6 +615,19 @@ public sealed class RealitySocketHub
                             { await connection.SendAsync(new { type = "error", message = ex.Message }, token); }
                         }, cancellationToken);
                         break;
+                    case "requestCasinoState":
+                    case "casinoBet":
+                    case "casinoAction":
+                    {
+                        var casino = await _world.CasinoAsync(characterId,
+                            type == "casinoBet" ? root.Deserialize<CasinoBetRequest>(SharedJson.Options) : null,
+                            type == "casinoAction" ? root.Deserialize<CasinoActionRequest>(SharedJson.Options) : null,
+                            cancellationToken);
+                        await connection.SendAsync(new { type = "casinoUpdated", player = casino.Player,
+                            privateState = _world.GetPrivateState(characterId), round = casino.Round,
+                            stations = CasinoRules.Stations }, cancellationToken);
+                        break;
+                    }
                     case "requestPrivateState":
                         await connection.SendAsync(new { type = "privateState", privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
@@ -713,6 +753,7 @@ public sealed class RealitySocketHub
             }
             catch (Exception exception) when (exception is WebSocketException or OperationCanceledException) { }
         }
+        foreach (var sound in tick.Sounds ?? []) await BroadcastAsync(new { type = "worldSound", sound }, null, token);
         await BroadcastPlayersAsync(tick.Players, token);
         await BroadcastActorsAsync(tick.Actors, token);
         await BroadcastRemovedActorsAsync(tick.RemovedActors, token);

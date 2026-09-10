@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>Vehicle animation check</title>
+<style>body{background:#152b25;color:#ffebba;font:16px system-ui}button{font:inherit;padding:8px;margin:5px}canvas{border:1px solid #d9bd71;display:block;max-width:100%}a{color:#ffe6a1}</style>
+<a href="/">Sound check</a><h1>UFO arrival and release</h1>
+<button id="enter">Play entry</button><button id="exit">Play exit</button><button id="entryMid">Pause mid-entry</button><button id="exitMid">Pause mid-exit</button><button id="exitLate">Pause departure</button><output id="phase"></output>
+<canvas id="ufo" width="1000" height="650"></canvas><h2>Garage display</h2><canvas id="garage" width="1000" height="650"></canvas>
+<script>
+const canvas=document.querySelector('#ufo'),ctx=canvas.getContext('2d');
+const state={scale:22,vehicleTransitions:new Map(),facings:new Map(),probulatorBeams:new Map(),movingUntil:new Map(),actionMode:'neutral'};
+const player={id:'me',name:'Preview',position:{x:500,y:560},travelMode:'ufo'};
+const Inversions={swim:()=>false},isSleeping=()=>false,abductionVisual=()=>null,toScreen=p=>p,viewportWidth=()=>1000,ufoFlightHeightPixels=()=>300,hash=()=>.5,drawAttachedFire=()=>{};
+let play=false,started=0,age=850;
+function select(entering,time,running){player.travelMode=entering?'ufo':'walk';state.vehicleTransitions.set('me',{from:entering?'walk':'ufo',to:player.travelMode,origin:player.position,started:0});age=time;started=performance.now();play=running;}
+document.querySelector('#enter').onclick=()=>select(true,0,true);document.querySelector('#exit').onclick=()=>select(false,0,true);
+document.querySelector('#entryMid').onclick=()=>select(true,850,false);document.querySelector('#exitMid').onclick=()=>select(false,500,false);document.querySelector('#exitLate').onclick=()=>select(false,1250,false);
+</script><script src="/ufo-test.js"></script><script src="/garage.js"></script><script>
+select(true,850,false);
+function render(now){if(play)age=now-started;ctx.fillStyle='#82b7c7';ctx.fillRect(0,0,1000,650);ctx.fillStyle='#526d3f';ctx.fillRect(0,560,1000,90);ctx.strokeStyle='#e2ddbd';ctx.beginPath();ctx.moveTo(500,180);ctx.lineTo(500,560);ctx.stroke();drawPlayer(player,true,1,age);document.querySelector('#phase').textContent=`${player.travelMode==='ufo'?'Entry':'Exit'} · ${Math.round(age)} ms`;requestAnimationFrame(render);}requestAnimationFrame(render);
+const gc=document.querySelector('#garage').getContext('2d'),garage={room:{x:0,y:0,width:28,height:18},passage:[{x:-2,y:5},{x:0,y:5},{x:0,y:7},{x:-2,y:7}],vehicles:['skateboard','bike','eBike','dirtBike','motorcycle','inflatableRaft','ufo','swimmies'].map(itemType=>({itemType,quantity:1}))},project=p=>({x:150+p.x*24+p.y*5,y:60+p.y*27});
+HomeGarage.floor(gc,garage,project);HomeGarage.vehicles(gc,garage,project,22,.6);
+</script>

@@ -2,6 +2,27 @@
   'use strict';
   const melee=['fist','knife','sword','hockeyStick','iceSkate','zombieBite'];
   const canAttack=weapon=>melee.includes(weapon)||weapon==='spearGun';
+  const slopeWidth=width=>Math.min(18,width/4);
+  function floorHeight(dungeon,x){
+    const distance=Math.min(dungeon.underwater?.westShore?x-.5:Infinity,dungeon.underwater?.eastShore?dungeon.width-.5-x:Infinity);
+    return .5+(dungeon.height-1)*Math.max(0,Math.min(1,1-distance/slopeWidth(dungeon.width)));
+  }
+  function clampPosition(dungeon,point){
+    const x=Math.max(dungeon.underwater?.westShore?1:.5,Math.min(dungeon.width-(dungeon.underwater?.eastShore?1:.5),point.x));
+    return {x,y:Math.max(Math.min(dungeon.height-.5,floorHeight(dungeon,x)+.35),Math.min(dungeon.height-.5,point.y))};
+  }
+  function attackPlan(origin,target,range,dungeon){
+    const dx=target.x-origin.x,dy=target.y-origin.y,hold=Math.max(.5,range*.78);
+    const aligned=Math.abs(dy)<=.2,inRange=Math.hypot(dx,dy)<=range;
+    return {ready:aligned&&inRange,facing:dx<0?'west':'east',destination:clampPosition(dungeon,{
+      x:Math.max(.6,Math.min(dungeon.width-.6,Math.abs(dx)<=hold?origin.x:target.x-Math.sign(dx)*hold)),
+      y:Math.max(.6,Math.min(dungeon.height-.6,target.y))})};
+  }
+  function actorBounds(actor,scale){
+    const type=actor.subtype||'',large=type.startsWith('large'),fish=type==='fish',octopus=type.toLowerCase().includes('octopus');
+    const s=Math.max(fish?7:14,scale*(large?1.1:fish?.3:.6));
+    return {left:-s*1.8,right:s*1.8,top:-s*1.15,bottom:s*(octopus?1.5:.7)};
+  }
   const surfaceY=height=>Math.min(220,height*.32);
   const depthScale=height=>(height-75-surfaceY(height))/19;
   function project(point,camera,scale,width,height){return{x:width/2+(point.x-camera.x)*scale,y:surfaceY(height)+(19.5-point.y)*depthScale(height)};}
@@ -45,17 +66,22 @@
     const surface=surfaceY(height);
     const sea=ctx.createLinearGradient(0,surface,0,height);sea.addColorStop(0,'#267b94');sea.addColorStop(.4,'#124d6b');sea.addColorStop(1,'#071b35');ctx.fillStyle=sea;ctx.fillRect(0,0,width,height);
     ctx.save();ctx.globalAlpha=.05;ctx.fillStyle='#d5fbef';for(let i=0;i<8;i++){const x=(i*233+Math.sin(now/5000)*30)%width;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x+150,height);ctx.lineTo(x+240,height);ctx.lineTo(x+25,0);ctx.fill();}ctx.restore();
-    ctx.fillStyle='#9ccad4';ctx.fillRect(0,0,width,surface);ctx.strokeStyle='#d0f9f3';ctx.lineWidth=3;ctx.beginPath();for(let x=0;x<=width;x+=8){const y=surface+Math.sin(x/32+now/650)*2;x?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();
-    const bed=project({x:0,y:.5}).y;ctx.fillStyle='#314a4c';ctx.fillRect(0,bed,width,height-bed);
-    for(let x=0;x<dungeon.width;x+=3){const p=project({x,y:.5});if(p.x < -40 || p.x > width+40)continue;ctx.strokeStyle=x%2?'#398a78':'#286b67';ctx.lineWidth=3;for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(p.x+i*5,bed);ctx.quadraticCurveTo(p.x+Math.sin(now/1300+x+i)*14,bed-25,p.x+i*3+Math.sin(now/1000+x)*8,bed-40-(x%7)*4);ctx.stroke();}}
+    ctx.fillStyle='#9ccad4';ctx.fillRect(0,0,width,surface);ctx.strokeStyle='#d0f9f3';ctx.lineWidth=3;ctx.beginPath();
+    const waterLeft=dungeon.underwater.westShore?Math.max(0,project({x:.5,y:19.5}).x):0,waterRight=dungeon.underwater.eastShore?Math.min(width,project({x:dungeon.width-.5,y:19.5}).x):width;
+    for(let x=waterLeft;x<=waterRight;x+=8){const y=surface+Math.sin(x/32+now/650)*2;x===waterLeft?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();
+    const bank=[.5,.5+slopeWidth(dungeon.width),dungeon.width-.5-slopeWidth(dungeon.width),dungeon.width-.5].map(x=>project({x,y:floorHeight(dungeon,x)}));
+    bank.unshift({x:Math.min(-20,bank[0].x-20),y:bank[0].y});bank.push({x:Math.max(width+20,bank.at(-1).x+20),y:bank.at(-1).y});
+    ctx.save();ctx.beginPath();ctx.moveTo(bank[0].x,height+20);for(const p of bank)ctx.lineTo(p.x,p.y);ctx.lineTo(bank.at(-1).x,height+20);ctx.closePath();
+    ctx.fillStyle='#85784e';ctx.fill();ctx.clip();ctx.strokeStyle='#dfc78d';ctx.lineWidth=16;ctx.lineJoin='round';ctx.beginPath();bank.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();ctx.restore();
+    for(let x=1;x<dungeon.width-1;x+=3){const floor=floorHeight(dungeon,x),p=project({x,y:floor}),bed=p.y;if(floor>dungeon.height-2||p.x < -40 || p.x > width+40)continue;ctx.strokeStyle=x%2?'#398a78':'#286b67';ctx.lineWidth=3;for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(p.x+i*5,bed);ctx.quadraticCurveTo(p.x+Math.sin(now/1300+x+i)*14,bed-25,p.x+i*3+Math.sin(now/1000+x)*8,bed-40-(x%7)*4);ctx.stroke();}}
     for(const actor of dungeon.actors||[]){const p=project(actor.position);if(p.x>-100&&p.x<width+100)creature(ctx,actor,p,scale,now);}
     diver(ctx,project(player.position),scale,facing,now,player.equippedWeapon);
     ctx.textAlign='center';ctx.fillStyle='#163c52';ctx.font='bold 15px monospace';ctx.fillText(`${dungeon.underwater.name} · DIFFICULTY ${dungeon.difficulty}`,width/2,115);
     ctx.font='12px monospace';ctx.fillStyle='#23475a';ctx.fillText('← WEST     Swim: WASD / arrows or click     EAST →',width/2,137);
-    ctx.fillText('Melee + spear gun · Defeat guardians to open treasure · Swim up or select Surface',width/2,height-36);
+    ctx.fillStyle='#f4ecd2';ctx.fillText('Melee + spear gun · Defeat guardians to open treasure · Select Surface to leave the water',width/2,height-36);
     const air=Math.max(0,player.air/player.maximumAir);ctx.fillStyle='#08263d';ctx.fillRect(width/2-100,151,200,9);ctx.fillStyle=air<.2?'#ff8a73':'#77e4d6';ctx.fillRect(width/2-100,151,200*air,9);
     ctx.fillStyle='#163c52';ctx.fillText(`AIR ${Math.ceil(air*100)}%`,width/2,181);
-    for(const [x,shore,label]of[[.5,dungeon.underwater.westShore,'WEST SHORE'],[dungeon.width-.5,dungeon.underwater.eastShore,'EAST SHORE']]){const p=project({x,y:10});if(shore&&p.x>40&&p.x<width-40){ctx.fillStyle='#e8d1a0';ctx.fillRect(p.x-4,surface,8,Math.max(0,bed-surface));ctx.fillText(label,p.x,surface-10);}}
+    for(const [x,shore,label]of[[.5,dungeon.underwater.westShore,'WEST SHORE'],[dungeon.width-.5,dungeon.underwater.eastShore,'EAST SHORE']]){const p=project({x,y:19.5});if(shore&&p.x>40&&p.x<width-40){ctx.fillStyle='#163c52';ctx.fillText(label,p.x,surface-10);}}
   }
-  return{canAttack,project,unproject,gear,diver,creature,draw};
+  return{canAttack,floorHeight,clampPosition,attackPlan,actorBounds,project,unproject,gear,diver,creature,draw};
 });

@@ -4,7 +4,7 @@ using AlternateEarth.Shared;
 namespace AlternateEarth.Server;
 
 public sealed record TransitTick(TransitSnapshot Transit, IReadOnlyList<PlayerState> Players, IReadOnlyList<ActorState> Actors,
-    IReadOnlyList<string> RemovedActors, IReadOnlyList<CombatEvent> Combat, IReadOnlyList<CanonicalEntity> Objects, bool NetworkChanged);
+    IReadOnlyList<string> RemovedActors, IReadOnlyList<CombatEvent> Combat, IReadOnlyList<CanonicalEntity> Objects, bool NetworkChanged, IReadOnlyList<WorldSoundEvent>? Sounds = null);
 
 public sealed partial class RealityWorld
 {
@@ -39,6 +39,8 @@ public sealed partial class RealityWorld
         public double Distance = Math.Min(10, route[0].Length / 2);
         public BusState State = new(id, routeId, route[0].Name, route[0].At(Math.Min(10, route[0].Length / 2)), route[0].Heading);
         public double Dwell;
+        public double HornCooldown;
+        public int HornCount;
         public BusTurnQueue Turn = new();
         public List<BusBreadcrumb> History = new();
         public double ReverseMeters;
@@ -203,6 +205,7 @@ public sealed partial class RealityWorld
         {
             var changedNetwork = RefreshTransitNetwork();
             var players = new Dictionary<string, PlayerState>(); var actors = new Dictionary<string, ActorState>();
+            var sounds = new List<WorldSoundEvent>();
             var removed = new HashSet<string>(); var combat = new List<CombatEvent>(); var objects = new Dictionary<string, CanonicalEntity>();
             var dt = Math.Clamp(elapsed.TotalSeconds * Configuration.GameSpeed, 0, 1);
             var people = _players.Values.Where(p => p.LocationId == "outdoor").ToArray();
@@ -217,6 +220,7 @@ public sealed partial class RealityWorld
             var anyoneWaiting = people.Any(p => p.WaitingAtBusStopId is not null);
             foreach (var bus in _buses.Values.OrderBy(b => b.State.Id, StringComparer.Ordinal))
             {
+                bus.HornCooldown = Math.Max(0, bus.HornCooldown - Math.Max(0, elapsed.TotalSeconds));
                 var serviceNeeded=people.Any(p => p.RidingBusId == bus.State.Id || WaitingForRoute(p,bus.RouteId));
                 if (!serviceNeeded || bus.State.HealthHearts<=0 || bus.ServiceOrigin is not null)
                     MoveBusIntoServicePosition(bus,serviceNeeded && bus.State.HealthHearts>0,dt,people,outdoorActors);
@@ -233,6 +237,7 @@ public sealed partial class RealityWorld
                 else
                 {
                     var speed = bus.Turn.Count > 0 ? bus.TurningAround ? 1.2 : 3 : BusRoadSpeed(bus.Edge) * (_fleeingVehicles.GetValueOrDefault(bus.State.Id) > DateTimeOffset.UtcNow ? 1.35 : 1);
+                    if (dt > 0) WarnBusPeople(bus, speed, people, outdoorActors, sounds);
                     var budget = speed * dt;
                     while (budget > .001)
                     {
@@ -300,7 +305,7 @@ public sealed partial class RealityWorld
                 }
             }
             PublishTransit(changedNetwork);
-            return new(_transitSnapshot, players.Values.ToArray(), actors.Values.ToArray(), removed.ToArray(), combat, objects.Values.ToArray(), changedNetwork);
+            return new(_transitSnapshot, players.Values.ToArray(), actors.Values.ToArray(), removed.ToArray(), combat, objects.Values.ToArray(), changedNetwork, sounds);
         }
         finally { _transitLock.Release(); }
     }

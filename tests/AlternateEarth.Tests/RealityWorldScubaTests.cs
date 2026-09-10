@@ -7,7 +7,7 @@ namespace AlternateEarth.Tests;
 
 public sealed partial class RealityWorldTests
 {
-    private async Task<(RealityWorld World, PlayerState Player, ProbulatorTestClock Clock)> ScubaFixture(bool gear = true, bool raft = false, bool shallow = false)
+    private async Task<(RealityWorld World, PlayerState Player, ProbulatorTestClock Clock)> ScubaFixture(bool gear = true, bool raft = false, bool shallow = false, bool swimmies = false)
     {
         var config = new RealityConfiguration(Guid.NewGuid().ToString("N"), "Scuba", 23, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var center = new LocalTangentProjection(config.Area.Region).Project(config.Area.Center);
@@ -15,7 +15,7 @@ public sealed partial class RealityWorldTests
             [new(center.X-90,center.Y-90),new(center.X+90,center.Y-90),new(center.X+90,center.Y+90),new(center.X-90,center.Y+90),new(center.X-90,center.Y-90)],
             new Dictionary<string,string> { ["natural"]="water", ["name"]="Test lake" });
         var store = new SqliteRealityStore(Path.Combine(_directory, config.Id + ".db")); await store.InitializeAsync(config);
-        await store.SaveInventoryAsync(new("diver", [new("scubaGear",gear?1:0),new("inflatableRaft",raft?1:0),new("spearGun",1,Quality:"Common"),new("spear",30),new("fish",2),new("knife",1),new("sword",1),new("hockeyStick",1),new("iceSkate",1),new("rifle",1),new("bullet",10),new("grenade",1)]));
+        await store.SaveInventoryAsync(new("diver", [new("swimmies",swimmies?1:0),new("scubaGear",gear?1:0),new("inflatableRaft",raft?1:0),new("spearGun",1,Quality:"Common"),new("spear",30),new("fish",2),new("knife",1),new("sword",1),new("hockeyStick",1),new("iceSkate",1),new("rifle",1),new("bullet",10),new("grenade",1)]));
         var clock = new ProbulatorTestClock();
         var world = new RealityWorld(config,new DeterministicWorldGenerator(new FixedGeographicProvider(lake)),new FixedWeatherProvider(),store,clock);
         await world.InitializeAsync(); var player = await world.JoinAsync("diver","Diver");
@@ -26,13 +26,70 @@ public sealed partial class RealityWorldTests
     private static PlayerState ScubaPlayer(RealityWorld world,string id="diver") => PhotoField<ConcurrentDictionary<string,PlayerState>>(world,"_players")[id];
     private static void ScubaDungeon(RealityWorld world,DungeonState dungeon) => PhotoField<ConcurrentDictionary<string,DungeonState>>(world,"_dungeons")[dungeon.Id]=dungeon;
 
-    [Fact]
-    public async Task ScubaRequiresGearAndWaterEvenInGodMode()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RaftCanBeDeployedInDeepOrShallowWater(bool shallow)
     {
-        var (world,p,_) = await ScubaFixture(false);await world.SetGodModeAsync(p.Id,true);
+        var (world, player, _) = await ScubaFixture(raft: true, shallow: shallow);
+        ScubaPlayer(world, player with { TravelMode = TravelMode.Walk });
+        var deployed = await world.SetTravelModeAsync(player.Id, TravelMode.Raft);
+        Assert.Equal(TravelMode.Raft, deployed.TravelMode);
+        Assert.Equal(shallow ? TerrainType.ShallowWater : TerrainType.DeepWater, deployed.Terrain);
+        Assert.Equal(player.Position, deployed.Position);
+        Assert.False(deployed.GodMode);
+    }
+
+    [Fact]
+    public async Task RaftDeploymentStillRequiresOwnershipAndWater()
+    {
+        var (world, player, _) = await ScubaFixture();
+        var missing = await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.Raft));
+        Assert.Contains("need an inflatable raft", missing.Message);
+        var (equipped, land, _) = await ScubaFixture(raft: true);
+        ScubaPlayer(equipped, land with { Position = land.Position with { X = land.Position.X + 110 }, TravelMode = TravelMode.Walk });
+        var dry = await Assert.ThrowsAsync<InvalidOperationException>(() => equipped.SetTravelModeAsync(land.Id, TravelMode.Raft));
+        Assert.Contains("shallow or deep water", dry.Message);
+    }
+
+    [Fact]
+    public async Task ScubaRequiresGearNormallyAndWaterEvenInGodMode()
+    {
+        var (world,p,_) = await ScubaFixture(false);
         await Assert.ThrowsAsync<InvalidOperationException>(()=>world.SetTravelModeAsync(p.Id,TravelMode.Scuba));
-        var (equipped,land,_) = await ScubaFixture();ScubaPlayer(equipped,land with {Position=land.Position with{X=land.Position.X+110}});
+        var (equipped,land,_) = await ScubaFixture();ScubaPlayer(equipped,land with {GodMode=true,Position=land.Position with{X=land.Position.X+110}});
         await Assert.ThrowsAsync<InvalidOperationException>(()=>equipped.SetTravelModeAsync(land.Id,TravelMode.Scuba));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SwimmiesClickRoutesAndMovementAllowDeepWater(bool shallow)
+    {
+        var (world, player, _) = await ScubaFixture(gear: false, shallow: shallow, swimmies: true);
+        var navigation = PhotoField<WorldNavigation>(world, "_navigation");
+        var target = player.Position with { X = player.Position.X - 10 };
+        Assert.Equal(TerrainType.DeepWater, navigation.TerrainAt(target.X, target.Y));
+        Assert.False((await world.FindPathAsync(player.Id, new(target.X, target.Y, 1))).Result.Success);
+        await world.SetTravelModeAsync(player.Id, TravelMode.Swim);
+        var route = (await world.FindPathAsync(player.Id, new(target.X, target.Y, 2))).Result;
+        Assert.True(route.Success, route.Message);
+        var moved = (await world.MoveAsync(player.Id, new(-1, 0, 3)))!;
+        Assert.True(moved.Moved);Assert.Equal(TravelMode.Swim, moved.Player.TravelMode);
+        Assert.False(moved.Player.GodMode);
+    }
+
+    [Fact]
+    public async Task SwimmiesCanRouteToShoreAndAutomaticallyWalkOnLand()
+    {
+        var (world, player, _) = await ScubaFixture(gear: false, swimmies: true);
+        await world.SetTravelModeAsync(player.Id, TravelMode.Swim);
+        var shore = player.Position with { X = player.Position.X + 95 };
+        var path = (await world.FindPathAsync(player.Id, new(shore.X, shore.Y, 1))).Result;
+        Assert.True(path.Success, path.Message);
+        ScubaPlayer(world, ScubaPlayer(world) with { Position = player.Position with { X = player.Position.X + 89.999 } });
+        var moved = (await world.MoveAsync(player.Id, new(1, 0, 2)))!;
+        Assert.True(moved.Moved);Assert.Equal(TravelMode.Walk, moved.Player.TravelMode);
     }
 
     [Theory]
@@ -53,15 +110,42 @@ public sealed partial class RealityWorldTests
     }
 
     [Fact]
-    public async Task ScubaSwimUpSurfacesAndReachingShoreAutomaticallyWalks()
+    public async Task ScubaWaterlineAndShoreRequireExplicitSurfacing()
     {
         var (world,p,_) = await ScubaFixture();var diver=await world.SetTravelModeAsync(p.Id,TravelMode.Scuba);var dungeon=world.GetPrivateState(p.Id).Dungeon!;
         ScubaPlayer(world,diver with{Position=diver.Position with{Y=dungeon.Height-.501}});
-        Assert.Equal(TravelMode.Swim,(await world.MoveAsync(p.Id,new(0,1,1)))!.Player.TravelMode);
-        diver=await world.SetTravelModeAsync(p.Id,TravelMode.Scuba);dungeon=world.GetPrivateState(p.Id).Dungeon!;Assert.True(dungeon.Underwater!.WestShore);
+        var waterline=(await world.MoveAsync(p.Id,new(0,1,1)))!.Player;
+        Assert.Equal(TravelMode.Scuba,waterline.TravelMode);Assert.Equal(dungeon.Id,waterline.LocationId);
+        Assert.Equal(dungeon.Height-.5,waterline.Position.Y);
+        Assert.True(dungeon.Underwater!.WestShore);
         ScubaPlayer(world,diver with{Position=diver.Position with{X=.501,Y=4}});
         var shore=(await world.MoveAsync(p.Id,new(-1,0,2)))!.Player;
-        Assert.Equal("outdoor",shore.LocationId);Assert.Equal(TravelMode.Walk,shore.TravelMode);Assert.False(RealityWorld.IsWater(shore.Terrain));
+        Assert.Equal(dungeon.Id,shore.LocationId);Assert.Equal(TravelMode.Scuba,shore.TravelMode);
+        Assert.Equal(1,shore.Position.X);
+        Assert.True(shore.Position.Y > 18);
+        var surfaced=await world.ExitDungeonAsync(p.Id);
+        Assert.Equal("outdoor",surfaced.LocationId);Assert.NotEqual(TravelMode.Scuba,surfaced.TravelMode);
+    }
+
+    [Fact]
+    public async Task ScubaSlopingBanksKeepRoutesCreaturesAndTreasureInWater()
+    {
+        var (world,p,_) = await ScubaFixture();
+        await world.SetTravelModeAsync(p.Id,TravelMode.Scuba);
+        var dungeon = world.GetPrivateState(p.Id).Dungeon!;
+        foreach (var point in dungeon.Actors.Select(actor => actor.Position).Concat(dungeon.Chests.Select(chest => chest.Position)).Append(dungeon.Exit))
+            Assert.True(point.Y >= ScubaGeometry.FloorHeight(dungeon.Width,dungeon.Height,dungeon.Underwater!,point.X)+.35-1e-9);
+        foreach (var x in new[] {-10d,dungeon.Width+10})
+        {
+            var path = (await world.FindPathAsync(p.Id,new(x,1,1))).Result;
+            Assert.True(path.Success);
+            var target = path.Waypoints.Last();
+            Assert.True(target.Y >= ScubaGeometry.FloorHeight(dungeon.Width,dungeon.Height,dungeon.Underwater!,target.X)+.35-1e-9);
+        }
+        var water = dungeon.Underwater! with { WestShore=true,EastShore=true };
+        foreach (var (x,y) in new[] {(.5,19.5),(9.5,10d),(18.5,.5),(90d,.5),(161.5,.5),(170.5,10d),(179.5,19.5)})
+            Assert.Equal(y,ScubaGeometry.FloorHeight(180,20,water,x),8);
+        Assert.Equal(.5,ScubaGeometry.FloorHeight(180,20,water with { EastShore=false },200));
     }
 
     [Fact]

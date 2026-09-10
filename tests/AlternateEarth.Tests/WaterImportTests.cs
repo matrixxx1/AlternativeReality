@@ -133,6 +133,28 @@ public sealed class WaterImportTests
         Assert.Equal(TerrainType.Grass, navigation.TerrainAt(44, 0));
     }
 
+    [Fact]
+    public void ShoresAndIslandEdgesProgressFromSandThroughShallowsToDeepWater()
+    {
+        GeometryPoint[] Square(double radius) => [new(-radius,-radius),new(radius,-radius),new(radius,radius),new(-radius,radius),new(-radius,-radius)];
+        var water = new CanonicalEntity("lake", EntityKind.Water, new(Area.Region, 0, 0), Square(100),
+            new Dictionary<string,string>(), InteriorRings: [Square(10)]);
+        var navigation = new WorldNavigation(Area.Bounds, [water], []);
+        foreach (var (dx,dy) in new[] { (1,0),(-1,0),(0,1),(0,-1) })
+        foreach (var island in new[] { false,true })
+        {
+            var transitions = new List<TerrainType>();
+            for (var step = -10; step <= 20; step++)
+            {
+                var depth = step / 5d;
+                var radius = island ? 10 + depth : 100 - depth;
+                var terrain = navigation.TerrainAt(dx * radius, dy * radius);
+                if (transitions.Count == 0 || transitions[^1] != terrain) transitions.Add(terrain);
+            }
+            Assert.Equal([TerrainType.Sand,TerrainType.ShallowWater,TerrainType.DeepWater], transitions);
+        }
+    }
+
     private static async Task<GeographicDataset> Import(string json, GeographicArea area)
     {
         var directory = Path.Combine(Path.GetTempPath(), "water-import-" + Guid.NewGuid().ToString("N"));

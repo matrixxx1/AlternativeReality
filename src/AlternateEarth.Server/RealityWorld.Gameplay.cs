@@ -100,7 +100,7 @@ public sealed partial class RealityWorld
         ,new("metal","Scrap metal","Reusable metal recovered from litter or a mailbox",0,0,50,500,WeightPounds:1)
         ,new("lockPickSet","Lock pick set","Reusable tool with a 15% chance to open a locked door",0,0,2_500,9_000,true,true,WeightPounds:.4)
     };
-    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.Concat(CraftingCatalog.Materials).Concat(CraftingCatalog.RecipeItems).Concat(HazardCatalog.Materials).Concat(HazardCatalog.Items).Concat(NutritionCatalog.Items).Select(item => NutritionCatalog.Foods.TryGetValue(item.ItemType, out var nutrition) ? item with { Nutrition = nutrition, Effect = NutritionCatalog.Description(nutrition) } : item).ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.Concat(GloveCatalog.Items).Concat(CraftingCatalog.Materials).Concat(CraftingCatalog.RecipeItems).Concat(HazardCatalog.Materials).Concat(HazardCatalog.Items).Concat(NutritionCatalog.Items).Select(item => NutritionCatalog.Foods.TryGetValue(item.ItemType, out var nutrition) ? item with { Nutrition = nutrition, Effect = NutritionCatalog.Description(nutrition) } : item).Select(item => item with { StorageSection = InventorySections.Section(item) }).ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     private static readonly MovementConfiguration DefaultMovementConfiguration = new(
         3.5,
         100,
@@ -120,6 +120,7 @@ public sealed partial class RealityWorld
     private ServerEventConfiguration _eventConfiguration = DefaultEventConfiguration;
     private static readonly string[] WeaponPowerOrder = ["camera", .. HazardCatalog.Weapons.Select(item => item.ItemType), "probulator", "rocketLauncher", "machineGun", "ar15", "flamethrower", "grenade", "molotovCocktail", "rifle", "spearGun", "sword", "iceSkate", "hockeyStick", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
     private static readonly HashSet<string> HatItems = new(["hat", "coolingHat", "warmHat"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> GloveItems = GloveCatalog.All.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> ShirtItems = new(["tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket", "fireproofJacket"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> PantsItems = new(["coolingShorts", "warmingPants"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> OffhandItems = new(["flashlight", "lantern", "candle", "laser", "shield"], StringComparer.OrdinalIgnoreCase);
@@ -189,14 +190,22 @@ public sealed partial class RealityWorld
             homeStorage = furniture.Where(IsStoredFurniture).ToArray();
             homeItemStorage = GetHomeItemStorage(homeAccount!);
         }
+        if (dungeon?.Garage is { } garage)
+        {
+            var owner = _baseBuildings.FirstOrDefault(pair => pair.Value == dungeon.BuildingId).Key;
+            if (owner is not null) dungeon = dungeon with { Garage = garage with { Vehicles = GetHomeItemStorage(owner).Items.Where(item => VehicleItems.Contains(item.ItemType)).ToArray() } };
+        }
         var quests = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => WithQuestStage(pair.Value)).OrderBy(quest => quest.Status).ThenBy(quest => quest.Title).ToArray();
         var homeStorageMoney = canEditHome && homeAccount is not null ? _homeCash.GetValueOrDefault(homeAccount) : 0;
-        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage, Quests: quests, CanEditHome: canEditHome, HomeStorageMoneyCents: homeStorageMoney, LearnedRecipes: _learnedRecipes.Keys.Where(key => key.Player == playerId).Select(key => key.Recipe).OrderBy(id => id).ToArray(), CraftingSkill: GetCraftingSkill(playerId), Progression: GetProgression(playerId), Inversions: GetInversionView(playerId), Achievements: GetAchievements(playerId), MapleSyrupUntilUtc: _mapleBoosts.TryGetValue(playerId, out var syrupUntil) ? syrupUntil : null, OwnedVehicles: VehicleItems.Where(item => InventoryQuantity(playerId, item) > 0).OrderBy(item => item).ToArray());
+        return new PlayerPrivateState(inventory, dungeon, relationships, chests, loot, baseState, ServerConfiguration: serverConfiguration, RevealedWorldAreas: revealedAreas, HomeStorage: homeStorage, HomeItemStorage: homeItemStorage, Quests: quests, CanEditHome: canEditHome, HomeStorageMoneyCents: homeStorageMoney, LearnedRecipes: _learnedRecipes.Keys.Where(key => key.Player == playerId).Select(key => key.Recipe).OrderBy(id => id).ToArray(), CraftingSkill: GetCraftingSkill(playerId), Progression: GetProgression(playerId), Inversions: GetInversionView(playerId), Achievements: GetAchievements(playerId), MapleSyrupUntilUtc: _mapleBoosts.TryGetValue(playerId, out var syrupUntil) ? syrupUntil : null, OwnedVehicles: VehicleItems.Where(item => playerIsGod(playerId) || InventoryQuantity(playerId, item) > 0).OrderBy(item => item).ToArray(), GodModeLoadout: GetGodModeLoadout(playerId), RecipeBook: GetRecipeBook(playerId), HomeWorkshop: WorkshopView(playerId), Casino: GetCasinoMapLocation());
     }
 
     public async Task<PlayerState> SetGodModeAsync(string playerId, bool enabled, CancellationToken cancellationToken = default)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
+        if (!enabled && IsSubmerged(player) && InventoryQuantity(playerId, "scubaGear") <= 0)
+            player = await ExitDungeonAsync(playerId, cancellationToken);
+        var travelMode = !enabled && TravelModeUnavailable(playerId, player) ? TravelMode.Walk : player.TravelMode;
         var hikingShoesOn = enabled ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(playerId, "magicHikingShoes") > 0;
         var runningShoesOn = enabled ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(playerId, "magicRunningShoes") > 0;
         if (hikingShoesOn && runningShoesOn) runningShoesOn = false;
@@ -209,7 +218,7 @@ public sealed partial class RealityWorld
             Water = enabled ? player.MaximumWater : player.Water,
             WalletCents = enabled ? Math.Max(50_000, player.WalletCents) : player.WalletCents,
             HealthHearts = enabled ? Math.Max(1, player.HealthHearts) : player.HealthHearts,
-            TravelMode = !enabled && TravelModeUnavailable(playerId, player) ? TravelMode.Walk : player.TravelMode,
+            TravelMode = travelMode,
             FlashlightOn = offhand == "flashlight",
             LanternOn = offhand == "lantern",
             LaserOn = offhand == "laser",
@@ -218,10 +227,11 @@ public sealed partial class RealityWorld
             MagicHikingShoesOn = hikingShoesOn,
             MagicRunningShoesOn = runningShoesOn,
             EquippedHat = RetainedEquipment(playerId, player.EquippedHat, HatItems, enabled),
+            EquippedGloves = RetainedEquipment(playerId, player.EquippedGloves, GloveItems, enabled),
             EquippedShirt = RetainedEquipment(playerId, player.EquippedShirt, ShirtItems, enabled),
             EquippedPants = RetainedEquipment(playerId, player.EquippedPants, PantsItems, enabled),
             HatOn = (enabled ? player.EquippedHat : RetainedEquipment(playerId, player.EquippedHat, HatItems, false)).Equals("hat", StringComparison.OrdinalIgnoreCase),
-            EquippedWeapon = player.TravelMode == TravelMode.Ufo ? "probulator" : enabled ? player.EquippedWeapon : BestUsableWeapon(playerId, player.EquippedWeapon, false),
+            EquippedWeapon = travelMode == TravelMode.Ufo ? "probulator" : player.EquippedWeapon == "probulator" ? "fist" : enabled ? player.EquippedWeapon : BestUsableWeapon(playerId, player.EquippedWeapon, false),
             BodyHeat = enabled ? 50 : player.BodyHeat,
             Version = player.Version + 1
         };
@@ -269,6 +279,12 @@ public sealed partial class RealityWorld
             if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException($"You need {DisplayItem(itemType)} in your inventory.");
             var equipped = itemType ?? "none";
             updated = player with { EquippedHat = equipped, HatOn = equipped.Equals("hat", StringComparison.OrdinalIgnoreCase), Version = player.Version + 1 };
+        }
+        else if (slot == "gloves")
+        {
+            if (itemType is not null && !GloveCatalog.IsGlove(itemType)) throw new InvalidOperationException("That item cannot be worn as gloves.");
+            if (itemType is not null && !player.GodMode && InventoryQuantity(playerId, itemType) <= 0) throw new InvalidOperationException("You need those gloves in your backpack to equip them.");
+            updated = player with { EquippedGloves = itemType ?? "none", Version = player.Version + 1 };
         }
         else if (slot == "shirt")
         {
@@ -489,7 +505,7 @@ public sealed partial class RealityWorld
     private static bool CandleActive(PlayerState player, DateTimeOffset? at = null) => player.CandleUntilUtc is { } until && until > (at ?? DateTimeOffset.UtcNow);
     private static string ActiveOffhand(PlayerState player) => player.ShieldOn ? "shield" : player.LaserOn ? "laser" : player.LanternOn ? "lantern" : player.FlashlightOn ? "flashlight" : CandleActive(player) ? "candle" : "none";
     private static bool IsFireproof(PlayerState player) => player.EquippedShirt.Equals("fireproofJacket", StringComparison.OrdinalIgnoreCase);
-    private static double ShieldReducedDamage(PlayerState player, double damage) => player.ShieldOn ? damage * .75 : damage;
+    private static double ShieldReducedDamage(PlayerState player, double damage, string effect = "physical") => GloveCatalog.ReduceDamage(player, damage, effect) * (player.ShieldOn ? .75 : 1);
     private static bool ShieldDeflects(PlayerState player, bool ranged) => ranged && player.ShieldOn && RandomNumberGenerator.GetInt32(2) == 0;
 
     public async Task<PlayerState> ConsumeItemAsync(string playerId, string itemType, CancellationToken cancellationToken = default)
@@ -499,7 +515,7 @@ public sealed partial class RealityWorld
         if (itemType.StartsWith("quest:food:", StringComparison.Ordinal)) return await ConsumeDeliveryFoodAsync(playerId, itemType, cancellationToken);
         if (itemType.Equals("craftingSkillBook", StringComparison.OrdinalIgnoreCase)) return await ReadCraftingSkillBookAsync(playerId, cancellationToken);
         if (itemType.Equals("mapleSyrup", StringComparison.OrdinalIgnoreCase)) return await ConsumeMapleSyrupAsync(player, cancellationToken);
-        if (itemType.Equals("antibiotics", StringComparison.OrdinalIgnoreCase) || NutritionCatalog.Foods.ContainsKey(itemType) && !itemType.Equals("water", StringComparison.OrdinalIgnoreCase)) return await ConsumeNutritionAsync(player,itemType,cancellationToken);
+        if (itemType.Equals("antibiotics", StringComparison.OrdinalIgnoreCase) || NutritionCatalog.Foods.ContainsKey(itemType)) return await ConsumeNutritionAsync(player,itemType,cancellationToken);
         var normalized = itemType.Trim().ToLowerInvariant(); if (normalized is not ("food" or "fish" or "water" or "energydrink" or "gallonofgas")) throw new InvalidOperationException("That item cannot be consumed.");
         if (normalized == "gallonofgas")
         {
@@ -683,6 +699,7 @@ public sealed partial class RealityWorld
             await SavePlayerAsync(stopped, cancellationToken);
             return new(stopped, false, true, false, false, false, $"Your {VehicleName(player.TravelMode)} is out of gas. Add gasoline before using it again.");
         }
+        if (dungeon.StoreCategory == "casino") request = request with { Y = 0, DestinationY = 4 };
         var (dx, dy, remainingDistance) = ResolveMovementVector(player, request);
         var now = DateTimeOffset.UtcNow; var previous = _lastMovement.AddOrUpdate(player.Id, now, (_, old) => now); var elapsed = Math.Clamp((now - previous).TotalSeconds, .01, .15);
         var wearingMagicHikingShoes = player.MagicHikingShoesOn && (player.GodMode || InventoryQuantity(player.Id, "magicHikingShoes") > 0);
@@ -729,6 +746,7 @@ public sealed partial class RealityWorld
 
     private DungeonState CreateDungeonSession(string sessionId, CanonicalEntity building)
     {
+        if (IsCasino(building)) return GenerateCasino(sessionId, building);
         var store = StoreProfileForBuilding(building);
         if (store is not null) return GenerateStoreInterior(sessionId, building, store);
         var difficulty = DungeonDifficulty(building);
@@ -1050,6 +1068,7 @@ public sealed partial class RealityWorld
             "vehicles" => new HashSet<string>(["bike", "eBike", "dirtBike", "motorcycle", "ufo", "gallonOfGas"], StringComparer.OrdinalIgnoreCase),
             _ => null
         };
+        if (merchant.MerchantCategory is "clothing" or "sportingGoods" or "weapons") allowed?.UnionWith(GloveCatalog.All.Keys);
         var pool = _itemConfigurations.Values.Where(item => item.ForSale && item.ItemType != "areaMap" && (allowed is null || allowed.Contains(item.ItemType))).OrderBy(item => item.ItemType).ToArray();
         var selectedCount = allowed is null ? random.Next(3, 6) : random.Next(Math.Min(2, pool.Length), Math.Min(pool.Length, Math.Max(3, (int)Math.Ceiling(pool.Length * .7))) + 1);
         var selected = pool.OrderBy(_ => random.Next()).Take(selectedCount).ToList();
@@ -1179,7 +1198,7 @@ public sealed partial class RealityWorld
             if (blocked) throw new InvalidOperationException($"A wall, building, tree, or other solid object blocks your shot at {targetName}.");
         }
         var now = DateTimeOffset.UtcNow;
-        var attackInterval = TimeSpan.FromSeconds((weapon == "ar15" && player.Ar15FireMode == "burst" ? 1 : Math.Clamp(_itemConfigurations.GetValueOrDefault(weapon)?.AttackIntervalSeconds ?? .5, .05, 10)) * (ranged ? ProgressionRules.ShootingInterval(StatsFor(playerId)) : 1));
+        var attackInterval = TimeSpan.FromSeconds((weapon == "ar15" && player.Ar15FireMode == "burst" ? 1 : Math.Clamp(_itemConfigurations.GetValueOrDefault(weapon)?.AttackIntervalSeconds ?? .5, .05, 10)) * (ranged ? ProgressionRules.ShootingInterval(StatsFor(playerId)) * GloveCatalog.ShootingInterval(player) : 1));
         if (_lastPlayerAttack.TryGetValue((playerId, weapon), out var priorAttack) && now - priorAttack < attackInterval)
             throw new InvalidOperationException($"Your {DisplayItem(weapon)} is not ready yet.");
         var shotCount = weapon == "ar15" && player.Ar15FireMode == "burst" ? 3 : 1;
@@ -1204,7 +1223,7 @@ public sealed partial class RealityWorld
         var shieldDeflected = playerTarget is not null && shotHits.Any(value => value) && ShieldDeflects(playerTarget, ranged);
         if (shieldDeflected) Array.Fill(shotHits, false);
         var hit = shotHits.Any(value => value);
-        var damage = hit ? (playerTarget is null ? baseDamage : ShieldReducedDamage(playerTarget, baseDamage)) * shotHits.Count(value => value) : 0;
+        var damage = hit ? (playerTarget is null ? baseDamage : ShieldReducedDamage(playerTarget, baseDamage, weapon)) * shotHits.Count(value => value) : 0;
         var died = hit && !((playerTarget?.GodMode) ?? false) && targetHealth - damage <= 0;
         if (busTarget is not null && hit)
         {
@@ -1265,7 +1284,7 @@ public sealed partial class RealityWorld
         {
             for (var round = 1; round < shotCount; round++)
             {
-                var roundDamage = shotHits[round] ? playerTarget is null ? baseDamage : ShieldReducedDamage(playerTarget, baseDamage) : 0;
+                var roundDamage = shotHits[round] ? playerTarget is null ? baseDamage : ShieldReducedDamage(playerTarget, baseDamage, weapon) : 0;
                 consequences.Add(new CombatEvent(player.Id, request.TargetId, weapon, player.Position, targetPosition, shotHits[round], roundDamage, died && round == shotCount - 1, $"{DisplayItem(weapon)} extra strike {(shotHits[round] ? "hit" : "missed")} {targetName}.", hit ? Math.Max(0, targetHealth - damage) : targetHealth));
             }
         }
@@ -1288,7 +1307,7 @@ public sealed partial class RealityWorld
             if (Configuration.PvpEnabled)
             foreach (var target in _players.Values.Where(target => !IsProbulatorAbducted(target.Id) && target.Id != player.Id && target.Id != request.TargetId && target.LocationId == player.LocationId && target.Position.Distance2D(targetPosition) <= radius).ToArray())
             {
-                var blastDistance = target.Position.Distance2D(targetPosition); var splash = ShieldReducedDamage(target, Math.Max(1, baseDamage - (baseDamage - 1) * blastDistance / radius));
+                var blastDistance = target.Position.Distance2D(targetPosition); var splash = ShieldReducedDamage(target, Math.Max(1, baseDamage - (baseDamage - 1) * blastDistance / radius), weapon);
                 var remaining = target.GodMode ? Math.Max(1, target.HealthHearts - splash) : Math.Max(0, target.HealthHearts - splash); var blastKilled = remaining <= 0;
                 var blastTarget = blastKilled ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { HealthHearts = remaining, Version = target.Version + 1 };
                 await SavePlayerAsync(blastTarget, cancellationToken);
@@ -1336,7 +1355,7 @@ public sealed partial class RealityWorld
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
         if (player.LocationId != "outdoor" || player.TravelMode != TravelMode.Ufo) throw new InvalidOperationException("You must be piloting your UFO to toggle the Probulator.");
         var now = DateTimeOffset.UtcNow;
-        if (_activeProbulatorBeams.TryGetValue(playerId, out var active) && active.EndsAtUtc > now)
+        if (request.Enabled == false || request.Enabled is null && _activeProbulatorBeams.TryGetValue(playerId, out var active) && active.EndsAtUtc > now)
         {
             _activeProbulatorBeams.TryRemove(playerId, out _);
             return new CombatResult(new CombatEvent(playerId, string.Empty, "probulator", player.Position, player.Position, false, 0, false,
@@ -1358,6 +1377,13 @@ public sealed partial class RealityWorld
     }
 
     private bool OwnsWeapon(string playerId, string weapon) => weapon == "fist" || InventoryQuantity(playerId, weapon) > 0;
+
+    private IReadOnlyList<ItemStack> GetGodModeLoadout(string playerId) => !playerIsGod(playerId) ? [] :
+        WeaponPowerOrder.Where(weapon => weapon != "probulator")
+            .Concat(WeaponPowerOrder.Select(weapon => WeaponDefinition(weapon).Ammo).OfType<string>())
+            .Concat(VehicleItems).Concat(GloveCatalog.All.Keys).Append("scubaGear").Append("gallonOfGas")
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(item => item)
+            .Select(item => InventoryStack(item, 1) with { UnitWeightPounds = 0, CarriedInBackpack = false }).ToArray();
 
     private bool CanUseWeapon(string playerId, string weapon, bool godMode)
     {
@@ -1553,6 +1579,7 @@ public sealed partial class RealityWorld
             if (random.NextDouble() < .8) items.Add(InventoryStack("rock", random.Next(1, 6), quality: RandomWeaponQuality(random)));
             if (random.NextDouble() < .6) items.Add(InventoryStack("ballBearing", random.Next(1, 9)));
             string[] usefulItems = ["spear", "scubaGear", "spearGun", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "arrow", "gallonOfGas", "knife", "slingshot"];
+            if (random.NextDouble() < .25) items.Add(InventoryStack(GloveCatalog.Items[random.Next(GloveCatalog.Items.Length)].ItemType, 1));
             var extraCount = random.Next(1, 4);
             for (var index = 0; index < extraCount; index++)
             {
@@ -1609,14 +1636,20 @@ public sealed partial class RealityWorld
             .Select(group => new PurchaseLine(group.Key, group.Sum(line => line.Quantity))).ToArray();
         foreach (var line in requested)
         {
-            var available = contents.Items.FirstOrDefault(item => item.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase))?.Quantity ?? 0;
+            var available = contents.Items.Where(item => item.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)).Sum(item => item.Quantity);
             if (line.Quantity > available) throw new InvalidOperationException($"The chest does not contain {line.Quantity} Ã— {DisplayItem(line.ItemType)}.");
         }
-        var rewards = requested.Select(line =>
+        var selectedRewards = new List<ItemStack>();
+        var remainingItems = new List<ItemStack>();
+        var quantities = requested.ToDictionary(line => line.ItemType, line => line.Quantity, StringComparer.OrdinalIgnoreCase);
+        foreach (var item in contents.Items.OrderByDescending(item => TreasureQualityRank(item.Quality)))
         {
-            var source = contents.Items.First(item => item.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase));
-            return InventoryStack(line.ItemType, line.Quantity, quality: source.Quality);
-        }).ToArray();
+            var quantity = Math.Min(item.Quantity, quantities.GetValueOrDefault(item.ItemType));
+            if (quantity > 0) selectedRewards.Add(InventoryStack(item.ItemType, quantity, quality: item.Quality));
+            if (quantity < item.Quantity) remainingItems.Add(item with { Quantity = item.Quantity - quantity });
+            quantities[item.ItemType] = quantities.GetValueOrDefault(item.ItemType) - quantity;
+        }
+        var rewards = selectedRewards.ToArray();
         var inventoryRewards = rewards.Where(item => CraftingCatalog.RecipeFromItem(item.ItemType) is null).ToArray();
         if (!CanAddToBackpack(playerId, inventoryRewards, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
         var learnedCount = 0;
@@ -1631,11 +1664,9 @@ public sealed partial class RealityWorld
             }
         }
         finally { _craftingProgressLock.Release(); }
-        foreach (var reward in inventoryRewards) AddInventory(playerId, reward.ItemType, reward.Quantity, reward.Quality);
-        var remaining = contents.Items.Select(item => item with
-        {
-            Quantity = item.Quantity - requested.Where(line => line.ItemType.Equals(item.ItemType, StringComparison.OrdinalIgnoreCase)).Sum(line => line.Quantity)
-        }).Where(item => item.Quantity > 0).ToArray();
+        foreach (var reward in inventoryRewards) AddInventory(playerId, reward.ItemType, reward.Quantity,
+            reward.Quality ?? (reward.Category == InventoryCategory.Weapon ? "Common" : null));
+        var remaining = remainingItems.ToArray();
         var removed = remaining.Length == 0;
         if (removed)
         {
@@ -1672,7 +1703,7 @@ public sealed partial class RealityWorld
         var bearings = random.Next(0, 12);
         if (bearings > 0) rewards.Add(InventoryStack("ballBearing", bearings));
         rewards.Add(InventoryStack("film", random.Next(1, 7)));
-        string[] bonusPool = ["scubaGear", "spearGun", "camera", "swimmies", "knife", "sword", "slingshot", "crossbow", "pistol", "rifle", "arrow", "bullet", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone"];
+        string[] bonusPool = ["waterFilter", "scubaGear", "spearGun", "camera", "swimmies", "knife", "sword", "slingshot", "crossbow", "pistol", "rifle", "arrow", "bullet", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone"];
         if (random.NextDouble() < .75)
         {
             var itemType = bonusPool[random.Next(bonusPool.Length)];
@@ -1680,6 +1711,7 @@ public sealed partial class RealityWorld
         }
         if (dungeonTreasure && (chestId.EndsWith(":chest:0", StringComparison.Ordinal) || random.NextDouble() < .4))
             rewards.Add(InventoryStack(CraftingCatalog.RecipeItemType(CraftingCatalog.Recipes[random.Next(CraftingCatalog.Recipes.Length)].Id), 1));
+        if (random.NextDouble() < .5) rewards.Add(InventoryStack("water", random.Next(1,4)));
         if (dungeonTreasure && random.NextDouble() < .01) rewards.Add(InventoryStack("craftingSkillBook", 1));
         if (dungeonTreasure && random.NextDouble() < .002) rewards.Add(InventoryStack("kryptonite", 1));
         if (random.NextDouble() < (nearWater ? .85 : .2)) rewards.Add(InventoryStack("spear", random.Next(3, 10) + diveDifficulty / 5));
@@ -1802,7 +1834,7 @@ public sealed partial class RealityWorld
             if (burning.IsPlayer && _players.TryGetValue(burning.TargetId, out var target))
             {
                 if (IsFireproof(target)) { _burningTargets.TryRemove(pair.Key, out _); continue; }
-                var burnDamage = ShieldReducedDamage(target, 2);
+                var burnDamage = ShieldReducedDamage(target, 2, "fire");
                 var health = target.GodMode ? Math.Max(1, target.HealthHearts - burnDamage) : Math.Max(0, target.HealthHearts - burnDamage); var died = health <= 0;
                 var updated = died ? await DieAndResetPlayerAsync(target with { HealthHearts = 0 }, cancellationToken) : target with { HealthHearts = health, Version = target.Version + 1 };
                 if (!await SavePlayerAsync(updated, cancellationToken)) continue;
@@ -2137,8 +2169,12 @@ public sealed partial class RealityWorld
         }
         var inventory = _inventories.GetOrAdd(playerId, _ => new(StringComparer.OrdinalIgnoreCase));
         lock (inventory) inventory[item] = inventory.GetValueOrDefault(item) + quantity;
-        if (InventoryDefinition(item).Category == InventoryCategory.Weapon)
-            _weaponQualities.TryAdd((playerId, item), NormalizeWeaponQuality(quality) ?? (item is "fist" or "probulator" ? "Common" : RandomWeaponQuality()));
+        if (InventoryDefinition(item).Category == InventoryCategory.Weapon || NormalizeWeaponQuality(quality) is not null)
+        {
+            var incoming = NormalizeWeaponQuality(quality) ?? (item is "fist" or "probulator" ? "Common" : RandomWeaponQuality());
+            _weaponQualities.AddOrUpdate((playerId, item), incoming,
+                (_, current) => TreasureQualityRank(incoming) > TreasureQualityRank(current) ? incoming : current);
+        }
     }
     private bool RemoveInventory(string playerId, string item, int quantity)
     {
@@ -2179,7 +2215,7 @@ public sealed partial class RealityWorld
     private ItemStack InventoryStack(string itemType, int quantity, string? playerId = null, string? quality = null)
     {
         var definition = InventoryDefinition(itemType);
-        if (definition.Category == InventoryCategory.Weapon && playerId is not null) quality = _weaponQualities.GetValueOrDefault((playerId, itemType));
+        if (playerId is not null) quality = _weaponQualities.GetValueOrDefault((playerId, itemType)) ?? quality;
         return new ItemStack(itemType, quantity, definition.Category, definition.WeightPounds, definition.CarriedInBackpack, quality, _photographs.GetValueOrDefault(itemType));
     }
 
@@ -2190,7 +2226,7 @@ public sealed partial class RealityWorld
     }
 
     private static readonly string[] WeaponQualityNames = ["Crude", "Poor", "Worn", "Common", "Fine", "Superior", "Masterwork", "Epic", "Legendary", "Godly"];
-    private static string? NormalizeWeaponQuality(string? quality) => WeaponQualityNames.FirstOrDefault(value => value.Equals(quality, StringComparison.OrdinalIgnoreCase));
+    private static string? NormalizeWeaponQuality(string? quality) => string.Equals(quality, "Premium", StringComparison.OrdinalIgnoreCase) ? "Superior" : WeaponQualityNames.FirstOrDefault(value => value.Equals(quality, StringComparison.OrdinalIgnoreCase));
     private static string RandomWeaponQuality(Random? random = null)
     {
         var roll = random?.Next(1000) ?? RandomNumberGenerator.GetInt32(1000);

@@ -2,7 +2,38 @@
   'use strict';
   function canWait(player,stop){return !!player&&!!stop&&player.locationId==='outdoor'&&!player.ridingBusId&&!player.abduction&&Math.hypot(player.position.x-stop.position.x,player.position.y-stop.position.y)<=3;}
   function attackPoint(bus,point){const dx=Math.cos(bus.headingRadians),dy=Math.sin(bus.headingRadians),x=point.x-bus.position.x,y=point.y-bus.position.y,a=Math.max(-4.5,Math.min(4.5,x*dx+y*dy)),b=Math.max(-1.25,Math.min(1.25,-x*dy+y*dx));return {...bus.position,x:bus.position.x+dx*a-dy*b,y:bus.position.y+dy*a+dx*b};}
-  function canBoard(player,bus){if(!player||!bus||player.locationId!=='outdoor'||player.ridingBusId||player.abduction||player.healthHearts<=0||bus.healthHearts<=0||bus.speedMetersPerSecond>.1)return false;const p=attackPoint(bus,player.position),right=(player.position.x-bus.position.x)*Math.sin(bus.headingRadians)-(player.position.y-bus.position.y)*Math.cos(bus.headingRadians);return right>=1.25&&Math.hypot(p.x-player.position.x,p.y-player.position.y)<=3;}
+  function canBoard(player,bus){if(!player||!bus||player.locationId!=='outdoor'||player.ridingBusId||player.abduction||player.healthHearts<=0||bus.healthHearts<=0||bus.speedMetersPerSecond>.1||bus.status!=='out of service')return false;const p=attackPoint(bus,player.position),right=(player.position.x-bus.position.x)*Math.sin(bus.headingRadians)-(player.position.y-bus.position.y)*Math.cos(bus.headingRadians);return right>=1.25&&Math.hypot(p.x-player.position.x,p.y-player.position.y)<=3;}
+  function canApproachBoarding(player,bus){return !!player&&!!bus&&player.locationId==='outdoor'&&!player.ridingBusId&&!player.waitingAtBusStopId&&!player.abduction&&player.healthHearts>0&&bus.healthHearts>0&&bus.status==='out of service'&&bus.speedMetersPerSecond<=.1;}
+  function boardingPlan(player,bus){
+    if(!canApproachBoarding(player,bus))return {unavailable:true};
+    if(canBoard(player,bus))return {ready:true};
+    const dx=Math.cos(bus.headingRadians),dy=Math.sin(bus.headingRadians),x=player.position.x-bus.position.x,y=player.position.y-bus.position.y;
+    const start={a:x*dx+y*dy,r:x*dy-y*dx},goal={a:Math.max(-4,Math.min(4,start.a)),r:2.4};
+    const world=p=>({...bus.position,x:bus.position.x+dx*p.a+dy*p.r,y:bus.position.y+dy*p.a-dx*p.r});
+    // Route around the hull with clearance for the player's radius and waypoint tolerance.
+    // If a moving bus overlapped the player, step out on the nearest side first.
+    if(Math.abs(start.a)<4.86&&Math.abs(start.r)<1.61)return {destination:world({a:start.a,r:start.r>=0?2.4:-2.4})};
+    function clear(a,b){
+      let low=0,high=1;
+      for(const [key,extent] of [['a',4.86],['r',1.61]]){
+        const delta=b[key]-a[key];
+        if(Math.abs(delta)<1e-9){if(Math.abs(a[key])>extent)return true;continue;}
+        const t1=(-extent-a[key])/delta,t2=(extent-a[key])/delta;
+        low=Math.max(low,Math.min(t1,t2));high=Math.min(high,Math.max(t1,t2));
+        if(low>high)return true;
+      }
+      return false;
+    }
+    const points=[start,goal,...[-5.7,5.7].flatMap(a=>[-2.4,2.4].map(r=>({a,r})))],distance=points.map(()=>Infinity),previous=[],visited=new Set();distance[0]=0;
+    while(visited.size<points.length){
+      const current=points.map((_,i)=>i).filter(i=>!visited.has(i)).sort((a,b)=>distance[a]-distance[b])[0];
+      if(!Number.isFinite(distance[current])||current===1)break;visited.add(current);
+      points.forEach((p,i)=>{if(visited.has(i)||!clear(points[current],p))return;const next=distance[current]+Math.hypot(p.a-points[current].a,p.r-points[current].r);if(next<distance[i]){distance[i]=next;previous[i]=current;}});
+    }
+    if(!Number.isFinite(distance[1]))return {unavailable:true};
+    let next=1;while(previous[next]!==0)next=previous[next];
+    return {destination:world(points[next])};
+  }
   function footprint(bus){const dx=Math.cos(bus.headingRadians),dy=Math.sin(bus.headingRadians),p=bus.position;return[[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,b])=>({x:p.x+dx*a*4.5-dy*b*1.25,y:p.y+dy*a*4.5+dx*b*1.25}));}
   function routeProjection(path,width,height){const xs=path.map(p=>p.x),ys=path.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),scale=Math.min((width-70)/Math.max(1,maxX-minX),(height-70)/Math.max(1,maxY-minY));return p=>({x:width/2+(p.x-(minX+maxX)/2)*scale,y:height/2-(p.y-(minY+maxY)/2)*scale});}
   function routeBuses(route,buses=[]){return buses.filter(b=>b.routeId===route.id&&Number.isFinite(b.position?.x)&&Number.isFinite(b.position?.y));}
@@ -64,5 +95,5 @@
     if(scale>=6){const label=p(0,0,1.75);c.font='700 9px monospace';c.textAlign='center';c.fillStyle=isMe?'#fff3a5':'#f0e8d1';c.fillText(isMe?'YOU · Waiting for bus':player.name,label.x,label.y);}
     c.restore();
   }
-  const api={canWait,canBoard,attackPoint,footprint,routeProjection,routeBuses,drawRoute,drawBus,benchPosition,benchProjection,drawStop,drawWaitingPlayer};if(typeof module==='object')module.exports=api;else root.BusTransit=api;
+  const api={canWait,canBoard,canApproachBoarding,boardingPlan,attackPoint,footprint,routeProjection,routeBuses,drawRoute,drawBus,benchPosition,benchProjection,drawStop,drawWaitingPlayer};if(typeof module==='object')module.exports=api;else root.BusTransit=api;
 })(globalThis);

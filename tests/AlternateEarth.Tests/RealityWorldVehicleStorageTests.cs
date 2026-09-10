@@ -44,7 +44,7 @@ public sealed partial class RealityWorldTests
         foreach (var mode in new[] { TravelMode.Skateboard, TravelMode.Bike, TravelMode.EBike, TravelMode.DirtBike, TravelMode.Motorcycle, TravelMode.Ufo })
             Assert.Equal(mode, (await world.SetTravelModeAsync(player.Id, mode)).TravelMode);
         var raft = await Assert.ThrowsAsync<InvalidOperationException>(() => world.SetTravelModeAsync(player.Id, TravelMode.Raft));
-        Assert.Contains("shallow water", raft.Message);
+        Assert.Contains("shallow or deep water", raft.Message);
         Assert.Equal(3, (await store.LoadInventoryAsync(homeOwner)).Items.Single(item => item.ItemType == "rock").Quantity);
         Assert.Contains(state.Inventory.Items, item => item.ItemType == "food");
     }

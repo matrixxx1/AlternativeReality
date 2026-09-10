@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><base href="/"><title>AlternativeReality sound check</title>
+<style>body{font:16px system-ui;background:#172b25;color:#f4e8bb;margin:28px;max-width:900px}button{font:inherit;padding:10px;margin:5px;background:#385742;color:inherit;border:1px solid #d8bc68;border-radius:6px}pre{white-space:pre-wrap}input{vertical-align:middle}</style>
+<h1>AlternativeReality sound check</h1><p>CC0 recordings and original procedural audio. This page uses a disposable scene, not a game account.</p>
+<div id="sounds"></div><p><a href="/visual-preview">UFO animation and garage preview</a></p><label>Engine speed <input id="speed" type="range" min="0" max="25" value="0"></label><button id="gas">Start bus engine</button><button id="fire">Start fire</button><button id="motor">Start UFO motor</button><button id="stop">Stop all sounds</button><pre id="status" role="status"></pre>
+<script src="game-audio.js"></script><script>
+const scene={listener:{id:'me',locationId:'outdoor',position:{x:0,y:0},travelMode:'walk'},players:[]};let nativeContext,analyser,decoded=0,failed=0,peak=0;const motorNodes=[];
+const audio=GameAudio.create({getScene:()=>scene,contextFactory:()=>{
+ nativeContext=new AudioContext();analyser=nativeContext.createAnalyser();analyser.fftSize=2048;analyser.connect(nativeContext.destination);
+ const makeSource=nativeContext.createBufferSource.bind(nativeContext);nativeContext.createBufferSource=()=>{const source=makeSource();motorNodes.push(source);return source;};
+ const decode=nativeContext.decodeAudioData.bind(nativeContext);nativeContext.decodeAudioData=async b=>{try{const result=await decode(b);decoded++;return result;}catch(e){failed++;throw e;}};
+ return new Proxy(nativeContext,{get:(t,k)=>{if(k==='destination')return analyser;const value=Reflect.get(t,k,t);return typeof value==='function'?value.bind(t):value;}});
+}});
+audio.bindLifecycle(); 
+for(const kind of ['cow','chicken','pig','goat','sheep','dog','cat','honk','beep','ahooga','gun','rifle','rocket','explosion','hit','craft','craftMetal','pour','glass','coins','door','teleport','whoosh','thwump','fart','dinoRoar','dinoBellow','dinoRasp']){const button=document.createElement('button');button.textContent='Play '+kind;button.onclick=async()=>{peak=0;await audio.unlock();audio.local(kind);};document.querySelector('#sounds').append(button);}
+document.querySelector('#motor').onclick=async()=>{peak=0;await audio.unlock();scene.players=[{...scene.listener,id:'ufo',travelMode:'ufo'}];};
+document.querySelector('#gas').onclick=async()=>{peak=0;audio.clear();await audio.unlock();scene.players=[];scene.fires=[];scene.buses=[{...scene.listener,id:'gas',status:'driving',speedMetersPerSecond:Number(document.querySelector('#speed').value)}];};
+document.querySelector('#speed').oninput=e=>{peak=0;if(scene.buses?.[0])scene.buses[0].speedMetersPerSecond=Number(e.target.value);};
+document.querySelector('#fire').onclick=async()=>{peak=0;audio.clear();scene.players=[];scene.buses=[];await audio.unlock();scene.fires=[{id:'test',position:scene.listener.position,locationId:'outdoor',endsAt:Date.now()+10000}];};
+document.querySelector('#stop').onclick=()=>{scene.players=[];scene.buses=[];scene.fires=[];audio.clear();peak=0;};
+setInterval(()=>{audio.tick();if(analyser){const data=new Float32Array(analyser.fftSize);analyser.getFloatTimeDomainData(data);peak=Math.max(peak,...data.map(Math.abs));}document.querySelector('#status').textContent=JSON.stringify({...audio.status(),motorRate:motorNodes.filter(n=>n.loop).at(-1)?.playbackRate.value,context:nativeContext?.state||'locked',decoded,failed,outputPeak:Number(peak.toFixed(4))},null,2);},100);
+</script></html>

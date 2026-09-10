@@ -4,6 +4,23 @@ namespace AlternateEarth.Server;
 
 public sealed partial class RealityWorld
 {
+    public async Task CollectDirtyWaterAsync(string playerId, CancellationToken token = default)
+    {
+        EnsureNotProbulatorAbducted(playerId);
+        if (IsGasAsleep(playerId)) throw new InvalidOperationException("You cannot collect water while asleep.");
+        await _treasureInteractionLock.WaitAsync(token);
+        try
+        {
+            if (!_players.TryGetValue(playerId, out var player) || !IsWater(TerrainFor(player)))
+                throw new InvalidOperationException("Stand in shallow or deep water to collect dirty water.");
+            if (!CanAddToBackpack(playerId, [InventoryStack("dirtyWater", 1)], out var capacity)) throw new InvalidOperationException(capacity);
+            AddInventory(playerId, "dirtyWater", 1);
+            try { await SaveInventoryAsync(playerId, token); }
+            catch { RemoveInventory(playerId, "dirtyWater", 1); throw; }
+        }
+        finally { _treasureInteractionLock.Release(); }
+    }
+
     internal static PlayerState StepHunger(PlayerState player, double seconds, DateTimeOffset now)
     {
         var state=player.Survival??new();
@@ -24,11 +41,12 @@ public sealed partial class RealityWorld
         return player with{Survival=new(hunger,illnesses,buffs),Stamina=stamina,HealthHearts=Math.Max(0,health)};
     }
 
-    internal static PlayerState EatNutrition(PlayerState player, Nutrition nutrition, DateTimeOffset now, double infectionRoll, double durationRoll)
+    internal static PlayerState EatNutrition(PlayerState player, Nutrition nutrition, DateTimeOffset now, double infectionRoll, double durationRoll, double cureRoll = 1)
     {
         var state=player.Survival??new();
         var illnesses=(state.Illnesses??[]).Where(i=>i.EndsAtUtc>now).ToList();
-        if(nutrition.Raw&&infectionRoll<.25)
+        if(cureRoll<nutrition.ParasiteCureChance)illnesses.RemoveAll(i=>i.Name=="Parasites");
+        if(infectionRoll<(nutrition.ParasiteChance??(nutrition.Raw?.25:0)))
         {
             var until=now.AddSeconds(60+Math.Clamp(durationRoll,0,1)*10740);
             var existing=illnesses.FirstOrDefault(i=>i.Name=="Parasites");
@@ -54,7 +72,8 @@ public sealed partial class RealityWorld
         var now=_probulatorClock.GetUtcNow();
         var updated=itemType.Equals("antibiotics",StringComparison.OrdinalIgnoreCase)
             ? player with{Survival=(player.Survival??new()) with{Illnesses=[]},Version=player.Version+1}
-            : EatNutrition(player,NutritionCatalog.Foods[itemType],now,ProgressionRoll(),ProgressionRoll());
+            : EatNutrition(player,NutritionCatalog.Foods[itemType],now,ProgressionRoll(),ProgressionRoll(),ProgressionRoll());
+        if(itemType.Equals("water",StringComparison.OrdinalIgnoreCase))updated=updated with{Water=player.MaximumWater,WaterProtectedUntilUtc=now.AddMinutes(5)};
         await SaveInventoryAsync(player.Id,token);await SavePlayerAsync(updated,token);return updated;
     }
 

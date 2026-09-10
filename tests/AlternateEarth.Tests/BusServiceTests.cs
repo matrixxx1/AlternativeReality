@@ -39,6 +39,7 @@ public sealed partial class RealityWorldTests
         mutable.GetType().GetField("State")!.SetValue(mutable,bus with {HealthHearts=1});
         await world.AdvanceTransitAsync(TimeSpan.Zero);
         await world.SetEquipmentAsync(player.Id,"weapon","knife");
+        await world.UpdateItemConfigurationAsync(player.Id, new("knife", 2, 1.6, 2_000, 4_000, Accuracy: 1));
         // Touching the vehicle gives deterministic configured melee accuracy at zero distance.
         await world.TeleportAsync(player.Id,new(bus.Position.X+Math.Sin(bus.HeadingRadians)*1.25,bus.Position.Y-Math.Cos(bus.HeadingRadians)*1.25,true));
         var result=await world.AttackAsync(player.Id,new(bus.Id,"rifle"));
@@ -75,5 +76,24 @@ public sealed partial class RealityWorldTests
         await world.TeleportAsync(player.Id,new(bus.Position.X+Math.Sin(bus.HeadingRadians)*2,bus.Position.Y-Math.Cos(bus.HeadingRadians)*2,true));
         var error=await Assert.ThrowsAsync<InvalidOperationException>(()=>world.BoardBusAsync(player.Id,bus.Id));
         Assert.Contains("stops",error.Message);
+    }
+    [Theory]
+    [InlineData("boarding")]
+    [InlineData("dropping off")]
+    [InlineData("yielding")]
+    [InlineData("blocked")]
+    [InlineData("waiting for map")]
+    [InlineData("waiting for safe pull-over")]
+    [InlineData("rejoining route")]
+    public async Task ActiveBusRejectsDirectBoardingEvenWhenStationary(string status)
+    {
+        var (world,player)=await TransitWorld();
+        var bus=world.GetTransitSnapshot().Buses.First();
+        var mutable=MutableBus(world,bus.Id);
+        mutable.GetType().GetField("State")!.SetValue(mutable,bus with {Status=status,SpeedMetersPerSecond=0});
+        await world.TeleportAsync(player.Id,new(bus.Position.X+Math.Sin(bus.HeadingRadians)*2,bus.Position.Y-Math.Cos(bus.HeadingRadians)*2,true));
+        var error=await Assert.ThrowsAsync<InvalidOperationException>(()=>world.BoardBusAsync(player.Id,bus.Id));
+        Assert.Contains("Wait at a bus stop",error.Message);
+        Assert.Null(world.CreateSnapshot().Players.Single(p=>p.Id==player.Id).RidingBusId);
     }
 }

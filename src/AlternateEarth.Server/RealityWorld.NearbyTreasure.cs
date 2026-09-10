@@ -55,6 +55,8 @@ public sealed partial class RealityWorld
         foreach (var item in chests.Where(c => c.Position.Distance2D(player.Position) <= 4 &&
             (c.ExpiresAtUtc is null || c.ExpiresAtUtc > DateTimeOffset.UtcNow)).OrderBy(c => c.Id))
         {
+            if (_dungeons.GetValueOrDefault(player.LocationId) is { Underwater: not null } dive &&
+                dive.Actors.Any(actor => actor.FactionId == item.Id)) continue;
             var walletBefore = _players[playerId].WalletCents;
             var opened = await OpenChestCoreAsync(playerId, item.Id, token);
             cash += opened.Player.WalletCents - walletBefore;
@@ -70,8 +72,12 @@ public sealed partial class RealityWorld
     public async Task<NearbyTreasureState> TakeNearbyTreasureAsync(string playerId, TakeNearbyTreasureRequest request, CancellationToken token = default)
     {
         await _treasureInteractionLock.WaitAsync(token);
-        try
-        {
+        try { return await TakeNearbyTreasureCoreAsync(playerId, request, token); }
+        finally { _treasureInteractionLock.Release(); }
+    }
+
+    private async Task<NearbyTreasureState> TakeNearbyTreasureCoreAsync(string playerId, TakeNearbyTreasureRequest request, CancellationToken token)
+    {
             if (request.Sources is null || request.Items is null || request.Sources.Length == 0 ||
                 request.Items.Any(i => string.IsNullOrWhiteSpace(i.ItemType) || i.Quantity is < 1 or > 100_000))
                 throw new InvalidOperationException("Choose valid treasure and quantities.");
@@ -110,6 +116,85 @@ public sealed partial class RealityWorld
             var result = await ReadNearbyTreasureAsync(playerId, request.AnchorId, token, rewardAnchor);
             result = result with { Message = result.Items.Count == 0 ? "Everything collected. Your treasure is in your inventory." : "Selected items collected. Choose any remaining treasure." };
             return result with { RemovedLoot = result.RemovedLoot.Concat(sources.Where(s => !s.Chest && !_loot.ContainsKey(s.Id)).Select(s => s.Id)).Distinct().ToArray() };
+    }
+
+    private static int TreasureQualityRank(string? quality) => Array.IndexOf(WeaponQualityNames, NormalizeWeaponQuality(quality) ?? "Common");
+
+    private bool IsTreasureGear(string item) => InventoryDefinition(item).Category == InventoryCategory.Weapon ||
+        HatItems.Contains(item) || GloveItems.Contains(item) || ShirtItems.Contains(item) || PantsItems.Contains(item) || OffhandItems.Contains(item) ||
+        VehicleItems.Contains(item) || item is "magicHikingShoes" or "magicRunningShoes" or "scubaGear" or "lockPickSet";
+
+    private static readonly HashSet<string> AutomaticCraftingItems = CraftingCatalog.Materials.Concat(HazardCatalog.Materials)
+        .Select(item => item.ItemType).Concat(CraftingCatalog.Recipes.SelectMany(recipe => recipe.Ingredients).Select(item => item.ItemType))
+        .Concat(["kindling", "canadianMoney"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private async Task<NearbyTreasureState> TakeNearbyUpgradesCoreAsync(string playerId, NearbyTreasureState opened, CancellationToken token)
+    {
+        var removed = opened.RemovedLoot.ToHashSet();
+        var changed = opened.ChangedLoot.ToDictionary(item => item.Id);
+        var homeItems = _playerAccounts.TryGetValue(playerId, out var accountId) ? GetHomeItemStorage(accountId).Items : [];
+        // Best quality first across all sources, so a lesser copy cannot claim the available space first.
+        var candidates = opened.Sources.SelectMany(source => source.Items.Select(item => (Source: source, Item: item)))
+            .OrderByDescending(candidate => TreasureQualityRank(candidate.Item.Quality)).ToArray();
+        foreach (var (source, item) in candidates)
+        {
+            var gear = IsTreasureGear(item.ItemType);
+            if (gear)
+            {
+                var owned = GetInventoryItems(playerId).Concat(homeItems).Where(owned => owned.Quantity > 0 &&
+                    owned.ItemType.Equals(item.ItemType, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (owned.Length > 0 && owned.Max(owned => TreasureQualityRank(owned.Quality)) >= TreasureQualityRank(item.Quality)) continue;
+                if (VehicleItems.Contains(item.ItemType) && InventoryQuantity(playerId, item.ItemType) > 0) continue;
+            }
+            else if (!AutomaticCraftingItems.Contains(item.ItemType) && CraftingCatalog.RecipeFromItem(item.ItemType) is null) continue;
+            var quantity = gear ? 1 : item.Quantity;
+            // Take only the quantity that fits, leaving the rest for a later visit.
+            var low = 0;
+            var high = quantity;
+            while (low < high)
+            {
+                var middle = low + (high - low + 1) / 2;
+                if (CanAddToBackpack(playerId, [item with { Quantity = middle }], out _)) low = middle;
+                else high = middle - 1;
+            }
+            if (low == 0) continue;
+            if (source.Chest) await TakeChestItemsCoreAsync(playerId, new(source.Id, [new(item.ItemType, low)]), token);
+            else
+            {
+                var taken = await TakeLootItemsCoreAsync(playerId, new(source.Id, [new(item.ItemType, low)]), token);
+                if (taken.Remaining is null) removed.Add(source.Id);
+                else if (taken.Remaining.DropKind != "eventReward") changed[source.Id] = taken.Remaining;
+            }
+        }
+        var result = await ReadNearbyTreasureAsync(playerId, opened.AnchorId, token);
+        removed.UnionWith(result.RemovedLoot);
+        foreach (var loot in result.ChangedLoot) changed[loot.Id] = loot;
+        return result with { IsEventReward = opened.IsEventReward, RemovedLoot = removed.ToArray(), ChangedLoot = changed.Values.Where(loot => !removed.Contains(loot.Id)).ToArray(),
+            Message = "Collected money, crafting items, and available gear upgrades that fit in your backpack." };
+    }
+
+    public async Task<NearbyTreasureState> AutoTakeNearbyTreasureAsync(string playerId, string sourceId, bool chest, CancellationToken token = default, bool upgradesOnly = false)
+    {
+        await _treasureInteractionLock.WaitAsync(token);
+        try
+        {
+            if (chest) ValidateTreasureChest(playerId, sourceId);
+            else
+            {
+                var loot = OpenLoot(playerId, sourceId);
+                var player = _players[playerId];
+                if (loot.LocationId != player.LocationId || loot.Position.Distance2D(player.Position) > 4)
+                    throw new InvalidOperationException("Move within 4 meters to collect treasure.");
+            }
+            var opened = await ReadNearbyTreasureAsync(playerId, sourceId, token);
+            if (upgradesOnly) return await TakeNearbyUpgradesCoreAsync(playerId, opened, token);
+            if (opened.Items.Count == 0 || !CanAddToBackpack(playerId, opened.Items, out _)) return opened;
+            var taken = await TakeNearbyTreasureCoreAsync(playerId, new(sourceId,
+                opened.Sources.Select(source => new TreasureSourceRequest(source.Id, source.Chest)).ToArray(),
+                opened.Items.Select(item => new PurchaseLine(item.ItemType, item.Quantity)).ToArray()), token);
+            var removed = opened.RemovedLoot.Concat(taken.RemovedLoot).Distinct().ToArray();
+            return taken with { RemovedLoot = removed, ChangedLoot = opened.ChangedLoot.Concat(taken.ChangedLoot)
+                .Where(loot => !removed.Contains(loot.Id)).GroupBy(loot => loot.Id).Select(group => group.Last()).ToArray() };
         }
         finally { _treasureInteractionLock.Release(); }
     }

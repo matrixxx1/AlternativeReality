@@ -1248,13 +1248,14 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         var entered = await world.EnterDungeonAsync(player.Id, door.Id);
 
         Assert.True(entered.Dungeon.IsHome);
-        Assert.Equal(30, entered.Dungeon.Width, 3);
-        Assert.Equal(20, entered.Dungeon.Height, 3);
+        Assert.Equal(60, entered.Dungeon.Width, 3);
+        Assert.Equal(30, entered.Dungeon.Footprint!.Max(point => point.X), 3);
+        Assert.Equal(22, entered.Dungeon.Height, 3);
         Assert.Equal(4, entered.Dungeon.Footprint!.Count);
-        Assert.Equal(4, entered.Dungeon.ExteriorWallCount);
+        Assert.Equal(12, entered.Dungeon.ExteriorWallCount);
         Assert.NotNull(entered.Dungeon.Doorway);
         Assert.True(IsInside(entered.Dungeon.Exit, entered.Dungeon.Footprint));
-        Assert.All(entered.Dungeon.Furnishings!, item => Assert.True(IsInside(item.Position, entered.Dungeon.Footprint)));
+        Assert.All(entered.Dungeon.Furnishings!.Where(item => item.Properties["objectType"] is not ("garageWorkbench" or "weaponsBench")), item => Assert.True(IsInside(item.Position, entered.Dungeon.Footprint)));
         Assert.All(entered.Dungeon.Walls.Skip(entered.Dungeon.ExteriorWallCount), wall => Assert.True(wall.DoorStart >= 0 && wall.DoorEnd > wall.DoorStart));
         Assert.Contains(entered.Dungeon.Furnishings!, item => item.Properties["objectType"] == "wardrobe");
         var chair = entered.Dungeon.Furnishings!.First(item => item.Properties["objectType"] == "diningChair");
@@ -1374,6 +1375,19 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         var switchedOff = world.ToggleProbulator(pilot.Id, new ToggleProbulatorRequest(1, 0));
         Assert.Equal("Probulator inactive", switchedOff.Event.StatusEffect);
         Assert.True(switchedOff.Event.StatusEffectUntilUtc <= DateTimeOffset.UtcNow);
+    }
+
+    [Fact]
+    public async Task AttackCanEnsureProbulatorOnWithoutTogglingAnActiveBeamOff()
+    {
+        var (world, pilot, _) = await CreateProbulatorTestWorld();
+        Assert.Equal("Probulator active", world.ToggleProbulator(pilot.Id, new(0, 0, true)).Event.StatusEffect);
+        Assert.Equal("Probulator active", world.ToggleProbulator(pilot.Id, new(0, 0, true)).Event.StatusEffect);
+        Assert.Equal("Probulator inactive", world.ToggleProbulator(pilot.Id, new(0, 0)).Event.StatusEffect);
+        Assert.Equal("Probulator inactive", world.ToggleProbulator(pilot.Id, new(0, 0, false)).Event.StatusEffect);
+        Assert.Equal("Probulator active", world.ToggleProbulator(pilot.Id, new(0, 0, true)).Event.StatusEffect);
+        await world.SetTravelModeAsync(pilot.Id, TravelMode.Walk);
+        Assert.Throws<InvalidOperationException>(() => world.ToggleProbulator(pilot.Id, new(0, 0, true)));
     }
 
     private async Task<(RealityWorld World, PlayerState Pilot, SqliteRealityStore Store)> CreateProbulatorTestWorld(bool pvp = true, TimeProvider? clock = null)

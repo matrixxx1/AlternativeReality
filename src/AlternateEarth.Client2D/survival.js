@@ -17,7 +17,7 @@
     const buffs=(s.buffs||[]).filter(b=>Date.parse(b.endsAtUtc)>now).map(b=>`+${b.amount} ${b.stat} (${Math.ceil((Date.parse(b.endsAtUtc)-now)/60000)} min)`);
     return {hunger,text:`${hunger.toFixed(1)} / 100${hunger>=100?' · STARVING':''}`,illnesses:illnesses.join(', ')||'Healthy',buffs:buffs.join(' · ')};
   }
-  function telemetry(player){const s=status(player),h=document.getElementById('hungerValue'),ill=document.getElementById('illnessValue');if(h){h.textContent=s.text;h.style.color=s.hunger>=80?'#ff9773':'';}if(ill){ill.textContent=s.illnesses;ill.title=s.illnesses==='Healthy'?'No diseases':'Eat and drink to survive; antibiotics cure illness.';}const buffs=document.getElementById('foodBuffValue');if(buffs)buffs.textContent=s.buffs||'None';}
+  function telemetry(player){const s=status(player),h=document.getElementById('hungerValue'),ill=document.getElementById('illnessValue');if(h){h.textContent=`${s.hunger.toFixed(1)} / 100`;h.title=s.text;h.style.color=s.hunger>=80?'#ff9773':'';}if(ill){ill.textContent=String((player.survival?.illnesses||[]).filter(i=>Date.parse(i.endsAtUtc)>Date.now()).length);ill.title=s.illnesses==='Healthy'?'No diseases':s.illnesses+'. Antibiotics cure illness.';}return s;}
   function clickWild(target,state,renderList,send,navigate,toast){
     if(state.dungeon)return false;const me=state.players.get(state.playerId);if(!me||me.abduction)return false;
     const e=renderList('resourceNode').filter(wild).find(e=>Math.hypot(e.position.x-target.x,e.position.y-target.y)<Math.max(1.2,18/state.scale));

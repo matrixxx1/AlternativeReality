@@ -49,6 +49,7 @@ public sealed partial class RealityWorld
             WalletCents = 0,
             EquippedWeapon = "fist",
             EquippedHat = "none",
+            EquippedGloves = "none",
             EquippedShirt = "none",
             EquippedPants = "none",
             FlashlightOn = false,
@@ -81,8 +82,10 @@ public sealed partial class RealityWorld
             if (_homeItemStorage.ContainsKey(accountId)) return;
             var stored = await _store.LoadInventoryAsync(HomeItemStorageOwnerId(accountId), cancellationToken);
             RestorePhotographs(stored.Items);
+            foreach(var item in stored.Items.Where(i=>i.Quantity>0 && i.Quality is not null)) _weaponQualities[(HomeItemStorageOwnerId(accountId),item.ItemType)]=item.Quality!;
             _homeItemStorage[accountId] = stored.Items.Where(item => item.Quantity > 0)
                 .ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+            _homeWorkshops[accountId] = await _store.LoadHomeWorkshopAsync(Configuration.Id, accountId, cancellationToken);
             _homeCash[accountId] = await _store.LoadHomeCashAsync(accountId, Configuration.Id, cancellationToken);
         }
         finally { _homeItemStorageLock.Release(); }
@@ -94,7 +97,7 @@ public sealed partial class RealityWorld
         if (_homeItemStorage.TryGetValue(accountId, out var storage))
         {
             lock (storage) items = storage.Where(pair => pair.Value > 0).OrderBy(pair => pair.Key)
-                .Select(pair => InventoryStack(pair.Key, pair.Value)).ToArray();
+                .Select(pair => InventoryStack(pair.Key, pair.Value, HomeItemStorageOwnerId(accountId))).ToArray();
         }
         return new InventoryState(HomeItemStorageOwnerId(accountId), items, WeightPounds: Math.Round(items.Sum(item => item.UnitWeightPounds * item.Quantity), 3), Unlimited: true);
     }
@@ -130,37 +133,38 @@ public sealed partial class RealityWorld
             await ParkCarriedVehiclesAsync(playerId, access.AccountId, cancellationToken);
             return (access.Player, GetPrivateState(playerId));
         }
-        await _homeItemStorageLock.WaitAsync(cancellationToken);
+        await _treasureInteractionLock.WaitAsync(cancellationToken);
         try
         {
-            var storage = _homeItemStorage[access.AccountId];
-            if (request.ToStorage)
+            await _homeItemStorageLock.WaitAsync(cancellationToken);
+            try
             {
-                if (!RemoveInventory(playerId, itemType, request.Quantity)) throw new InvalidOperationException($"You do not have that many {DisplayItem(itemType)}.");
-                lock (storage) storage[itemType] = storage.GetValueOrDefault(itemType) + request.Quantity;
-            }
-            else
-            {
-                lock (storage)
+                var backpack=GetInventoryState(playerId);var home=GetHomeItemStorage(access.AccountId);
+                var source=request.ToStorage?backpack:home;var destination=request.ToStorage?home:backpack;
+                var item=source.Items.SingleOrDefault(i=>i.ItemType==itemType);
+                if(item is null || item.Quantity<request.Quantity)throw new InvalidOperationException("There are not enough of that item to transfer.");
+                if(!request.ToStorage && !CanAddToBackpack(playerId,[item with{Quantity=request.Quantity}],out var capacity))throw new InvalidOperationException(capacity);
+                var existing=destination.Items.SingleOrDefault(i=>i.ItemType==itemType);
+                var quality=existing is null || TreasureQualityRank(item.Quality)>TreasureQualityRank(existing.Quality)?item.Quality:existing.Quality;
+                var moved=item with{Quantity=(existing?.Quantity??0)+request.Quantity,Quality=quality};
+                var nextSource=source with{Items=source.Items.Select(i=>i.ItemType==itemType?i with{Quantity=i.Quantity-request.Quantity}:i).Where(i=>i.Quantity>0).ToArray()};
+                var nextDestination=destination with{Items=[..destination.Items.Where(i=>i.ItemType!=itemType),moved]};
+                var nextBackpack=request.ToStorage?nextSource:nextDestination;var nextHome=request.ToStorage?nextDestination:nextSource;
+                await _store.SaveInventoriesAsync([nextBackpack,nextHome],cancellationToken);
+                _inventories[playerId]=nextBackpack.Items.ToDictionary(i=>i.ItemType,i=>i.Quantity,StringComparer.OrdinalIgnoreCase);
+                _homeItemStorage[access.AccountId]=nextHome.Items.ToDictionary(i=>i.ItemType,i=>i.Quantity,StringComparer.OrdinalIgnoreCase);
+                foreach(var state in new[]{nextBackpack,nextHome})
                 {
-                    if (storage.GetValueOrDefault(itemType) < request.Quantity) throw new InvalidOperationException($"The chest does not contain that many {DisplayItem(itemType)}.");
+                    _weaponQualities.TryRemove((state.PlayerId,itemType),out _);
+                    if(state.Items.SingleOrDefault(i=>i.ItemType==itemType)?.Quality is { } savedQuality)_weaponQualities[(state.PlayerId,itemType)]=savedQuality;
                 }
-                if (!CanAddToBackpack(playerId, new[] { InventoryStack(itemType, request.Quantity) }, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
-                lock (storage)
-                {
-                    storage[itemType] -= request.Quantity;
-                    if (storage[itemType] <= 0) storage.Remove(itemType);
-                }
-                AddInventory(playerId, itemType, request.Quantity);
+                var player=NormalizeEquipmentAfterInventoryChange(_players[playerId]);
+                await SavePlayerAsync(player,cancellationToken);
+                return(player,GetPrivateState(playerId));
             }
-
-            var player = NormalizeEquipmentAfterInventoryChange(access.Player);
-            await SaveInventoryAsync(playerId, cancellationToken);
-            await _store.SaveInventoryAsync(GetHomeItemStorage(access.AccountId), cancellationToken);
-            await SavePlayerAsync(player, cancellationToken);
-            return (player, GetPrivateState(playerId));
+            finally{_homeItemStorageLock.Release();}
         }
-        finally { _homeItemStorageLock.Release(); }
+        finally{_treasureInteractionLock.Release();}
     }
 
     public async Task<(PlayerState Player, PlayerPrivateState PrivateState, string Message)> TransferHomeMoneyAsync(string playerId, TransferHomeMoneyRequest request, CancellationToken cancellationToken = default)
@@ -320,7 +324,7 @@ public sealed partial class RealityWorld
     private PlayerState NormalizeEquipmentAfterInventoryChange(PlayerState player)
     {
         var godMode = player.GodMode;
-        var travelMode = (player.TravelMode == TravelMode.Ufo && InventoryQuantity(player.Id, "ufo") <= 0) || (!godMode && TravelModeUnavailable(player.Id, player)) ? TravelMode.Walk : player.TravelMode;
+        var travelMode = !godMode && TravelModeUnavailable(player.Id, player) ? TravelMode.Walk : player.TravelMode;
         var offhand = ActiveOffhand(player);
         if (!godMode && offhand != "none" && offhand != "candle" && InventoryQuantity(player.Id, offhand) <= 0) offhand = "none";
         return player with
@@ -334,6 +338,7 @@ public sealed partial class RealityWorld
             MagicHikingShoesOn = godMode ? player.MagicHikingShoesOn : player.MagicHikingShoesOn && InventoryQuantity(player.Id, "magicHikingShoes") > 0,
             MagicRunningShoesOn = godMode ? player.MagicRunningShoesOn : player.MagicRunningShoesOn && InventoryQuantity(player.Id, "magicRunningShoes") > 0,
             EquippedHat = RetainedEquipment(player.Id, player.EquippedHat, HatItems, godMode),
+            EquippedGloves = RetainedEquipment(player.Id, player.EquippedGloves, GloveItems, godMode),
             EquippedShirt = RetainedEquipment(player.Id, player.EquippedShirt, ShirtItems, godMode),
             EquippedPants = RetainedEquipment(player.Id, player.EquippedPants, PantsItems, godMode),
             HatOn = RetainedEquipment(player.Id, player.EquippedHat, HatItems, godMode).Equals("hat", StringComparison.OrdinalIgnoreCase),

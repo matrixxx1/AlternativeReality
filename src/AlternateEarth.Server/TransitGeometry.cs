@@ -6,6 +6,15 @@ internal static class TransitGeometry
 {
     public const double BusLength = 9;
     public const double BusWidth = 2.5;
+    public static bool InBusWarningPath(BusState bus, WorldPosition person, double speed)
+    {
+        if (person.Region != bus.Position.Region || speed <= .1) return false;
+        var x = person.X - bus.Position.X; var y = person.Y - bus.Position.Y;
+        var dx = Math.Cos(bus.HeadingRadians); var dy = Math.Sin(bus.HeadingRadians);
+        var ahead = x * dx + y * dy;
+        var side = Math.Abs(x * -dy + y * dx);
+        return ahead >= 0 && ahead <= BusLength / 2 + Math.Clamp(speed * 1.4, 3, 24) && side <= BusWidth / 2 + .65;
+    }
     public static WorldPosition ClosestPoint(BusState bus, WorldPosition point)
     {
         var dx = Math.Cos(bus.HeadingRadians); var dy = Math.Sin(bus.HeadingRadians);

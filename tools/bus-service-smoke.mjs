@@ -12,7 +12,7 @@ const region={latitudeBand:45,longitudeBand:-123},position=(x,y)=>({region,x,y,z
 const points=[[-40,0],[40,0],[40,30],[-40,30],[-40,0]];
 const features=points.slice(0,-1).map((p,i)=>({id:'smoke-road:'+i,kind:'road',position:position(...p),geometry:[{x:p[0],y:p[1],z:0},{x:points[i+1][0],y:points[i+1][1],z:0}],properties:{name:'Transit Test Loop',highway:'secondary',oneway:'yes',widthMeters:'8',osmNodeIds:`${i+1},${i===3?1:i+2}`},version:1,isBaseEntity:true}));
 const area={center:{latitude:45.5,longitude:-122.5,elevationMeters:0},sizeMeters:1000};
-const key=crypto.createHash('sha256').update('v3:transit-smoke:123:45:-123:45.500000:-122.500000:1000').digest('hex').toUpperCase().slice(0,20);
+const key=crypto.createHash('sha256').update('v4:transit-smoke:123:45:-123:45.500000:-122.500000:1000').digest('hex').toUpperCase().slice(0,20);
 fs.writeFileSync(path.join(data,'world-cache',`world-${key}.json`),JSON.stringify({provider:'Generated canonical world (transit smoke fixture)',area,features,elevation:[{x:0,y:0,elevationMeters:0}],cachedAtUtc:new Date().toISOString()}));
 const log=fs.openSync(path.join(data,'server.log'),'a');
 // Hold geographic requests until the test ends, to prove a slow map cannot block commands.

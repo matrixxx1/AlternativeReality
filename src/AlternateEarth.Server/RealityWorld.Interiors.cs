@@ -147,7 +147,7 @@ public sealed partial class RealityWorld
     {
         var point = new GeometryPoint(position.X, position.Y);
         if (position.X < .5 || position.Y < .5 || position.X > dungeon.Width - .5 || position.Y > dungeon.Height - .5) return false;
-        if (!PointInsideFootprint(point, dungeon.Footprint)) return false;
+        if (!HomeFloorContains(dungeon, point)) return false;
         if (dungeon.Furnishings?.Any(item => item.Properties.GetValueOrDefault("objectType") != "rug" && FurnitureContains(item, position, .38)) == true) return false;
         foreach (var wall in dungeon.Walls)
         {

@@ -53,6 +53,28 @@ test('inventory changes, equipment changes, tab changes and renamed items refres
   changes(()=>c.state.players.get('me').hatOn=true);
   changes(()=>c.state.privateState.serverConfiguration.items.push({itemType:'hat',displayName:'Sun hat'}));
 });
+test('God Mode displays virtual weapons and ammunition and refreshes when toggled',()=>{
+  const c=inventoryHarness(),inventory={items:[{itemType:'pistol',quantity:2}],weaponSlotsUsed:1};
+  c.state.privateState.godModeLoadout=[{itemType:'pistol',quantity:1},{itemType:'rifle',quantity:1},{itemType:'bullet',quantity:1}];
+  const text=node=>[node.textContent||'',...(node.children||[]).map(text)].join(' ');
+  c.render(inventory);assert.doesNotMatch(text(c.ui.inventory),/Equip Rifle|bullet ×1/);
+  c.state.players.get('me').godMode=true;c.render(inventory);
+  assert.match(text(c.ui.inventory),/Rifle/);assert.match(text(c.ui.inventory),/bullet ×1/);
+  assert.match(text(c.ui.inventory),/Pistol ×2/);
+  assert.deepEqual(inventory.items,[{itemType:'pistol',quantity:2}]);
+  c.state.players.get('me').godMode=false;c.render(inventory);
+  assert.doesNotMatch(text(c.ui.inventory),/Rifle|bullet ×1/);
+});
+
+test('God Mode exposes all travel buttons without removing terrain restrictions',()=>{
+  const buttons=['ufo','swim','scuba','raft','bike'].map(mode=>({dataset:{mode},classList:{toggle(){}},setAttribute(){}}));
+  const player={godMode:true},state={playerId:'me',players:new Map([['me',player]]),privateState:{inventory:{items:[]}}};
+  let synced=0;
+  const update=new Function('state','document','syncTravelButtonState',implementation('updateMode')+';return updateMode;')(state,{querySelectorAll:()=>buttons},()=>synced++);
+  update('walk');assert.ok(buttons.every(button=>!button.hidden));assert.equal(synced,5);
+  player.godMode=false;update('walk');assert.ok(buttons.every(button=>button.hidden));
+});
+
 test('speech bubbles reuse measured text until content, width, or font changes',()=>{
   let measurements=0;const state={},ctx={measureText(text){measurements++;return {width:text.length*7};}};
   const layout=new Function('state','ctx',implementation('speechLayout')+implementation('wrapChat')+';return speechLayout;')(state,ctx);
@@ -72,4 +94,37 @@ test('dungeon visibility matches discovered cells and refreshes on new dungeon s
   state.dungeon={revealedCells:['-1,-1']};assert.equal(revealed(1,1),false);assert.equal(revealed(-1,-1),true);
   state.dungeon.revealedCells.push('0,0');assert.equal(revealed(1,1),true);
   state.dungeon=null;assert.equal(revealed(1,1),false);assert.equal(state.revealedCellIndex,null);
+});
+
+test('God Mode bypasses fog without erasing exploration, and disabling it restores fog',()=>{
+ const fog=new Set(['5:5']),state={outdoorFog:fog,playerId:'me',players:new Map(),dungeon:{revealedCells:['0,0']}},me={godMode:true,position:{x:0,y:0}};
+ let fills=0;const ctx=new Proxy({fill(){fills++;}},{get:(target,key)=>target[key]||(()=>{}),set:(target,key,value)=>(target[key]=value,true)});
+ const draw=new Function('state','ctx','toScreen','fogCellSize','fogKey',implementation('drawOutdoorFog')+';return drawOutdoorFog;')(state,ctx,p=>p,10,(x,y)=>`${x}:${y}`);
+ const revealed=new Function('state',implementation('revealedAt')+';return revealedAt;')(state);
+ state.players.set('me',me);draw({minX:40,maxX:70,minY:40,maxY:70},me);assert.equal(fills,0);assert.ok(fog.has('5:5'));assert.equal(revealed(99,99),true);
+ me.godMode=false;draw({minX:40,maxX:70,minY:40,maxY:70},me);assert.equal(fills,1);assert.equal(revealed(99,99),false);assert.equal(revealed(1,1),true);
+});
+test('stats owns the only God Mode button and no separate fog control remains',()=>{
+ const html=fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8');const panel=html.slice(html.indexOf('<section id="progressionWindow"'),html.indexOf('<section id="activeEventsPanel"'));
+ assert.match(panel,/<button id="godMode"[^>]+aria-pressed="false"/);assert.match(panel,/<button id="serverConfigButton"/);assert.equal((html.match(/id="godMode"/g)||[]).length,1);assert.doesNotMatch(html+source,/hideFogToggle|hideFogLabel|ui\.hideFog/);
+});
+
+test('God Mode button changes its indicator only after acknowledgement and blocks duplicate requests',()=>{
+ const me={godMode:false},state={playerId:'me',players:new Map([['me',me]]),godTogglePending:null},sent=[];
+ const node=()=>({setAttribute(k,v){this[k]=v;}}),ui={god:node(),serverConfigButton:node(),performancePanel:node(),rebuild:node(),actionMenu:{hidden:true}};
+ const c=require('node:vm').createContext({state,ui,send:m=>sent.push(m),showToast(){},updateActionMenu(){},closeServerConfigWindow(){},clearTimeout(){},setTimeout:()=>1});
+ for(const name of ['syncGodControls','toggleGodMode'])require('node:vm').runInContext(source.split('\n').find(line=>line.startsWith('  function '+name+'(')),c);
+ c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'false');assert.equal(ui.serverConfigButton.disabled,true);
+ c.toggleGodMode();c.toggleGodMode();assert.equal(sent.length,1);assert.equal(sent[0].enabled,true);assert.equal(ui.god['aria-pressed'],'false');
+ c.syncGodControls(me);assert.equal(ui.god.disabled,true);me.godMode=true;c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'true');assert.equal(ui.god.textContent,'God Mode: On');assert.equal(ui.serverConfigButton.disabled,false);
+ c.toggleGodMode();assert.equal(sent[1].enabled,false);me.godMode=false;c.syncGodControls(me);assert.equal(ui.god['aria-pressed'],'false');assert.equal(ui.god.disabled,false);
+});
+test('Effects combines active meal bonuses with other effects and removes expired meals',()=>{
+ const vm=require('node:vm'),nodes=new Map(),node=()=>({style:{}}),get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};let now=1000;
+ const ui=new Proxy({}, {get:(t,k)=>t[k]??=node()}),state={privateState:{}},c=vm.createContext({state,ui,document:{getElementById:get},Date:{now:()=>now,parse:Date.parse},renderActiveEvents(){},gpsText:()=>'',isSleeping:()=>false,candleActive:()=>false,countdown:()=>'',title:s=>s});
+ vm.runInContext(fs.readFileSync('src/AlternateEarth.Client2D/survival.js','utf8'),c);vm.runInContext(source.split('\n').find(line=>line.startsWith('  function updateTelemetry(')),c);
+ const me={godMode:true,locationId:'outdoor',position:{x:0,y:0,z:0},water:10,bodyHeat:50,survival:{buffs:[{amount:3,stat:'strength',endsAtUtc:new Date(61000).toISOString()},{amount:9,stat:'luck',endsAtUtc:new Date(500).toISOString()}]}};
+ c.updateTelemetry(me);assert.match(ui.effects.textContent,/\+3 strength.*God Mode/);assert.doesNotMatch(ui.effects.textContent,/luck/);
+ now=62000;c.updateTelemetry(me);assert.doesNotMatch(ui.effects.textContent,/strength/);assert.match(ui.effects.textContent,/God Mode/);
+ assert.doesNotMatch(fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8'),/foodBuffValue|Meal effects/);
 });

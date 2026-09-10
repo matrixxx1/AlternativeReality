@@ -19,9 +19,11 @@ public sealed partial class RealityWorldTests
             new CanonicalEntity("craft-table", EntityKind.PlayerStructure, new WorldPosition(configuration.Area.Region, 5, 5),
                 Array.Empty<GeometryPoint>(), new Dictionary<string, string>
                 {
-                    ["objectType"] = "craftingTable", ["displayName"] = "Crafting table", ["stored"] = "false",
+                    ["objectType"] = "weaponsBench", ["displayName"] = "Weapons bench", ["stored"] = "false",
                     ["widthMeters"] = "1.6", ["depthMeters"] = "0.8", ["rotationDegrees"] = "0", ["builtIn"] = "false"
-                }, IsBaseEntity: false)
+                }, IsBaseEntity: false),
+            new CanonicalEntity("misc-table", EntityKind.PlayerStructure, new WorldPosition(configuration.Area.Region, 8, 5),
+                Array.Empty<GeometryPoint>(), new Dictionary<string,string>{["objectType"]="craftingTable",["displayName"]="Crafting table",["stored"]="false",["widthMeters"]="1.6",["depthMeters"]="0.8",["rotationDegrees"]="0",["builtIn"]="false"},IsBaseEntity:false)
         });
         await store.SaveInventoryAndCraftingProgressAsync(new InventoryState("home-items:crafting-tests:crafter-account", new[]
         {
@@ -136,7 +138,7 @@ public sealed partial class RealityWorldTests
     {
         var (world, store, building) = await CreateCraftingTestWorld(99);
         Assert.Equal(1, world.GetCraftingSkill("crafter").Level);
-        Assert.Equal(0, Assert.Single(world.RequestCrafting("crafter", "craft-table").Recipes).MaximumCraftable);
+        Assert.Empty(world.RequestCrafting("crafter", "craft-table").Recipes);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.CraftItemAsync("crafter", new("craft-table", "napalmBottle")));
         Assert.Contains("level 25", error.Message);
         Assert.Equal(99, await store.LoadCraftingExperienceAsync(world.Configuration.Id, "crafter"));
@@ -201,7 +203,7 @@ public sealed partial class RealityWorldTests
     {
         var (world, pilot, _) = await CreateProbulatorTestWorld();
         var recipes = CraftingCatalog.Recipes.ToDictionary(item => item.Id);
-        Assert.Equal(75, recipes.Count);
+        Assert.Equal(78, recipes.Count);
         foreach (var (id, level) in new[] { ("molotovCocktail", 1), ("skateboard", 25), ("rocketLauncher", 50), ("motorcycle", 100), ("ufo", 5_000) })
             Assert.Equal(level, recipes[id].RequiredLevel);
         Assert.Contains(recipes["ufo"].Ingredients, item => item.ItemType == "kryptonite");

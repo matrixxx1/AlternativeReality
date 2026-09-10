@@ -8,7 +8,7 @@ namespace AlternateEarth.Geo;
 
 public sealed class DeterministicWorldGenerator
 {
-    private const int GeneratedWorldCacheVersion = 3;
+    private const int GeneratedWorldCacheVersion = 4;
     private static readonly string[] HumanNames =
     [
         "Joe", "Sam", "Dave", "Maria", "Priya", "Marcus", "Elena", "Theo",

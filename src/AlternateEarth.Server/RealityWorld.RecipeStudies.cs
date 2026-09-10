@@ -17,6 +17,21 @@ public sealed partial class RealityWorld
 
     public RecipeStudy? GetRecipeStudy(string playerId, string recipeId) => _recipeStudies.GetValueOrDefault((playerId, recipeId));
 
+    public IReadOnlyList<RecipeBookEntry> GetRecipeBook(string playerId)
+    {
+
+        var supplies = CraftingSupplies(playerId);
+        return CraftingCatalog.Recipes.OrderBy(recipe => recipe.Name).Select(recipe =>
+        {
+            var study = GetRecipeStudy(playerId, recipe.Id);
+            var category = recipe.StationType == "stove" ? "Food/Water" : VehicleItems.Contains(recipe.OutputItemType) ? "Vehicles" :
+                IsCraftingAmmo(recipe.OutputItemType) ? "Ammo" : InventoryDefinition(recipe.OutputItemType).Category == InventoryCategory.Weapon ? "Weapons" : "Misc";
+            return new RecipeBookEntry(recipe.Id, recipe.Name, recipe.OutputItemType, category, recipe.StationType,
+                study?.Count ?? 0, InventoryQuantity(playerId, CraftingCatalog.RecipeItemType(recipe.Id)),
+                study is null ? 0 : CraftChance(playerId, recipe, study), recipe.RequiredLevel, study?.NextBonus ?? 0, CraftBonuses(playerId, recipe), CraftableBatches(playerId, recipe, supplies), recipe.OutputQuantity);
+        }).ToArray();
+    }
+
     // Caller holds the crafting lock. Inventory consumption and study count commit together.
     private async Task StudyRecipeCoreAsync(string playerId, CraftingRecipe recipe, int quantity, InventoryState? consumedInventory, CancellationToken token)
     {

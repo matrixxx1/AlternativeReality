@@ -112,6 +112,8 @@ public sealed partial class RealityWorldTests
     [Fact] public async Task CameraMustBeEquippedAndConsumesExactlyOneFramePerExposure()
     {
         var(world,id,_,clock)=await RetroFixture();
+        typeof(RealityWorld).GetMethod("AddInventory",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(world,[id,"camera",1,null]);
+        await world.SetGodModeAsync(id,false);
         await Assert.ThrowsAsync<InvalidOperationException>(()=>world.PhotographAsync(id,null));
         await world.SetEquipmentAsync(id,"weapon","camera");
         await Assert.ThrowsAsync<InvalidOperationException>(()=>world.PhotographAsync(id,null));

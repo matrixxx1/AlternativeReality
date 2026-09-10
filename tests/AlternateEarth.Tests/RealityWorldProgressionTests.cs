@@ -238,7 +238,7 @@ public sealed partial class RealityWorldTests
         }
         Assert.DoesNotContain(world.GetPrivateState("crafter").Inventory.Items, item => item.ItemType == "recipe:napalmBottle");
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.ConsumeItemAsync("crafter", "recipe:napalmBottle"));
-        Assert.Equal(4, Assert.Single(await store.LoadRecipeStudiesAsync(world.Configuration.Id, "crafter")).Count);
+        Assert.Equal(4, Assert.Single(await store.LoadRecipeStudiesAsync(world.Configuration.Id, "crafter"), study => study.RecipeId == "napalmBottle").Count);
         Assert.True(world.GetProgression("crafter").Experience > 0);
         await world.LeaveAsync("crafter"); await world.JoinAsync("crafter", "Crafter", "crafter-account");
         Assert.Equal(initial.BaseChance + .0875, world.GetRecipeStudy("crafter", "napalmBottle")!.BaseChance, 6);

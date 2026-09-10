@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AlternativeReality</title>
-  <link rel="stylesheet" href="styles.css?v=81">
+  <link rel="stylesheet" href="styles.css?v=88">
 </head>
 <body>
   <canvas id="world" aria-label="AlternativeReality game world"></canvas>
@@ -25,28 +25,43 @@
     <div class="status-row"><span id="connectionDot" class="dot"></span><span id="status">Opening reality link</span></div>
   </header>
   <section id="statsPanel" class="panel telemetry-panel" aria-label="Stats" data-collapsible="Stats">
-    <div class="hearts"><span>Health</span><strong id="heartsValue">♥♥♥♥♥♥♥♥♥♥</strong></div>
-    <div class="stamina"><span>Stamina</span><strong id="staminaValue">◆◆◆◆◆◆◆◆◆◆</strong></div>
-    <div class="water"><span>Water</span><strong id="waterValue">●●●●●●●●●●</strong></div>
-    <div class="body-heat"><span>Heat</span><strong id="bodyHeatValue">Comfortable · 50%</strong></div>
     <div><span>Level</span><strong id="playerLevelValue">1</strong></div>
     <progress id="playerExperience" max="100" value="0" aria-label="Experience toward next level"></progress>
     <small id="playerExperienceText">0 / 100 XP</small>
-    <div><span>Alignment</span><strong id="alignmentValue">Neutral</strong></div>
-    <button id="openProgression" type="button">Character stats</button>
+    <div class="status-grid">
+      <div><span>Alignment</span><strong id="alignmentValue" title="Neutral">0.00</strong></div>
+      <div><span>Crafting</span><strong id="craftingLevelValue" title="Level and progress to next level">1 (0%)</strong></div>
+      <div><span>Wanted</span><strong id="wantedValue">0</strong></div>
+      <div><span>Hunger</span><strong id="hungerValue">0 / 100</strong></div>
+      <div><span>Illness</span><strong id="illnessValue" title="No diseases">0</strong></div>
+      <div><span>Air</span><strong id="airValue">10 / 10</strong></div>
+      <div class="hearts"><span>Health</span><strong id="heartsValue">10 / 10</strong></div>
+      <div class="stamina"><span>Stamina</span><strong id="staminaValue">10 / 10</strong></div>
+      <div class="water"><span>Water</span><strong id="waterValue">10 / 10</strong></div>
+      <div class="body-heat"><span>Heat</span><strong id="bodyHeatValue" title="Comfortable">50%</strong></div>
+    </div>
+    <div class="character-actions" role="group" aria-label="Character, inventory and chat">
+      <button id="openProgression" type="button" title="Character stats" aria-label="Character stats" aria-controls="progressionWindow">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="4" r="2.5"/><path d="M12 7v8m-7-5 7 2 7-2m-7 5-5 7m5-7 5 7"/></svg>
+      </button>
+      <button id="openInventoryButton" type="button" title="Inventory" aria-label="Inventory" aria-controls="inventoryPanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M7 6h10a3 3 0 0 1 3 3v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a3 3 0 0 1 3-3Z"/><rect x="7" y="13" width="10" height="6" rx="1"/><path d="M9 9h6m-3 4v2"/></svg>
+      </button>
+      <button id="openRecipesButton" type="button" title="Recipes" aria-label="Recipes" aria-controls="recipesWindow" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5C8 2 4 3 2 4v16c3-1 7-1 10 1 3-2 7-2 10-1V4c-2-1-6-2-10 1Zm0 0v16M5 8h4m-4 4h4m6-4h4m-4 4h4"/></svg>
+      </button>
+      <button id="openChatButton" type="button" title="Chat" aria-label="Chat" aria-controls="chatPanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-9l-6 4v-4H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M7 8h10M7 12h7"/></svg>
+      </button>
+    </div>
     <div id="dungeonComplete" hidden>Dungeon complete · Grand treasure unlocked</div>
-    <div><span>Crafting</span><strong id="craftingLevelValue">Level 1 · 0%</strong></div>
-    <div><span>Wanted</span><strong id="wantedValue">None</strong></div>
-    <div><span>Hunger</span><strong id="hungerValue">0 / 100</strong></div>
-    <div><span>Illness</span><strong id="illnessValue">Healthy</strong></div>
-    <div><span>Meal effects</span><strong id="foodBuffValue">None</strong></div>
-    <div><span>Air</span><strong id="airValue">10 / 10</strong></div>
     <div><span>Effects</span><strong id="effectsValue">None</strong></div>
   </section>
   <section id="progressionWindow" class="panel progression-panel" data-collapsible="NOT SPECIAL" hidden>
     <h2>NOT SPECIAL</h2>
     <p id="progressionSummary"></p>
     <p id="alignmentSummary"></p>
+    <div class="admin-controls god-controls"><button id="godMode" type="button" aria-pressed="false">God Mode: Off</button><button id="serverConfigButton" type="button" title="Enable God Mode to open server configuration" aria-label="Server configuration" disabled>⚙</button></div>
     <p>Each level grants one point. You can redistribute your points at any time; no stat can go below zero.</p>
     <strong id="statPointsRemaining" aria-live="polite"></strong>
     <div id="statAllocation"></div>
@@ -57,21 +72,15 @@
     <div id="activeEventsList" class="active-events-list" aria-live="polite"></div>
   </section>
   <section id="miniMapPanel" class="panel minimap-panel" data-collapsible="Mini map">
-    <canvas id="miniMap" width="372" height="220" aria-label="Nearby stores, players, graves, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
+    <canvas id="miniMap" width="372" height="220" aria-label="Stores, casino, live buses, players, graves, personal flags, and Home" aria-describedby="miniMapTooltip"></canvas>
     <div id="miniMapTooltip" class="minimap-tooltip" role="tooltip" hidden></div>
-    <div class="minimap-legend"><span class="you">● You</span><span class="store">◆ Store</span><span class="player">● Player</span><span class="grave">✝ Grave</span><span class="flag">⚑ Your flag</span><span class="home">⌂ Home</span></div>
-    <div class="minimap-actions" role="group" aria-label="Map and inventory actions">
+    <div class="minimap-legend" role="group" aria-label="Minimap visibility"><label class="you"><input type="checkbox" data-minimap-filter="you" checked>● You</label><label class="store"><input type="checkbox" data-minimap-filter="store" checked>◆ Store</label><label class="casino" style="color:#68e0bb"><input type="checkbox" data-minimap-filter="casino" checked>C Casino</label><label class="bus" style="color:#f9ce56"><input type="checkbox" data-minimap-filter="bus" checked>B Buses</label><label class="player"><input type="checkbox" data-minimap-filter="player" checked>● Player</label><label class="grave"><input type="checkbox" data-minimap-filter="grave" checked>✝ Grave</label><label class="flag"><input type="checkbox" data-minimap-filter="flag" checked>⚑ Flags</label><label class="home"><input type="checkbox" data-minimap-filter="home" checked>⌂ Home</label></div>
+    <div class="minimap-actions" role="group" aria-label="Map actions">
       <button id="miniMapTeleportHomeButton" class="minimap-home-button" type="button" title="Teleport Home" aria-label="Teleport Home" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/></svg>
       </button>
       <button id="centerButton" type="button" title="Center on player" aria-label="Center on player">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
-      </button>
-      <button id="openInventoryButton" type="button" title="Inventory" aria-label="Inventory" aria-controls="inventoryPanel" aria-expanded="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M7 6h10a3 3 0 0 1 3 3v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a3 3 0 0 1 3-3Z"/><rect x="7" y="13" width="10" height="6" rx="1"/><path d="M9 9h6m-3 4v2"/></svg>
-      </button>
-      <button id="openChatButton" type="button" title="Chat" aria-label="Chat" aria-controls="chatPanel" aria-expanded="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-9l-6 4v-4H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M7 8h10M7 12h7"/></svg>
       </button>
     </div>
     <div class="minimap-location" role="group" aria-label="Location">
@@ -122,14 +131,9 @@
     <button id="travelProbulator" type="button" aria-pressed="false" hidden>Probulator: OFF</button>
     <strong id="lootingLabel">Looting</strong>
     <div class="mode-buttons looting-buttons" role="group" aria-labelledby="lootingLabel">
-      <button type="button" data-looting="all" aria-pressed="false">Take all</button>
-      <button type="button" data-looting="selective" aria-pressed="true" class="active">Selective</button>
-    </div>
-    <p id="lootingDescription" class="behavior-description" aria-live="polite">Open treasure to choose what to take or leave.</p>
-    <div class="admin-controls">
-      <label><input id="godMode" type="checkbox"> God Mode</label>
-      <label id="hideFogLabel" hidden><input id="hideFogToggle" type="checkbox"> Hide fog</label>
-      <button id="serverConfigButton" type="button" hidden>Server config</button>
+      <button type="button" data-looting="all" title="Automatically collect nearby treasure when it fits in your backpack." aria-pressed="false">Auto take all</button>
+      <button type="button" data-looting="selective" title="Open treasure to choose what to take or leave." aria-pressed="true" class="active">Manual</button>
+      <button type="button" data-looting="upgrades" title="Automatically collect money and crafting items, plus unowned or higher-quality gear and weapons, when backpack space allows." aria-pressed="false">Upgrades only</button>
     </div>
   </section>
   <section id="characterPanel" class="panel character-panel" data-collapsible="Character manager" hidden>
@@ -144,7 +148,10 @@
         <button type="button" role="tab" data-home-storage-tab="weapon">Weapons</button>
         <button type="button" role="tab" data-home-storage-tab="ammo">Ammo</button>
         <button type="button" role="tab" data-home-storage-tab="quest">Quest items</button>
-        <button type="button" role="tab" data-home-storage-tab="misc">Misc</button>
+        <button type="button" role="tab" data-home-storage-tab="gloves">Gloves</button>
+        <button type="button" role="tab" data-home-storage-tab="food">Food &amp; Water</button>
+        <button type="button" role="tab" data-home-storage-tab="crafting">Crafting</button>
+        <button type="button" role="tab" data-home-storage-tab="misc">Other</button>
         <button type="button" role="tab" data-home-storage-tab="furniture">Furniture</button>
       </nav>
     <section id="homeFurnitureSection" hidden>
@@ -164,17 +171,40 @@
       </div>
     </section>
   </section>
-  <section id="craftingWindow" class="panel crafting-window" data-collapsible="Crafting table" hidden>
-    <h2>Crafting table</h2>
+  <section id="homeUpgradesWindow" class="panel home-upgrades-window" data-collapsible="Home upgrades" hidden>
+    <h2>Home upgrades</h2>
+    <p>Buy once for your Home. Upgrades apply immediately, are permanent, and cannot be sold or dropped.</p>
+    <p>Bonuses stack. A successful vehicle craft can save 20% of each ingredient stack (at least one from stacks of two or more).</p>
+    <div id="homeUpgradeRows"></div>
+    <button id="closeHomeUpgrades" type="button">Close</button>
+  </section>
+  <section id="recipesWindow" class="panel recipes-window" data-collapsible="Recipes" hidden>
+    <h2>Recipes</h2>
+    <p id="recipeBookSkill"></p>
+    <div id="recipeBookTabs" class="recipe-book-tabs" role="tablist" aria-label="Recipe categories">
+      <button type="button" role="tab" data-recipe-tab="Food/Water">Food/Water</button>
+      <button type="button" role="tab" data-recipe-tab="Weapons">Weapons</button>
+      <button type="button" role="tab" data-recipe-tab="Ammo">Ammo</button>
+      <button type="button" role="tab" data-recipe-tab="Vehicles">Vehicles</button>
+      <button type="button" role="tab" data-recipe-tab="Misc">Misc</button>
+    </div>
+    <div id="recipeBookRows" role="tabpanel"></div>
+    <button id="closeRecipesButton" type="button">Close</button>
+  </section>
+  <section id="craftingWindow" class="panel crafting-window" data-collapsible="Crafting" hidden>
+    <h2 id="craftingTitle">Crafting table</h2>
     <p id="craftingSkillSummary"></p>
-    <p>Use supplies from your Home storage. Finished items go back into storage.</p>
+    <p>Use supplies from Home storage first, then your backpack. Finished items go into Home storage.</p>
     <small>Recipes use invented game-item counts, not real measurements or preparation instructions.</small>
     <div id="craftingRecipes" class="crafting-recipes"></div>
+    <button id="craftingUpgrades" type="button">Home upgrades</button>
     <button id="craftingRefresh" type="button">Refresh supplies</button>
     <button id="craftingClose" type="button">Close</button>
   </section>
   <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
     <strong>Actions</strong>
+    <button id="openHomeUpgradesButton" type="button" hidden>Home upgrades</button>
+    <button id="collectDirtyWaterButton" type="button" hidden>Collect dirty water</button>
     <div id="noActions">No actions available.</div>
     <button id="waitForBusButton" type="button" hidden>Wait for bus</button>
     <button id="viewBusRouteButton" type="button" hidden>View route</button>
@@ -226,8 +256,8 @@
   <section id="treasureWindow" class="panel treasure-window" role="dialog" aria-label="Treasure pickup" data-collapsible="Treasure" hidden>
     <h2>Treasure chest</h2>
     <div id="treasureCash" class="treasure-cash"></div>
-    <p>Choose quantities to take. Unselected items stay here.</p>
-    <div class="treasure-columns">
+    <p id="treasureHint">Choose quantities to take. Unselected items stay here.</p>
+    <div id="treasureColumns" class="treasure-columns">
       <div><h3>Treasure</h3><div id="treasureItems" class="treasure-items"></div></div>
     </div>
     <div id="treasureWeight" class="treasure-weight"></div>
@@ -328,7 +358,8 @@
         </svg>
         <button id="equipmentHat" class="equipment-slot slot-hat" type="button"><span>Hat</span><em>Empty</em></button>
         <button id="equipmentShirt" class="equipment-slot slot-shirt" type="button"><span>Shirt</span><em>Empty</em></button>
-        <button id="equipmentOffhand" class="equipment-slot slot-gloves" type="button"><span>Offhand</span><em>Empty</em></button>
+        <button id="equipmentOffhand" class="equipment-slot slot-offhand" type="button"><span>Offhand</span><em>Empty</em></button>
+        <button id="equipmentGloves" class="equipment-slot slot-gloves" type="button"><span>Gloves</span><em>Empty</em></button>
         <button id="equipmentPants" class="equipment-slot slot-pants" type="button"><span>Pants</span><em>Empty</em></button>
         <button id="equipmentShoes" class="equipment-slot slot-shoes" type="button"><span>Shoes</span><em>Empty</em></button>
         <button id="equipmentWeapon" class="equipment-slot slot-weapon" type="button"><span>Weapon</span><em>Fist</em></button>
@@ -341,6 +372,9 @@
           <button type="button" data-inventory-tab="weapon">Weapons <span id="weaponSlotCount">0/3</span></button>
           <button type="button" data-inventory-tab="ammo">Ammo</button>
           <button type="button" data-inventory-tab="quest">Quest items <span id="questSlotCount" title="Unlimited item slots">0</span></button>
+          <button type="button" data-inventory-tab="gloves">Gloves</button>
+          <button type="button" data-inventory-tab="food">Food &amp; Water</button>
+          <button type="button" data-inventory-tab="crafting">Crafting</button>
           <button type="button" data-inventory-tab="other">Other <span id="otherSlotCount" title="Unlimited item slots">0</span></button>
         </nav>
         <div id="inventoryItems" class="inventory-items">Empty</div>
@@ -387,17 +421,24 @@
   <div id="toast" role="status"></div>
   <section id="busRidePanel" class="bus-ride-panel" aria-live="polite" hidden><span id="busRideStatus"></span><button id="getOffBusButton" type="button" hidden>Get off bus now</button><button id="cancelBusWaitButton" type="button" hidden>Cancel waiting</button><button id="rideViewRouteButton" type="button">View route</button></section>
   <dialog id="busRouteDialog" aria-labelledby="busRouteTitle"><h2 id="busRouteTitle">Bus route</h2><button id="closeBusRouteButton" type="button">Close route</button><label>Service <select id="busRouteSelect"></select></label><p id="busRouteSummary"></p><canvas id="busRouteCanvas" width="800" height="480" aria-label="Bus route, direction arrows and numbered stops"></canvas><ol id="busRouteStops"></ol><button id="routeWaitForBusButton" type="button">Wait at selected stop</button></dialog>
-  <script src="transit.js?v=5"></script>
+  <script src="transit.js?v=7"></script>
   <script src="commands.js?v=6"></script>
   <script src="combat-effects.js?v=3"></script>
-  <script src="map-markers.js?v=1"></script>
+  <script src="map-markers.js?v=3"></script>
   <script src="quest-navigation.js?v=1"></script>
   <script src="action-targets.js?v=1"></script>
-  <script src="survival.js?v=1"></script>
-  <script src="scuba.js?v=2"></script>
+  <script src="survival.js?v=3"></script>
+  <script src="scuba.js?v=4"></script>
   <script src="retro-battles.js?v=1"></script>
   <script src="northern-exposure.js"></script>
-  <script src="inversions.js?v=3"></script>
-  <script src="app.js?v=152"></script>
+  <script src="inversions.js?v=4"></script>
+  <script src="home-workshop.js?v=1"></script>
+  <script src="garage.js?v=2"></script>
+  <script src="recipe-book.js?v=2"></script>
+  <script src="game-audio.js?v=5"></script>
+  <link rel="stylesheet" href="casino.css?v=2">
+  <script src="casino.js?v=2"></script>
+  <script src="inventory-sections.js?v=1"></script>
+  <script src="app.js?v=173"></script>
 </body>
 </html>

@@ -14,6 +14,9 @@ internal static class CraftingCatalog
     // Invented inventory-token costs for game balance, never physical measurements or instructions.
     private static readonly CraftingRecipe[] BaseRecipes =
     [
+        new("waterFilter", "Water filter", "waterFilter", 1, [new("paper",1),new("cloth",1)]),
+        new("water", "Water", "water", 1, [new("cloth",1),new("dirtyWater",3)], "stove"),
+        new("purifiedWater", "Purified water", "purifiedWater", 1, [new("paper",1),new("cloth",1),new("water",3)], "stove"),
         new("gunpowder", "Gunpowder", "gunpowder", 1,
             [new("powderBase", 1), new("sparkBinder", 1)]),
         new("molotovCocktail", "Molotov cocktail", "molotovCocktail", 1,
@@ -56,6 +59,7 @@ internal static class CraftingCatalog
         // Broad game difficulty and destructive potential; no real manufacturing details.
         var level = recipe.Id switch
         {
+            "water" or "purifiedWater" or "waterFilter" => 1,
             "fishStew" or "friedFish" or "hockeyStick" or "mapleSyrup" or "molotovCocktail" or "salvageCloth" or "charcoal" or "food" or "candle" => 1,
             "hat" => 3,
             "gunpowder" or "tShirt" or "slingshot" or "ballBearing" => 5,
@@ -76,7 +80,9 @@ internal static class CraftingCatalog
             _ => throw new InvalidOperationException($"Assign a crafting level to {recipe.Id}.")
         };
         var difficulty = level >= 5_000 ? "Extraterrestrial" : level >= 100 ? "Expert" : level >= 40 ? "Advanced" : level >= 15 ? "Intermediate" : "Basic";
-        return recipe with { RequiredLevel = level, Difficulty = difficulty };
+        var station = recipe.OutputItemType is "skateboard" or "bike" or "eBike" or "dirtBike" or "motorcycle" or "inflatableRaft" or "ufo" or "swimmies" ? "garageWorkbench"
+            : NutritionCatalog.Foods.ContainsKey(recipe.OutputItemType) || recipe.OutputItemType == "mapleSyrup" ? "stove" : recipe.OutputItemType is "molotovCocktail" or "bullet" or "arrow" or "ballBearing" or "rocket" or "hockeyStick" or "knife" or "sword" or "slingshot" or "crossbow" or "pistol" or "rifle" or "grenade" or "rocketLauncher" || HazardCatalog.Find(recipe.OutputItemType) is not null ? "weaponsBench" : recipe.StationType;
+        return recipe with { RequiredLevel = level, Difficulty = difficulty, StationType = station };
     }).ToArray();
 
     public static string RecipeItemType(string id) => $"recipe:{id}";
@@ -86,13 +92,14 @@ internal static class CraftingCatalog
     public static readonly string[] ChemicalItems =
         ["charcoal", "potassiumNitrate", "salt", "pepper", "sulfur", "bleach", "ammonia", "sulfuricAcid", "cookingOil", "flour", "sugar", "cookingSupplies", "laundryDetergent", .. HazardCatalog.FictionalReagents];
     public static readonly string[] LitterItems =
-        ["spear", "pencil", "pen", "marker", "newspaper", "emptyGlassBottle", "emptyGlassJar", "emptyPlasticBottle", "crustySocks", "soiledUnderwear", "areaMap", "paper", "wood", "cloth", "plastic", "styrofoam", "metal", "drugs", "glassScrap", "rubber", "mechanicalParts", "electronics", "battery"];
+        ["waterFilter", "spear", "pencil", "pen", "marker", "newspaper", "emptyGlassBottle", "emptyGlassJar", "emptyPlasticBottle", "crustySocks", "soiledUnderwear", "areaMap", "paper", "wood", "cloth", "plastic", "styrofoam", "metal", "drugs", "glassScrap", "rubber", "mechanicalParts", "electronics", "battery"];
 
     private static ItemConfiguration Material(string id, string name, double weight, long min, long max, bool forSale = true) =>
         new(id, name, "Scavenging and crafting inventory item", 0, 0, min, max, forSale, WeightPounds: weight);
 
     public static readonly ItemConfiguration[] Materials =
     [
+        Material("waterFilter", "Water filter", .15, 800, 1500, false),
         Material("kryptonite", "Kryptonite", .5, 500_000, 1_000_000, false),
         new("craftingSkillBook", "Building shit for dummies", "Read once to gain one full crafting level", 0, 0, 10_000, 30_000, false, WeightPounds: .25),
         Material("glassScrap", "Glass scraps", .2, 10, 75),

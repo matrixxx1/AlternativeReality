@@ -29,6 +29,7 @@ public sealed partial class RealityWorld
 
     private bool IsBuildingLocked(CanonicalEntity building, long? cycle = null)
     {
+        if (IsCasino(building)) return false;
         if (_publicBaseClaims.ContainsKey(building.Id) || _baseBuildings.Values.Contains(building.Id)) return false;
         if (StoreHoursForBuilding(building) is { } hours) return !hours.IsOpen(CurrentServerTime);
         if (IsQuestBuilding(building)) return false;
@@ -39,6 +40,7 @@ public sealed partial class RealityWorld
 
     private StoreOpeningHours? StoreHoursForBuilding(CanonicalEntity building)
     {
+        if (IsCasino(building)) return null;
         if (_publicBaseClaims.ContainsKey(building.Id) || _baseBuildings.Values.Contains(building.Id) || StoreProfileForBuilding(building) is null) return null;
         // A seeded assignment keeps each store's daily hours stable across visits and restarts.
         return new StoreOpeningHours((int)(unchecked((uint)StableInt($"store-hours:{Configuration.Seed}:{building.Id}")) % 24));

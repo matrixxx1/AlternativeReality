@@ -117,14 +117,14 @@ public sealed partial class RealityWorld
             var inventory = _inventories[playerId];
             lock (inventory)
             {
-                if (!RemoveInventory(playerId, "film", 1))
+                if (!player.GodMode && !RemoveInventory(playerId, "film", 1))
                 { _photographs.TryRemove(itemType, out _); throw new InvalidOperationException("You need film. Buy it from vendors or find it in treasure chests."); }
                 if (!CanAddToBackpack(playerId, [InventoryStack(itemType, 1)], out var capacityMessage))
-                { AddInventory(playerId, "film", 1); _photographs.TryRemove(itemType, out _); throw new InvalidOperationException(capacityMessage); }
+                { if (!player.GodMode) AddInventory(playerId, "film", 1); _photographs.TryRemove(itemType, out _); throw new InvalidOperationException(capacityMessage); }
                 AddInventory(playerId, itemType, 1);
             }
             try { await _store.SaveCameraExposureAsync(GetInventoryState(playerId), itemType, thumbnailDataUrl, token); }
-            catch { RemoveInventory(playerId, itemType, 1); AddInventory(playerId, "film", 1); _photographs.TryRemove(itemType, out _); throw; }
+            catch { RemoveInventory(playerId, itemType, 1); if (!player.GodMode) AddInventory(playerId, "film", 1); _photographs.TryRemove(itemType, out _); throw; }
             _cameraShots[playerId] = now;
             foreach (var key in _tradeQuotes.Keys.Where(k => k.Player == playerId).ToArray()) _tradeQuotes.TryRemove(key, out _);
             _progressionNotices.Enqueue(new(playerId, "Photograph added to your backpack: " + subject + ". Submit it as quest proof or sell it to a vendor."));
