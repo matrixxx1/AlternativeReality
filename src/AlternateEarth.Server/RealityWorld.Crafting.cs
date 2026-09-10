@@ -140,7 +140,9 @@ public sealed partial class RealityWorld
                     if (output > 0) next[recipe.OutputItemType] = checked(next.GetValueOrDefault(recipe.OutputItemType) + output);
                     if(succeeded>0&&FarmCatalog.ReturnedContainer(recipe.Id) is { } empty)next[empty]=checked(next.GetValueOrDefault(empty)+succeeded);
                     var saved = new InventoryState(HomeItemStorageOwnerId(access.AccountId), next.Where(item => item.Value > 0).Select(item => InventoryStack(item.Key, item.Value, HomeItemStorageOwnerId(access.AccountId))).ToArray());
-                    var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + (succeeded + (failed ? 1 : 0)) * CraftingCatalog.ExperiencePerBatch);
+                    var attemptedBatches = succeeded + (failed ? 1 : 0);
+                    var craftingExperienceGained = checked(attemptedBatches * CraftingCatalog.ExperienceForCraft(recipe));
+                    var experience = checked(_craftingExperience.GetValueOrDefault(playerId) + craftingExperienceGained);
                     var furniture = failed ? _homeFurniture[access.AccountId].Where(item => item.Id != request.FurnitureId).ToList() : null;
                     var savedBackpack=backpack with {Items=backpack.Items.Where(i=>nextBackpack.GetValueOrDefault(i.ItemType)>0).Select(i=>i with {Quantity=nextBackpack[i.ItemType]}).ToArray()};
                     await _store.SaveCraftAttemptAsync(Configuration.Id, playerId, saved, experience, access.AccountId, furniture, cancellationToken, savedBackpack);
@@ -171,8 +173,8 @@ public sealed partial class RealityWorld
                     await AwardExperienceAsync(playerId, succeeded * (4 + recipe.RequiredLevel / 10d) + (failed ? 1 : 0),
                         failed ? "Crafting practice and a failed experiment" : "Crafted " + recipe.Name, cancellationToken: cancellationToken);
                     var message = failed
-                        ? $"Craft failed! The station exploded and dealt 1 damage. Lost the failed batch's materials; {succeeded} earlier batch(es) succeeded. Unattempted materials remain in your backpack and Home storage."
-                        : $"Crafted {output} × {recipe.Name} into Home storage. +{succeeded} crafting XP; level {GetCraftingSkill(playerId).Level}.";
+                        ? $"Craft failed! The station exploded and dealt 1 damage. Lost the failed batch's materials; {succeeded} earlier batch(es) succeeded. Unattempted materials remain in your backpack and Home storage. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}."
+                        : $"Crafted {output} × {recipe.Name} into Home storage. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}.";
                     if(bonusOutput>0) message += $" Upgrades added {bonusOutput} free bonus item(s).";
                     if(savedMaterials>0) message += $" Garage upgrades saved {savedMaterials} ingredient item(s).";
                     return new CraftingResult(failed ? new CraftingState(request.FurnitureId, Array.Empty<CraftingRecipeState>(), GetCraftingSkill(playerId), true, access.Table.Properties["objectType"]) : RequestCrafting(playerId, request.FurnitureId),

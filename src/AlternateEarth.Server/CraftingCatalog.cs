@@ -4,9 +4,14 @@ namespace AlternateEarth.Server;
 
 internal static class CraftingCatalog
 {
-    public const int ExperiencePerBatch = 1;
     public const int ExperiencePerNewRecipe = 25;
     public const double LevelExperienceGrowth = 1.005;
+
+    public static long ExperienceForCraft(CraftingRecipe recipe)
+    {
+        var ingredientTypes = recipe.Ingredients.Select(ingredient => ingredient.ItemType).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        return 1L << Math.Clamp(ingredientTypes - 1, 0, 30);
+    }
 
     public static long ExperienceForLevel(int level) => (long)Math.Min(long.MaxValue / 4d,
         Math.Ceiling(100 * Math.Pow(LevelExperienceGrowth, Math.Max(0, level - 1))));

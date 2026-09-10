@@ -166,10 +166,12 @@ public sealed partial class RealityWorldTests
     {
         var (world, store, building) = await CreateCraftingTestWorld();
         var before = world.GetCraftingSkill("crafter").Experience;
-        await world.CraftItemAsync("crafter", new("craft-table", "napalmBottle", 2));
-        Assert.Equal(before + 2, world.GetCraftingSkill("crafter").Experience);
+        var recipe = CraftingCatalog.Recipes.Single(item => item.Id == "napalmBottle");
+        var expectedGain = 2 * CraftingCatalog.ExperienceForCraft(recipe);
+        await world.CraftItemAsync("crafter", new("craft-table", recipe.Id, 2));
+        Assert.Equal(before + expectedGain, world.GetCraftingSkill("crafter").Experience);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.CraftItemAsync("crafter", new("craft-table", "napalmBottle", 2)));
-        Assert.Equal(before + 2, await store.LoadCraftingExperienceAsync(world.Configuration.Id, "crafter"));
+        Assert.Equal(before + expectedGain, await store.LoadCraftingExperienceAsync(world.Configuration.Id, "crafter"));
         Assert.True(CraftingCatalog.ExperienceForLevel(200) - CraftingCatalog.ExperienceForLevel(100) >
             CraftingCatalog.ExperienceForLevel(100) - CraftingCatalog.ExperienceForLevel(1));
         long highExperience = Enumerable.Range(1, 4_999).Sum(CraftingCatalog.ExperienceForLevel);
@@ -179,6 +181,36 @@ public sealed partial class RealityWorldTests
         Assert.Equal(5_000, world.GetCraftingSkill("crafter").Level);
         await world.ConsumeItemAsync("crafter", "craftingSkillBook");
         Assert.Equal(5_001, world.GetCraftingSkill("crafter").Level);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 4)]
+    [InlineData(4, 8)]
+    [InlineData(5, 16)]
+    public void CraftingExperienceRisesExponentiallyWithIngredientCount(int ingredientCount, long expected)
+    {
+        var ingredients = Enumerable.Range(1, ingredientCount).Select(index => new RecipeIngredient($"ingredient{index}", 1)).ToArray();
+        var recipe = new CraftingRecipe("test", "Test", "test", 1, ingredients);
+
+        Assert.Equal(expected, CraftingCatalog.ExperienceForCraft(recipe));
+    }
+
+    [Fact]
+    public async Task FailedCraftStillAddsSmallAmountOfCraftingExperience()
+    {
+        var (world, store, _) = await CreateCraftingTestWorld();
+        var before = world.GetCraftingSkill("crafter").Experience;
+        world.ProgressionRoll = () => 1;
+
+        var result = await world.CraftItemAsync("crafter", new("craft-table", "napalmBottle"));
+        var expectedGain = CraftingCatalog.ExperienceForCraft(CraftingCatalog.Recipes.Single(item => item.Id == "napalmBottle"));
+
+        Assert.True(result.Crafting.TableDestroyed);
+        Assert.Equal(before + expectedGain, world.GetCraftingSkill("crafter").Experience);
+        Assert.Equal(before + expectedGain, await store.LoadCraftingExperienceAsync(world.Configuration.Id, "crafter"));
+        Assert.Contains($"+{expectedGain} crafting XP", result.Message);
     }
 
     [Fact]
