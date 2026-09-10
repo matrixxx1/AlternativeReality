@@ -27,7 +27,7 @@
     if(['defensive','attackReady'].includes(state.actionMode)&&combat.targetId===state.playerId&&combat.attackerId!==state.playerId&&!combat.targetDied)
       state.defensiveThreats.set(combat.attackerId,now+30000);
   }
-  function automaticAction({mode,me,targets,players,relationships,attackers,now,pvpEnabled=true,avoid=new Map()}){
+  function automaticAction({mode,me,targets,players,relationships,attackers,now,pvpEnabled=true,avoid=new Map(),range=0,canFire=()=>true}){
     const nearby=targets.filter(target=>target.id!==me.id&&!defeated(target)&&!target.abduction&&
       (target.locationId||'outdoor')===(me.locationId||'outdoor'))
       .map(target=>({target,distance:Math.hypot(target.position.x-me.position.x,target.position.y-me.position.y)}))
@@ -43,8 +43,10 @@
     }
     if(!['aggressive','defensive','attackReady'].includes(mode)||(me.equippedWeapon||'none')==='none')return null;
     const candidate=nearby.find(({target,distance})=>(players.has(target.id)?pvpEnabled:['npc','animal'].includes(target.kind))&&
-      (avoid.get(target.id)||0)<=now&&(mode==='aggressive'?distance<=15:(attackers.get(target.id)||0)>now));
-    return candidate?{kind:'attack',target:candidate.target}:null;
+      (avoid.get(target.id)||0)<=now&&(mode==='aggressive'||(mode==='attackReady'
+        ?distance<=range&&canFire(target)&&((attackers.get(target.id)||0)>now||(relationships.get(target.id)??target.friendRating??0)<0)
+        :(attackers.get(target.id)||0)>now)));
+    return candidate?{kind:mode==='attackReady'?'fire':'attack',target:candidate.target}:null;
   }
   function fearDestination(position,attacker,dungeon){
     let dx=position.x-attacker.x,dy=position.y-attacker.y;

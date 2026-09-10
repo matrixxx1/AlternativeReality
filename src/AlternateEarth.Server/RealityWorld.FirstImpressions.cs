@@ -17,7 +17,7 @@ public sealed partial class RealityWorld
         if (!_players.ContainsKey(playerId)) throw new InvalidOperationException("Unknown player.");
         if (mode == "friendly") mode = "defensive"; // Compatibility with clients before Friendly was removed.
         if (mode == "attack") mode = "attackReady"; // Existing clients before Posturing.
-        if (mode is not ("neutral" or "attackReady" or "aggressive" or "defensive" or "timid")) throw new InvalidOperationException("Choose Neutral, Poised, Aggressive, Defensive, or Timid posturing.");
+        if (mode is not ("neutral" or "attackReady" or "aggressive" or "defensive" or "timid")) throw new InvalidOperationException("Choose Neutral, Offensive, Aggressive, Defensive, or Timid posturing.");
         _actionModes[playerId] = mode;
         return mode;
     }

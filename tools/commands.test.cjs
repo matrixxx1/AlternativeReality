@@ -87,9 +87,9 @@ test('Neutral clicks do not start attacks',()=>{
 
 function automatic(mode,extra={}){
  const me={id:'me',position:{x:0,y:0},equippedWeapon:'rifle'},npc={id:'npc',kind:'npc',position:{x:4,y:0},healthHearts:10},player={id:'player',position:{x:3,y:0},healthHearts:10},animal={id:'animal',kind:'animal',position:{x:5,y:0},healthHearts:10};
- return commands.automaticAction({mode,me,targets:[npc,player,animal],players:new Map([['player',player]]),relationships:new Map(),attackers:new Map(),now:1000,...extra});
+ return commands.automaticAction({mode,me,targets:[npc,player,animal],players:new Map([['player',player]]),relationships:new Map(),attackers:new Map(),now:1000,range:50,...extra});
 }
-test('Poised leaves bystanders alone; Aggressive chooses nearby characters and respects PvP',()=>{
+test('Offensive leaves bystanders alone; Aggressive chooses nearby characters and respects PvP',()=>{
  assert.equal(automatic('attackReady'),null);assert.equal(automatic('aggressive').target.id,'player');
  assert.equal(automatic('aggressive',{pvpEnabled:false}).target.id,'npc');
  assert.equal(automatic('aggressive',{pvpEnabled:false,avoid:new Map([['npc',2000]])}).target.id,'animal');
@@ -197,7 +197,7 @@ test('UFO Attack enables the Probulator immediately, including when its visible 
  c.me.travelMode='walk';c.beginFollowCommand('attack',c.target);assert.equal(c.sent.length,0);
 });
 
- test('Poised retaliates against each kind of attacker and respects target restrictions',()=>{
+ test('Offensive retaliates against each kind of attacker and respects target restrictions',()=>{
    for(const id of ['npc','animal','player']){
      const attackers=new Map([[id,2000]]);
      assert.equal(automatic('attackReady',{attackers}).target.id,id);
@@ -206,7 +206,7 @@ test('UFO Attack enables the Probulator immediately, including when its visible 
    }
    assert.equal(automatic('attackReady',{attackers:new Map([['player',2000]]),pvpEnabled:false}),null);
  });
- test('incoming attacks including misses trigger Poised retaliation, but self attacks and other targets do not',()=>{
+ test('incoming attacks including misses trigger Offensive retaliation, but self attacks and other targets do not',()=>{
    for(const mode of ['attackReady','defensive','neutral','timid','aggressive']){
      const state={actionMode:mode,playerId:'me',defensiveThreats:new Map()};
      commands.rememberAttacker(state,{attackerId:'npc',targetId:'me',hit:false},1000);
@@ -215,3 +215,37 @@ test('UFO Attack enables the Probulator immediately, including when its visible 
      assert.equal(state.defensiveThreats.has('me'),false);assert.equal(state.defensiveThreats.has('other'),false);
    }
  });
+
+test('Offensive holds position: only recent attackers or negative relationships inside weapon range',()=>{
+ for(const id of ['npc','animal','player']){
+  assert.equal(automatic('attackReady',{range:2,attackers:new Map([[id,2000]])}),null);
+  const action=automatic('attackReady',{relationships:new Map([[id,-.01]])});
+  assert.equal(action.kind,'fire');assert.equal(action.target.id,id);
+  assert.equal(automatic('attackReady',{relationships:new Map([[id,0]])}),null);
+  assert.equal(automatic('attackReady',{relationships:new Map([[id,1]])}),null);
+  assert.equal(automatic('attackReady',{relationships:new Map([[id,-1]]),canFire:()=>false}),null);
+ }
+ assert.equal(automatic('attackReady',{range:4,relationships:new Map([['npc',-1]])}).target.id,'npc');
+ assert.equal(automatic('attackReady',{range:3.99,relationships:new Map([['npc',-1]])}),null);
+});
+test('Aggressive pursues friendly NPCs beyond the former 15-meter limit',()=>{
+ const target={id:'friend',kind:'npc',position:{x:60,y:0},friendRating:10};
+ assert.equal(automatic('aggressive',{targets:[target]}).kind,'attack');
+ assert.equal(automatic('aggressive',{targets:[target]}).target.id,'friend');
+});
+test('stationary fire obeys cadence and never creates a route or follow command',()=>{
+ const c=harness('attackReady');vm.runInContext(implementation('fireFromPosition'),c);
+ c.fireFromPosition(1000,c.me,c.target);c.fireFromPosition(1100,c.me,c.target);
+ assert.equal(c.sent.length,1);assert.equal(c.sent[0].type,'attack');
+ c.fireFromPosition(1475,c.me,c.target);assert.equal(c.sent.length,2);
+ assert.equal(c.routes.length,0);assert.equal(c.state.followCommand,null);
+});
+test('Offensive automatically fires without starting pursuit and stops when target leaves range',()=>{
+ const c=harness('attackReady');c.target.kind='npc';
+ Object.assign(c.state,{relationships:new Map([['npc',-1]]),defensiveThreats:new Map(),postureAvoid:new Map(),nextPostureAt:0,postureSuppressedUntil:0});
+ vm.runInContext(implementation('fireFromPosition'),c);
+ const start=source.indexOf('  function maintainPosturing('),end=source.indexOf('  function fireFromPosition(',start);
+ vm.runInContext(source.slice(start,end),c);
+ c.maintainPosturing(1000,c.me);assert.equal(c.sent.length,1);assert.equal(c.routes.length,0);assert.equal(c.state.followCommand,null);
+ c.target.position.x=60;c.maintainPosturing(2000,c.me);assert.equal(c.sent.length,1);assert.equal(c.routes.length,0);
+});
