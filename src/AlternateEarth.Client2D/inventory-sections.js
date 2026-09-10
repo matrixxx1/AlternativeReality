@@ -1,11 +1,14 @@
 const InventorySections = (() => {
-  function section(item, definition, vehicles, ammo, weapons, questItems) {
+  function section(item, definition, vehicles, ammo, weapons, questItems, equipmentSlots={}) {
     const type=item?.itemType || '', category=String(item?.category || '').toLowerCase();
     if(vehicles.has(type)) return 'vehicle';
     if(ammo.has(type)) return 'ammo';
     if(weapons.has(type) || category==='weapon') return 'weapon';
     if(type.startsWith('quest:') || category==='quest' || questItems.has(type)) return 'quest';
-    if(['gloves','food','crafting'].includes(definition?.storageSection)) return definition.storageSection;
+    const slot=equipmentSlots[type];
+    if(slot==='offhand' || definition?.storageSection==='offhand') return 'offhand';
+    if(['hat','shirt','pants','shoes','gloves'].includes(slot) || ['gloves','clothing'].includes(definition?.storageSection)) return 'clothing';
+    if(['food','crafting'].includes(definition?.storageSection)) return definition.storageSection;
     if(definition?.nutrition || ['food','water','dirtyWater','purifiedWater','energyDrink','mapleSyrup'].includes(type)) return 'food';
     if(type.startsWith('recipe:')) return 'crafting';
     return 'misc';

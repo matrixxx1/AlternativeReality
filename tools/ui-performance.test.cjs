@@ -31,7 +31,7 @@ function inventoryHarness(){
   const state={players:new Map([['me',{id:'me',equippedWeapon:'fist'}]]),playerId:'me',inventoryTab:'weapon',privateState:{serverConfiguration:{items:[]}}};
   const ui={inventory:element(),weaponSlotCount:element(),questSlotCount:element(),otherSlotCount:element()};
   const dependencies={state,ui,document:{createElement:element,querySelectorAll:()=>[]},updateBackpackSummary:()=>summaries++,candleActive:me=>!!me?.candleOn,
-    hazardWeaponTypes:new Set(),weaponTypes:new Set(['fist','pistol']),equipmentSlotByItem:{hat:'hat'},createItemArt:element,dropControls:element,
+    vehicleTypes:new Set(),hazardWeaponTypes:new Set(),weaponTypes:new Set(['fist','pistol']),equipmentSlotByItem:{hat:'hat'},createItemArt:element,dropControls:element,
     itemDisplayName:type=>type,stackWeight:item=>item.quantity*(item.unitWeightPounds||0),weightText:String,title:String,itemCategory:item=>item.itemType==='hat'?'other':'weapon',send(){}};
   const render=new Function(...Object.keys(dependencies),['equippedItem','inventoryRenderKey','renderInventory'].map(implementation).join('\n')+';return renderInventory;')(...Object.values(dependencies));
   return {state,ui,nodes,render,get created(){return created;},get summaries(){return summaries;}};

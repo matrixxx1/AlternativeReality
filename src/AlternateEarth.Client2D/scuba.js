@@ -1,5 +1,6 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.Scuba=api;})(globalThis,function(){
   'use strict';
+  const weaponArt=typeof module==='object'&&module.exports?require('./held-weapons.js'):HeldWeapons;
   const melee=['fist','knife','sword','hockeyStick','iceSkate','zombieBite'];
   const canAttack=weapon=>melee.includes(weapon)||weapon==='spearGun';
   const slopeWidth=width=>Math.min(18,width/4);
@@ -46,7 +47,7 @@
     ctx.fillStyle='#e5bd49';ctx.beginPath();ctx.roundRect(-s*.8,-s*.65,s*1.15,s*.4,s*.17);ctx.fill();
     ctx.strokeStyle='#5fa9b8';ctx.lineWidth=s*.1;ctx.beginPath();ctx.moveTo(s*.3,-s*.48);ctx.quadraticCurveTo(s*1.7,-s*.8,s*1.27,s*.1);ctx.stroke();
     ctx.strokeStyle='#193c53';ctx.lineWidth=s*.16;ctx.beginPath();ctx.moveTo(s*.3,s*.12);ctx.lineTo(s*.65,s*.55);ctx.lineTo(s*1.3,s*.4);ctx.stroke();
-    if(weapon==='spearGun'){ctx.strokeStyle='#d4e7e7';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(s*.9,s*.42);ctx.lineTo(s*2.8,s*.42);ctx.stroke();ctx.strokeStyle='#b28f50';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(s,s*.55);ctx.lineTo(s*2,s*.55);ctx.stroke();}
+    if(weapon==='spearGun'){ctx.save();ctx.translate(s*1.3,s*.48);weaponArt.draw(ctx,weapon,s*1.4,{now,moving:true});ctx.restore();}
     else if(melee.includes(weapon)&&weapon!=='fist'){ctx.strokeStyle='#f2f9fc';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(s*1.3,s*.4);ctx.lineTo(s*(weapon==='knife'?1.8:2.5),s*.25);ctx.stroke();}
     ctx.strokeStyle='rgba(185,245,255,.7)';ctx.lineWidth=1;for(let i=0;i<4;i++){const age=(now/1000+i*.3)%1.5;ctx.beginPath();ctx.arc(s*1.4+age*s*.15,-age*s*1.8,2+age*2,0,Math.PI*2);ctx.stroke();}
     ctx.restore();
