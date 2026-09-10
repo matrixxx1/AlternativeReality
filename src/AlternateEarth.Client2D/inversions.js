@@ -19,7 +19,6 @@
   const e=v?.active,sig=JSON.stringify([!!me?.godMode,v?.vote,e?.id,e?.kills,e?.message,v?.completedDungeons,v?.queued,e?.type==='sender'?e.missiles.filter(m=>m.kind==='returnable').map(m=>m.id):null]);if(sig===signature)return;signature=sig;panel.replaceChildren();panel.hidden=!v?.vote&&!v?.active&&!v?.queued?.length;
   if(v?.vote){panel.append(make('h2',v.vote.round>1?'Server Vote — tie runoff':'Server Vote'));const time=make('strong');time.dataset.expires=v.vote.endsAtUtc;panel.append(time);
    for(const option of v.vote.options){const row=make('div');row.className='vote-option';row.append(make('strong',option.name),button('Vote',()=>api.send({type:'castServerVote',option:option.id})),make('small',option.voters.length?option.voters.join(', '):'No votes yet'));panel.append(row);}
-   if(me?.godMode)panel.append(button('God mode: cancel vote',()=>api.send({type:'cancelServerVote'})));
   }
   if(v?.active){const e=v.active;panel.append(make('h3',e.name));const timer=make('strong');timer.dataset.expires=e.endsAtUtc;panel.append(timer,make('p',e.message));
    if(e.type==='smug')panel.append(make('p',`${e.kills} / 50 smug citizens defeated`));

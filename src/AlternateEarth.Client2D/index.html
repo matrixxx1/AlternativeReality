@@ -281,7 +281,6 @@
       <button type="button" role="tab" data-server-config-tab="misc">Misc</button>
       <button type="button" role="tab" data-server-config-tab="movement">Terrain &amp; Movement</button>
       <button type="button" role="tab" data-server-config-tab="events">Reality inversion</button>
-      <button type="button" role="tab" data-server-config-tab="rebuild">Reality rebuilding</button>
     </nav>
     <section class="server-config-page" data-server-config-page="god" hidden>
       <h3>God Mode</h3>
@@ -294,6 +293,21 @@
     <button id="clearTestCharactersButton" type="button">Clear my test characters</button>
     <button id="teleportButton" type="button">Teleport to location</button>
       </div>
+      <fieldset id="godWorldTools" disabled><legend>World administration</legend>
+        <div class="server-event-row"><strong>Server Vote</strong><span>Hourly votes choose from Random and three inversions. Each vote lasts one minute.</span><button type="button" data-world-event="vote">Trigger Server Vote · 1 minute</button><button id="cancelServerVoteButton" type="button" disabled>Cancel active Server Vote</button></div>
+    <section aria-label="Reality rebuilding">
+      <h3>Reality rebuilding</h3>
+      <p>Manage the generated world and review this server’s map storage.</p>
+      <button id="refreshRealityInfo" type="button">Refresh information</button>
+      <p id="realityInfoStatus" role="status" aria-live="polite">Open this tab to load server information.</p>
+      <dl id="realityInfo" class="reality-info"></dl>
+      <h3>Rebuild options</h3>
+      <label>What to rebuild<select id="rebuildMode"><option value="cached">Reset world using saved map blocks</option><option value="fresh">Rebuild all map blocks from scratch</option></select></label>
+      <p id="rebuildDescription">Resets gameplay changes and reloads the starting block from its saved map. Saved geography remains available.</p>
+      <p>Both options reset dungeons, chests, quests, relationships, and player-created world changes for everyone. Accounts, characters, inventories, base ownership, and purchased maps are preserved. Players return Home, or to the server start if they have no Home.</p>
+      <button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button>
+    </section>
+      </fieldset>
     </section>
     <section class="server-config-page" data-server-config-page="vehicles">
       <div class="server-config-table"><div class="server-config-row server-config-labels"><strong>Item / effect</strong><strong>Settings</strong><strong>Save</strong><strong>Inventory</strong></div><div id="serverConfigVehicles"></div></div>
@@ -341,23 +355,12 @@
         <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="landOfGiantsEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="landOfGiantsIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="landOfGiantsDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="landOfGiants">Trigger now</button></div>
         <div class="server-event-row world-event-row" hidden style="display:none"><label>Inversion name<input id="bearEventNameConfig" class="event-name-input" type="text" minlength="3" maxlength="60"></label><label>Frequency (hours)<input id="bearIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="bearDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="bear">Trigger now</button></div>
         <div class="server-event-row world-event-row" hidden style="display:none"><strong>Retro battles<br>Jump Now, Regret Later!</strong><label>Frequency (hours)<input id="retroBattlesIntervalConfig" type="number" min="1" max="168" step="1"></label><label>Duration (minutes)<input id="retroBattlesDurationConfig" type="number" min="1" max="120" step="1"></label><button type="button" data-world-event="retroBattles">Trigger now</button></div>
-        <div class="server-event-row"><strong>Server Vote</strong><span>Hourly votes choose from Random and three inversions. Each vote lasts one minute.</span><button type="button" data-world-event="vote">Trigger Server Vote · 1 minute</button></div>
+
         <div class="server-event-row"><label>Wanted level for SWAT deployment<input id="wantedSwatThresholdConfig" type="number" min="1" max="100" step="1"></label></div>
       </div>
       <div class="server-event-actions"><button id="saveServerEventsConfig" type="button">Save Reality inversion settings</button></div>
     </section>
-    <section class="server-config-page" data-server-config-page="rebuild" hidden>
-      <h3>Reality rebuilding</h3>
-      <p>Manage the generated world and review this server’s map storage.</p>
-      <button id="refreshRealityInfo" type="button">Refresh information</button>
-      <p id="realityInfoStatus" role="status" aria-live="polite">Open this tab to load server information.</p>
-      <dl id="realityInfo" class="reality-info"></dl>
-      <h3>Rebuild options</h3>
-      <label>What to rebuild<select id="rebuildMode"><option value="cached">Reset world using saved map blocks</option><option value="fresh">Rebuild all map blocks from scratch</option></select></label>
-      <p id="rebuildDescription">Resets gameplay changes and reloads the starting block from its saved map. Saved geography remains available.</p>
-      <p>Both options reset dungeons, chests, quests, relationships, and player-created world changes for everyone. Accounts, characters, inventories, base ownership, and purchased maps are preserved. Players return Home, or to the server start if they have no Home.</p>
-      <button id="rebuildButton" class="danger-action" type="button" disabled>Rebuild Reality</button>
-    </section>
+
   </section>
   </aside>
   <section id="inventoryPanel" class="panel inventory-panel panel-popup" data-popup="Inventory" role="dialog" aria-labelledby="inventoryTitle" hidden>
@@ -445,7 +448,7 @@
   <script src="scuba.js?v=5"></script>
   <script src="retro-battles.js?v=1"></script>
   <script src="northern-exposure.js"></script>
-  <script src="inversions.js?v=4"></script>
+  <script src="inversions.js?v=5"></script>
   <script src="home-workshop.js?v=1"></script>
   <script src="garage.js?v=2"></script>
   <script src="recipe-book.js?v=2"></script>
@@ -454,6 +457,6 @@
   <script src="casino.js?v=2"></script>
   <script src="inventory-sections.js?v=2"></script>
   <script src="gardens.js?v=1"></script>
-  <script src="app.js?v=179"></script>
+  <script src="app.js?v=180"></script>
 </body>
 </html>

@@ -501,3 +501,6 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 #godMode::before { content:'';width:9px;height:9px;border-radius:50%;background:#8b938c;border:1px solid #b9c1b8; }
 #godMode[aria-pressed="true"]::before { background:#79f394;border-color:#b0ffc2;box-shadow:0 0 6px #58d87b; }
 #serverConfigButton { width:34px;height:34px;padding:0;font-size:24px;line-height:1; }
+
+#godWorldTools{margin-top:20px;border:1px solid #49615e;padding:16px;min-width:0;}
+.rebuild-confirmation{max-width:min(520px,85vw);background:#18252a;color:#edf1e5;border:1px solid #829a85;border-radius:10px;padding:24px;line-height:1.5}.rebuild-confirmation::backdrop{background:#000a}.rebuild-confirmation form{display:flex;justify-content:flex-end;gap:12px}

@@ -142,3 +142,16 @@ test('God placement waits for a map click, cancels safely, and checks current pe
  c.beginGodPlacement('teleport');c.cancelGodPlacement();assert.equal(c.placeGodTool({x:1,y:1}),false);assert.equal(sent.length,1);
  c.beginGodPlacement('animal');state.players.get('me').godMode=false;c.placeGodTool({x:1,y:1});assert.equal(sent.length,1);
 });
+
+test('vote administration and rebuild live exclusively in the God Mode tab',()=>{
+ const html=fs.readFileSync('src/AlternateEarth.Client2D/index.html','utf8');const god=html.slice(html.indexOf('data-server-config-page="god"'),html.indexOf('data-server-config-page="vehicles"'));
+ for(const marker of ['data-world-event="vote"','id="cancelServerVoteButton"','id="rebuildButton"','id="rebuildMode"','id="realityInfo"']){assert.ok(god.includes(marker));assert.equal(html.split(marker).length,2);}
+ assert.ok(!html.includes('data-server-config-tab="rebuild"'));
+});
+test('vote controls follow permissions and active votes in the adopted server popup',()=>{
+ const controls={'#cancelServerVoteButton':{},'[data-world-event="vote"]':{}},state={playerId:'me',players:new Map([['me',{godMode:false}]]),godTogglePending:null,inversions:{vote:null}},c={state,ui:{serverConfigWindow:{querySelector:s=>controls[s]}}};
+ require('node:vm').runInNewContext(source.slice(source.indexOf('  function syncGodVoteControls('),source.indexOf("  ui.serverConfigWindow.querySelector('#cancelServerVoteButton').addEventListener")),c);
+ c.syncGodVoteControls();assert.ok(controls['#cancelServerVoteButton'].disabled);assert.ok(controls['[data-world-event="vote"]'].disabled);
+ state.players.get('me').godMode=true;c.syncGodVoteControls();assert.equal(controls['[data-world-event="vote"]'].disabled,false);assert.equal(controls['#cancelServerVoteButton'].disabled,true);
+ state.inversions.vote={round:2};c.syncGodVoteControls();assert.equal(controls['#cancelServerVoteButton'].disabled,false);assert.equal(controls['[data-world-event="vote"]'].disabled,true);
+});
