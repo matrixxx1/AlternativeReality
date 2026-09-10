@@ -40,7 +40,7 @@ public sealed partial class RealityWorld
         new("crossbow","Crossbow","Ranged weapon; consumes arrows",3,100,30_000,50_000,true,true,"arrow",WeightPounds:6.5,Category:InventoryCategory.Weapon,Accuracy:.86,AttackIntervalSeconds:1.4),
         new("arrow","Arrow","Crossbow ammunition",0,0,5,500,WeightPounds:.08),
         new("pistol","Pistol","Ranged weapon; consumes bullets",5,50,100_000,300_000,true,true,"bullet",WeightPounds:2,Category:InventoryCategory.Weapon,Accuracy:.82,AttackIntervalSeconds:.3),
-        new("scubaGear","Scuba gear","Tank and goggles; submerge in water. Air lasts much longer but still runs out",0,0,18000,35000,true,true,WeightPounds:12,CarriedInBackpack:false),
+        new("scubaGear","Scuba gear","Garage-stored tank and goggles; submerge in water. Air lasts much longer but still runs out",0,0,18000,35000,true,true,WeightPounds:0,CarriedInBackpack:false),
         new("spear","Spear","Spear gun ammunition; common near water treasure",0,0,35,150,WeightPounds:.15),
         new("spearGun","Spear gun","Rifle-like damage; slow spear projectile and reload; works underwater",7,200,25000,65000,true,true,"spear",WeightPounds:4,Category:InventoryCategory.Weapon,Accuracy:.9,AttackIntervalSeconds:1.4),
         new("fish","Raw fish","Small health and stamina recovery; parasite risk unless cooked",0,0,100,350,WeightPounds:.5),
@@ -1383,7 +1383,7 @@ public sealed partial class RealityWorld
     private IReadOnlyList<ItemStack> GetGodModeLoadout(string playerId) => !playerIsGod(playerId) ? [] :
         WeaponPowerOrder.Where(weapon => weapon != "probulator")
             .Concat(WeaponPowerOrder.Select(weapon => WeaponDefinition(weapon).Ammo).OfType<string>())
-            .Concat(VehicleItems).Concat(GloveCatalog.All.Keys).Append("scubaGear").Append("gallonOfGas")
+            .Concat(VehicleItems).Concat(GloveCatalog.All.Keys).Append("gallonOfGas")
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(item => item)
             .Select(item => InventoryStack(item, 1) with { UnitWeightPounds = 0, CarriedInBackpack = false }).ToArray();
 

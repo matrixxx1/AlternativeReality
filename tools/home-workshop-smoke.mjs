@@ -29,7 +29,7 @@ try{
 c=sqlite3.connect(sys.argv[1]); character=sys.argv[2]
 account=c.execute('SELECT AccountId FROM AccountCharacters WHERE Id=?',(character,)).fetchone()[0]
 owner='home-items:expansion-smoke:'+account
-items=[('dirtyWater',12,'Crude'),('cloth',8,'Crude'),('paper',5,None),('waterFilter',1,None)]+[(v,1,None) for v in ['skateboard','bike','eBike','dirtBike','motorcycle','inflatableRaft','ufo','swimmies']]
+items=[('dirtyWater',12,'Crude'),('cloth',8,'Crude'),('paper',5,None),('waterFilter',1,None)]+[(v,1,None) for v in ['skateboard','bike','eBike','dirtBike','motorcycle','inflatableRaft','ufo','swimmies','scubaGear']]
 c.executemany('INSERT INTO Inventories(OwnerId,Slot,ItemType,Quantity,MetadataJson) VALUES(?,?,?,?,?)',[(owner,100+i,t,q,json.dumps({'quality':quality})) for i,(t,q,quality) in enumerate(items)])
 c.executemany('INSERT INTO Inventories(OwnerId,Slot,ItemType,Quantity,MetadataJson) VALUES(?,?,?,?,?)',[(character,800+i,'recipe:'+r,2,'{}') for i,r in enumerate(['water','waterFilter','bullet','knife','skateboard'])])
 c.executemany('INSERT INTO Inventories(OwnerId,Slot,ItemType,Quantity,MetadataJson) VALUES(?,?,?,?,?)',[(character,900,'dirtyWater',3,json.dumps({'quality':'Crude'})),(character,901,'cloth',1,json.dumps({'quality':'Crude'}))])
@@ -43,8 +43,8 @@ c.execute('INSERT OR REPLACE INTO CraftingProgress(RealityId,PlayerId,Experience
   await command({type:'setGodMode',enabled:true},'privateState');
   const home=welcome.privateState.base;await command({type:'teleport',x:home.position.x,y:home.position.y,godMode:true},'playerTeleported');
   const entered=await command({type:'enterDungeon',doorId:home.doorId},'dungeonEntered');
-  const interior=entered.privateState.dungeon;assert.ok(interior.garage);assert.equal(interior.garage.vehicles.length,8);
-  for(const station of ['stove','weaponsBench','garageWorkbench'])assert.ok(interior.furnishings.some(i=>i.properties.objectType===station),station);
+  const interior=entered.privateState.dungeon;assert.ok(interior.garage);assert.equal(interior.garage.vehicles.length,9);
+  for(const station of ['stove','sewingTable','weaponsBench','garageWorkbench'])assert.ok(interior.furnishings.some(i=>i.properties.objectType===station),station);
   const stove=interior.furnishings.find(i=>i.properties.objectType==='stove');
   const crafting=await command({type:'requestCrafting',furnitureId:stove.id},'craftingOpened');
   assert.equal(crafting.crafting.recipes.find(r=>r.id==='water').successChance,.35);
@@ -58,6 +58,6 @@ c.execute('INSERT OR REPLACE INTO CraftingProgress(RealityId,PlayerId,Experience
   assert.equal(purified.privateState.recipeBook.find(r=>r.id==='water').bonuses.ingredientQuality,-.15);
   for(const asset of ['garage.js','recipe-book.js','home-workshop.js','game-audio.js','audio/cow.mp3','audio/chicken.mp3'])assert.equal((await fetch(base+'/'+asset)).status,200);
   fs.writeFileSync(path.join(data,'verified-home.json'),JSON.stringify(purified.privateState,null,2));
-  console.log(JSON.stringify({result:'PASS',garageVehicles:8,defaultStations:3,starterWater:true,qualityAdjustedChance:true,permanentUpgrades:4,purifierUsesRemaining:49,recipeTabs:true}));
+  console.log(JSON.stringify({result:'PASS',garageVehicles:9,defaultStations:4,starterWater:true,qualityAdjustedChance:true,permanentUpgrades:4,purifierUsesRemaining:49,recipeTabs:true}));
   succeeded=true;ws.close();ws=null;
 }catch(error){console.error(error);throw error;}finally{ws?.close();if(keep&&succeeded){console.log(JSON.stringify({fixtureUrl:base.replace("127.0.0.1","localhost"),fixturePid:server.pid,data}));await new Promise(resolve=>{const hold=setInterval(()=>{},1000);process.once('SIGINT',()=>{clearInterval(hold);server.kill();resolve();});});}else server.kill();fs.closeSync(log);}

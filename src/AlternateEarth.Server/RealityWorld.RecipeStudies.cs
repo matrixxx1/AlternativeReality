@@ -24,7 +24,7 @@ public sealed partial class RealityWorld
         return CraftingCatalog.Recipes.OrderBy(recipe => recipe.Name).Select(recipe =>
         {
             var study = GetRecipeStudy(playerId, recipe.Id) ?? (NutritionCatalog.IsBasicCook(recipe)?new RecipeStudy(recipe.Id,0,1):null);
-            var category = recipe.StationType == "stove" ? "Food/Water" : VehicleItems.Contains(recipe.OutputItemType) ? "Vehicles" :
+            var category = recipe.StationType == "stove" ? "Food/Water" : recipe.StationType == "sewingTable" ? "Clothing" : VehicleItems.Contains(recipe.OutputItemType) ? "Vehicles" :
                 IsCraftingAmmo(recipe.OutputItemType) ? "Ammo" : InventoryDefinition(recipe.OutputItemType).Category == InventoryCategory.Weapon ? "Weapons" : "Misc";
             return new RecipeBookEntry(recipe.Id, recipe.Name, recipe.OutputItemType, category, recipe.StationType,
                 study?.Count ?? 0, InventoryQuantity(playerId, CraftingCatalog.RecipeItemType(recipe.Id)),

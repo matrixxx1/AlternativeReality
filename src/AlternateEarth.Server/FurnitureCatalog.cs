@@ -22,6 +22,7 @@ internal static class FurnitureCatalog
         new("stove", "Stove", 1.2, .8, 15_000, 45_000, "stove", ["black", "white"], ["solid"]),
         new("weaponsBench", "Weapons bench", 1.8, .9, 20000, 50000, "weaponsBench", ["oak", "black"], ["solid"]),
         new("garageWorkbench", "Garage workbench", 2, 1, 15_000, 45_000, "garageWorkbench", ["black", "oak"], ["solid"]),
+        new("sewingTable", "Sewing table", 1.6, .8, 15_000, 45_000, "sewingTable", ["oak", "walnut", "white"], ["woodgrain", "solid"]),
         new("bed", "Bed", 2.1, 1.5, 30_000, 250_000, "bed", ["walnut", "white", "black", "navy", "sage"], ["solid", "striped", "plaid", "floral"]),
         new("bunkBed", "Bunk bed", 2.1, 1.2, 55_000, 220_000, "bed", ["oak", "white", "black", "blue"], ["solid", "striped"]),
         new("dresser", "Dresser", 1.5, .55, 25_000, 180_000, "dresser", ["oak", "walnut", "white", "black", "teal"], ["solid", "woodgrain"]),

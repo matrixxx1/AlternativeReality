@@ -178,7 +178,7 @@ public sealed partial class RealityWorld
         var size = FurnitureSize(furniture, rotation); const double clearance = .18;
         var station=furniture.Properties.GetValueOrDefault("objectType");
         if(station is "garageWorkbench" or "weaponsBench" && !InsideGarage(home.Garage,x,y))return false;
-        if(station is "kitchenSink" or "stove" or "craftingTable" && InsideGarage(home.Garage,x,y))return false;
+        if(station is "kitchenSink" or "stove" or "sewingTable" or "craftingTable" && InsideGarage(home.Garage,x,y))return false;
         if(home.Garage is { } garage)
         {
             var entryY=(garage.Passage[0].Y+garage.Passage[^1].Y)/2;

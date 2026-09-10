@@ -1,6 +1,7 @@
 using AlternateEarth.Geo;
 using AlternateEarth.Server;
 using AlternateEarth.Shared;
+using System.Collections.Concurrent;
 
 namespace AlternateEarth.Tests;
 
@@ -30,6 +31,7 @@ public sealed partial class RealityWorldTests
             new ItemStack("emberGel", 3), new ItemStack("bindingResin", 3), new ItemStack("emptyGlassBottle", 3)
         }), configuration.Id, "crafter", experience);
         await store.SaveLearnedRecipeAsync(configuration.Id, "crafter", "napalmBottle");
+        await store.SaveLearnedRecipeAsync(configuration.Id, "crafter", "tShirt");
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
         world.ProgressionRoll = () => 0;
         await world.InitializeAsync();
@@ -181,6 +183,21 @@ public sealed partial class RealityWorldTests
         Assert.Equal(5_000, world.GetCraftingSkill("crafter").Level);
         await world.ConsumeItemAsync("crafter", "craftingSkillBook");
         Assert.Equal(5_001, world.GetCraftingSkill("crafter").Level);
+    }
+
+    [Fact]
+    public async Task SewingTableUsesDiscoveredClothingRecipesAndConsumesSewingMaterials()
+    {
+        var (world,_,_)=await CreateCraftingTestWorld();
+        var sewing=world.GetPrivateState("crafter").Dungeon!.Furnishings!.Single(f=>f.Properties["objectType"]=="sewingTable");
+        var storage=PhotoField<ConcurrentDictionary<string,Dictionary<string,int>>>(world,"_homeItemStorage")["crafter-account"];
+        storage["cloth"]=3;storage["thread"]=2;storage["needle"]=1;world.ProgressionRoll=()=>0;
+        var recipe=world.RequestCrafting("crafter",sewing.Id).Recipes.Single(r=>r.Id=="tShirt");
+        Assert.True(recipe.Learned);Assert.Equal(1,recipe.MaximumCraftable);
+        var made=await world.CraftItemAsync("crafter",new(sewing.Id,"tShirt"));
+        Assert.Contains(made.PrivateState.HomeItemStorage!.Items,i=>i.ItemType=="tShirt"&&i.Quantity==1);
+        Assert.DoesNotContain(made.PrivateState.HomeItemStorage.Items,i=>i.ItemType is "cloth" or "thread" or "needle");
+        Assert.Contains(made.PrivateState.RecipeBook!,r=>r.Id=="tShirt"&&r.Category=="Clothing");
     }
 
     [Theory]

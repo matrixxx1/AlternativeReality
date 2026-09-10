@@ -1,5 +1,5 @@
 (function(root){
-  const tabs=['Food/Water','Weapons','Ammo','Vehicles','Misc'];
+  const tabs=['Food/Water','Clothing','Weapons','Ammo','Vehicles','Misc'];
   function rows(entries,tab){return (entries||[]).filter(entry=>entry.category===tab).sort((a,b)=>Number(b.level>0)-Number(a.level>0)||Number(b.availableCopies>0)-Number(a.availableCopies>0)||a.name.localeCompare(b.name));}
   function summary(entry,skillLevel){
     if(entry.id?.startsWith('cook')&&entry.outputItemType?.startsWith('cooked'))return `Basic stove cooking · No recipe needed · 100% success · Can make ${entry.maximumCraftable||0}`;

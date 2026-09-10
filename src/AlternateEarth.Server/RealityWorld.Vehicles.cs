@@ -5,7 +5,7 @@ namespace AlternateEarth.Server;
 public sealed partial class RealityWorld
 {
     private static readonly HashSet<string> VehicleItems = new(
-        ["skateboard", "bike", "eBike", "dirtBike", "motorcycle", "inflatableRaft", "ufo", "swimmies"], StringComparer.OrdinalIgnoreCase);
+        ["skateboard", "bike", "eBike", "dirtBike", "motorcycle", "inflatableRaft", "ufo", "swimmies", "scubaGear"], StringComparer.OrdinalIgnoreCase);
 
     private Dictionary<string, int>? VehicleHomeStorage(string playerId) =>
         _playerAccounts.TryGetValue(playerId, out var accountId) && _homeItemStorage.TryGetValue(accountId, out var storage) ? storage : null;

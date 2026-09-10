@@ -65,10 +65,10 @@ public sealed partial class RealityWorld
         EnsureNotProbulatorAbducted(playerId);
         if (IsGasAsleep(playerId)) throw new InvalidOperationException("You cannot craft while asleep.");
         if (!_players.TryGetValue(playerId, out var player) || !_dungeons.TryGetValue(player.LocationId, out var home) || !home.IsHome)
-            throw new InvalidOperationException("Use a placed stove, crafting table, or garage workbench inside your Home.");
+            throw new InvalidOperationException("Use a crafting station inside your Home.");
         if (!_playerAccounts.TryGetValue(playerId, out var accountId) || _baseBuildings.GetValueOrDefault(accountId) != home.BuildingId)
             throw new InvalidOperationException("Visitors cannot use another player's crafting supplies.");
-        var table = home.Furnishings?.FirstOrDefault(item => item.Id == furnitureId && item.Properties.GetValueOrDefault("objectType") is ("craftingTable" or "stove" or "garageWorkbench" or "weaponsBench") && !IsStoredFurniture(item))
+        var table = home.Furnishings?.FirstOrDefault(item => item.Id == furnitureId && item.Properties.GetValueOrDefault("objectType") is ("craftingTable" or "stove" or "sewingTable" or "garageWorkbench" or "weaponsBench") && !IsStoredFurniture(item))
             ?? throw new InvalidOperationException("Place your crafting station in Home before using it.");
         if (table.Properties.GetValueOrDefault("objectType") is ("garageWorkbench" or "weaponsBench") && !InsideGarage(home.Garage, table.Position.X, table.Position.Y))
             throw new InvalidOperationException("Vehicle crafting requires a workbench in the garage.");
@@ -126,7 +126,7 @@ public sealed partial class RealityWorld
                     }
                     var study = GetRecipeStudy(playerId, recipe.Id) ?? new RecipeStudy(recipe.Id, 1, .01);
                     var bonuses = CraftBonuses(playerId, recipe);
-                    var bonusOutput = 0; var savedMaterials = 0;
+                    var bonusOutput = 0; var savedMaterials = 0; var leatherOutput = 0;
                     var succeeded = 0;
                     var failed = false;
                     for (var batch = 0; batch < request.Quantity; batch++)
@@ -145,6 +145,7 @@ public sealed partial class RealityWorld
                         }
                         if (PlayerCanFailCrafting(playerId)&&!NutritionCatalog.IsBasicCook(recipe)&&ProgressionRoll() >= chance) { failed = true; break; }
                         succeeded++;
+                        if (recipe.Id == "cookcow" && ProgressionRoll() < .10) leatherOutput++;
                         if (bonuses.Quantity > 0 && ProgressionRoll() < bonuses.Quantity) bonusOutput++;
                         if (bonuses.Materials > 0 && ProgressionRoll() < bonuses.Materials)
                             foreach(var ingredient in recipe.Ingredients.Where(i=>i.Quantity>1))
@@ -154,8 +155,9 @@ public sealed partial class RealityWorld
                                 next[ingredient.ItemType]=next.GetValueOrDefault(ingredient.ItemType)+returnHome;nextBackpack[ingredient.ItemType]=nextBackpack.GetValueOrDefault(ingredient.ItemType)+savedQuantity-returnHome;savedMaterials+=savedQuantity;
                             }
                     }
-                    var output = checked(recipe.OutputQuantity * succeeded + bonusOutput);
+                    var output = checked(recipe.OutputQuantity * (succeeded - leatherOutput) + bonusOutput);
                     if (output > 0) next[recipe.OutputItemType] = checked(next.GetValueOrDefault(recipe.OutputItemType) + output);
+                    if (leatherOutput > 0) next["leather"] = checked(next.GetValueOrDefault("leather") + leatherOutput);
                     if(succeeded>0&&FarmCatalog.ReturnedContainer(recipe.Id) is { } empty)next[empty]=checked(next.GetValueOrDefault(empty)+succeeded);
                     var saved = new InventoryState(HomeItemStorageOwnerId(access.AccountId), next.Where(item => item.Value > 0).Select(item => InventoryStack(item.Key, item.Value, HomeItemStorageOwnerId(access.AccountId))).ToArray());
                     var attemptedBatches = succeeded + (failed ? 1 : 0);
@@ -197,6 +199,7 @@ public sealed partial class RealityWorld
                     var message = failed
                         ? $"Craft failed! The station exploded and dealt 1 damage. Lost the failed batch's materials; {succeeded} earlier batch(es) succeeded. Unattempted materials remain in your backpack and Home storage. Failed batches grant double crafting XP. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}. {FailedCraftExperienceEffect}: +50% all XP for 5 minutes."
                         : $"Crafted {output} × {recipe.Name} into Home storage. +{craftingExperienceGained} crafting XP; level {GetCraftingSkill(playerId).Level}.";
+                    if(leatherOutput>0) message += $" {leatherOutput} raw beef batch(es) produced leather instead of cooked beef.";
                     if(bonusOutput>0) message += $" Upgrades added {bonusOutput} free bonus item(s).";
                     if(savedMaterials>0) message += $" Garage upgrades saved {savedMaterials} ingredient item(s).";
                     return new CraftingResult(failed ? new CraftingState(request.FurnitureId, Array.Empty<CraftingRecipeState>(), GetCraftingSkill(playerId), true, access.Table.Properties["objectType"]) : RequestCrafting(playerId, request.FurnitureId),

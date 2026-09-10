@@ -31,6 +31,11 @@ public sealed partial class RealityWorldTests
         var recipe=world.RequestCrafting("crafter",stove.Id).Recipes.Single(r=>r.Id=="cookmoose");Assert.True(recipe.Learned);Assert.Equal(1,recipe.SuccessChance);Assert.Single(recipe.Ingredients);
         var made=await world.CraftItemAsync("crafter",new(stove.Id,"cookmoose"));Assert.Contains(made.PrivateState.HomeItemStorage!.Items,i=>i.ItemType=="cookedmoose"&&i.Quantity==1);Assert.DoesNotContain(made.PrivateState.Inventory.Items,i=>i.ItemType=="rawMoose");
     }
+    [Fact] public async Task CookingRawCowHasTenPercentChanceToProduceLeatherInstead()
+    {
+        var (world,_,_)=await CreateCraftingTestWorld(0);var stove=world.GetPrivateState("crafter").Dungeon!.Furnishings!.Single(f=>f.Properties["objectType"]=="stove");var pack=PhotoField<ConcurrentDictionary<string,Dictionary<string,int>>>(world,"_inventories")["crafter"];pack["rawCow"]=1;world.ProgressionRoll=()=>0;
+        var made=await world.CraftItemAsync("crafter",new(stove.Id,"cookcow"));Assert.Contains(made.PrivateState.HomeItemStorage!.Items,i=>i.ItemType=="leather"&&i.Quantity==1);Assert.DoesNotContain(made.PrivateState.HomeItemStorage.Items,i=>i.ItemType=="cookedcow");Assert.Contains("produced leather instead",made.Message);
+    }
     [Fact] public void MeatNutritionMatchesBasicCookedAndPreparedDishesAtLeastDoubleIt()
     {
         foreach(var recipe in NutritionCatalog.Recipes.Where(NutritionCatalog.IsBasicCook))

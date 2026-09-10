@@ -48,8 +48,18 @@ internal static class CraftingCatalog
         new("emptyGlassJar", "Empty glass jar", "emptyGlassJar", 1, [new("glassScrap", 2)]),
         new("salvageCloth", "Salvaged cloth", "cloth", 1, [new("crustySocks", 1)]),
         new("charcoal", "Charcoal briquettes", "charcoal", 1, [new("wood", 2)]),
-        new("hat", "Hat", "hat", 1, [new("cloth", 2)]),
-        new("tShirt", "T-shirt", "tShirt", 1, [new("cloth", 3)]),
+        new("hat", "Hat", "hat", 1, [new("cloth", 2), new("thread", 2), new("needle", 1)], "sewingTable"),
+        new("warmHat", "Warm knit hat", "warmHat", 1, [new("cloth", 3), new("thread", 2), new("needle", 1)], "sewingTable"),
+        new("coolingHat", "Cooling hat", "coolingHat", 1, [new("cloth", 2), new("thread", 2), new("plastic", 1), new("needle", 1)], "sewingTable"),
+        new("tShirt", "T-shirt", "tShirt", 1, [new("cloth", 3), new("thread", 2), new("needle", 1)], "sewingTable"),
+        new("longSleeveShirt", "Long-sleeve shirt", "longSleeveShirt", 1, [new("cloth", 5), new("thread", 3), new("needle", 1)], "sewingTable"),
+        new("coolingShirt", "Cooling shirt", "coolingShirt", 1, [new("cloth", 4), new("thread", 3), new("plastic", 2), new("needle", 1)], "sewingTable"),
+        new("sweater", "Sweater", "sweater", 1, [new("cloth", 7), new("thread", 5), new("needle", 1)], "sewingTable"),
+        new("lightJacket", "Light jacket", "lightJacket", 1, [new("cloth", 6), new("leather", 2), new("thread", 4), new("needle", 1)], "sewingTable"),
+        new("winterJacket", "Winter jacket", "winterJacket", 1, [new("cloth", 8), new("leather", 3), new("plastic", 2), new("thread", 5), new("needle", 1)], "sewingTable"),
+        new("fireproofJacket", "Fireproof jacket", "fireproofJacket", 1, [new("cloth", 6), new("leather", 3), new("metal", 2), new("thread", 4), new("needle", 1)], "sewingTable"),
+        new("coolingShorts", "Cooling shorts", "coolingShorts", 1, [new("cloth", 4), new("plastic", 2), new("thread", 3), new("needle", 1)], "sewingTable"),
+        new("warmingPants", "Warming pants", "warmingPants", 1, [new("cloth", 6), new("leather", 2), new("thread", 4), new("needle", 1)], "sewingTable"),
         .. NutritionCatalog.Recipes,
         .. FarmCatalog.Recipes,
         new("food", "Food rations", "food", 2, [new("flour", 2), new("cookingOil", 1), new("water", 1)]),
@@ -67,14 +77,15 @@ internal static class CraftingCatalog
         {
             "water" or "purifiedWater" or "waterFilter" => 1,
             "fishStew" or "friedFish" or "hockeyStick" or "mapleSyrup" or "molotovCocktail" or "salvageCloth" or "charcoal" or "food" or "candle" => 1,
-            "hat" => 3,
-            "gunpowder" or "tShirt" or "slingshot" or "ballBearing" => 5,
+            "hat" or "warmHat" => 3,
+            "gunpowder" or "tShirt" or "longSleeveShirt" or "coolingHat" or "slingshot" or "ballBearing" => 5,
+            "coolingShirt" or "sweater" or "coolingShorts" => 8,
             "arrow" => 8,
-            "knife" or "emptyGlassBottle" => 10,
+            "knife" or "emptyGlassBottle" or "lightJacket" or "warmingPants" => 10,
             "emptyGlassJar" => 12,
             "bullet" or "flashlight" or "chloramineGasBottle" => 15,
-            "lantern" or "shield" or "chloramineGasJar" or "chlorineGasBottle" or "peraceticAcidGasBottle" => 20,
-            "sword" or "lockPickSet" or "skateboard" or "chlorineGasJar" or "peraceticAcidGasJar" or "napalmBottle" => 25,
+            "lantern" or "shield" or "winterJacket" or "chloramineGasJar" or "chlorineGasBottle" or "peraceticAcidGasBottle" => 20,
+            "sword" or "lockPickSet" or "skateboard" or "fireproofJacket" or "chlorineGasJar" or "peraceticAcidGasJar" or "napalmBottle" => 25,
             "chloroformGasBottle" or "napalmJar" => 30,
             "crossbow" or "grenade" or "chloroformGasJar" => 35,
             "pistol" => 40,
@@ -88,7 +99,7 @@ internal static class CraftingCatalog
         };
         var difficulty = level >= 5_000 ? "Extraterrestrial" : level >= 100 ? "Expert" : level >= 40 ? "Advanced" : level >= 15 ? "Intermediate" : "Basic";
         var station = recipe.OutputItemType is "skateboard" or "bike" or "eBike" or "dirtBike" or "motorcycle" or "inflatableRaft" or "ufo" or "swimmies" ? "garageWorkbench"
-            : NutritionCatalog.Foods.ContainsKey(recipe.OutputItemType) || recipe.OutputItemType == "mapleSyrup" ? "stove" : recipe.OutputItemType is "molotovCocktail" or "bullet" or "arrow" or "ballBearing" or "rocket" or "hockeyStick" or "knife" or "sword" or "slingshot" or "crossbow" or "pistol" or "rifle" or "grenade" or "rocketLauncher" || HazardCatalog.Find(recipe.OutputItemType) is not null ? "weaponsBench" : recipe.StationType;
+            : recipe.StationType == "sewingTable" ? "sewingTable" : NutritionCatalog.Foods.ContainsKey(recipe.OutputItemType) || recipe.OutputItemType == "mapleSyrup" ? "stove" : recipe.OutputItemType is "molotovCocktail" or "bullet" or "arrow" or "ballBearing" or "rocket" or "hockeyStick" or "knife" or "sword" or "slingshot" or "crossbow" or "pistol" or "rifle" or "grenade" or "rocketLauncher" || HazardCatalog.Find(recipe.OutputItemType) is not null ? "weaponsBench" : recipe.StationType;
         return recipe with { RequiredLevel = level, Difficulty = difficulty, StationType = station };
     }).ToArray();
 
@@ -99,7 +110,7 @@ internal static class CraftingCatalog
     public static readonly string[] ChemicalItems =
         ["charcoal", "potassiumNitrate", "salt", "pepper", "sulfur", "bleach", "ammonia", "sulfuricAcid", "cookingOil", "flour", "sugar", "cookingSupplies", "laundryDetergent", .. HazardCatalog.FictionalReagents];
     public static readonly string[] LitterItems =
-        ["waterFilter", "spear", "pencil", "pen", "marker", "newspaper", "emptyGlassBottle", "emptyGlassJar", "emptyPlasticBottle", "crustySocks", "soiledUnderwear", "areaMap", "paper", "wood", "cloth", "plastic", "styrofoam", "metal", "drugs", "glassScrap", "rubber", "mechanicalParts", "electronics", "battery"];
+        ["waterFilter", "spear", "pencil", "pen", "marker", "newspaper", "emptyGlassBottle", "emptyGlassJar", "emptyPlasticBottle", "crustySocks", "soiledUnderwear", "areaMap", "paper", "wood", "cloth", "thread", "needle", "leather", "plastic", "styrofoam", "metal", "drugs", "glassScrap", "rubber", "mechanicalParts", "electronics", "battery"];
 
     private static ItemConfiguration Material(string id, string name, double weight, long min, long max, bool forSale = true) =>
         new(id, name, "Scavenging and crafting inventory item", 0, 0, min, max, forSale, WeightPounds: weight);
@@ -123,6 +134,9 @@ internal static class CraftingCatalog
         Material("soiledUnderwear", "Poop-covered underwear", .2, 1, 5, false),
         Material("paper", "Scrap paper", .05, 5, 50),
         Material("cloth", "Cloth", .2, 25, 200),
+        Material("thread", "Thread", .05, 10, 80),
+        Material("needle", "Sewing needle", .01, 25, 150),
+        Material("leather", "Leather", .4, 100, 600),
         Material("plastic", "Scrap plastic", .15, 5, 100),
         Material("styrofoam", "Styrofoam", .05, 5, 50),
         Material("drugs", "Unidentified drugs", .1, 100, 1_000, false),

@@ -45,11 +45,11 @@ public sealed partial class RealityWorld
     private void AddHomeStations(string accountId, CanonicalEntity building, List<CanonicalEntity> furniture)
     {
         var home=EmptyHome($"home:{accountId}:{building.Id}",building,[]);
-        foreach(var type in new[]{"kitchenSink","stove","garageWorkbench","weaponsBench"})
+        foreach(var type in new[]{"kitchenSink","stove","sewingTable","garageWorkbench","weaponsBench"})
         {
             if(furniture.Any(item=>item.Properties.GetValueOrDefault("objectType")==type))continue;
             var definition=type=="kitchenSink"?FurnitureCatalog.KitchenSink:FurnitureCatalog.All.Single(item=>item.Type==type);
-            var item=CreateFurnitureEntity(accountId,definition,"black","solid",true,1000+(type=="kitchenSink"?3:type=="stove"?0:type=="garageWorkbench"?1:2),building.Position.Region);
+            var item=CreateFurnitureEntity(accountId,definition,"black","solid",true,1000+(type=="kitchenSink"?4:type=="stove"?0:type=="sewingTable"?1:type=="garageWorkbench"?2:3),building.Position.Region);
             if(TryFindOpenFurniturePosition(home,item,furniture,out var position))item=SetFurniturePlacement(item,position.X,position.Y,0,false);
             furniture.Add(item);
         }

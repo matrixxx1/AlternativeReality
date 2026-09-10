@@ -6,7 +6,7 @@ namespace AlternateEarth.Tests;
 
 public sealed partial class RealityWorldTests
 {
-    private static readonly string[] StoredVehicleTypes = ["skateboard", "bike", "eBike", "dirtBike", "motorcycle", "inflatableRaft", "ufo"];
+    private static readonly string[] StoredVehicleTypes = ["skateboard", "bike", "eBike", "dirtBike", "motorcycle", "inflatableRaft", "ufo", "scubaGear"];
 
     private async Task<(RealityWorld World, SqliteRealityStore Store, PlayerState Player, string HomeOwner)> CreateVehicleStorageWorld(double eBikeRange = 1609.344)
     {

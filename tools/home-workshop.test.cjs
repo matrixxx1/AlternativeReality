@@ -6,7 +6,7 @@ function harness(file){
   vm.runInContext(fs.readFileSync(require.resolve('../src/AlternateEarth.Client2D/'+file),'utf8'),context);return{api:context.module.exports,element};
 }
 test('recipe tabs filter every category and show exact server success and skill requirements',()=>{
-  assert.deepEqual(recipes.tabs,['Food/Water','Weapons','Ammo','Vehicles','Misc']);
+  assert.deepEqual(recipes.tabs,['Food/Water','Clothing','Weapons','Ammo','Vehicles','Misc']);
   const entries=recipes.tabs.map((category,i)=>({category,name:String(i),level:i?2:0,successChance:.4375,requiredCraftingLevel:10}));
   for(const category of recipes.tabs)assert.equal(recipes.rows(entries,category).length,1);
   assert.match(recipes.summary(entries[0],1),/level 0.*Not learned/);
@@ -33,10 +33,10 @@ test('ingredient quality and permanent upgrade adjustments are explained separat
   assert.match(workshop.bonusSummary({success:.12,ingredientQuality:-.15,quantity:.23,materials:0}),/12.0 points.*-15.0 points.*23%/);
   assert.match(workshop.effects({stationType:'garageWorkbench',successBonus:.08,materialSavingChance:.1}),/8 percentage points.*10% chance to save/);
 });
-test('garage vehicle slots stay inside the connected room and exclude empty stacks',()=>{
+test('garage vehicle slots include scuba gear, stay inside the connected room, and exclude empty stacks',()=>{
   const room={x:32,y:4,width:18,height:12},vehicles=['bike','eBike','skateboard','motorcycle','dirtBike','inflatableRaft','ufo','swimmies'].map(itemType=>({itemType,quantity:1}));
-  const slots=garage.slots({room,vehicles:[...vehicles,{itemType:'empty',quantity:0}]});assert.equal(slots.length,8);
-  assert.equal(new Set(slots.map(v=>`${v.x},${v.y}`)).size,8);
+  vehicles.push({itemType:'scubaGear',quantity:1});const slots=garage.slots({room,vehicles:[...vehicles,{itemType:'empty',quantity:0}]});assert.equal(slots.length,9);
+  assert.equal(new Set(slots.map(v=>`${v.x},${v.y}`)).size,9);
   for(const p of slots){assert.ok(p.x>room.x&&p.x<room.x+room.width);assert.ok(p.y>room.y&&p.y<room.y+room.height);}
 });
 
