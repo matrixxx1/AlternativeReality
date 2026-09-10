@@ -123,7 +123,7 @@ public sealed partial class RealityWorldTests
         Assert.Equal(1,world.GetPrivateState(p.Id).Inventory.Items.Single(i=>i.ItemType=="dirtyWater").Quantity);
         var consumed=await world.ConsumeItemAsync(p.Id,"dirtyWater");
         Assert.DoesNotContain(world.GetPrivateState(p.Id).Inventory.Items,i=>i.ItemType=="dirtyWater");
-        ScubaPlayer(world,p); inventory["water"]=10000;
+        ScubaPlayer(world,p); inventory=PhotoField<ConcurrentDictionary<string,Dictionary<string,int>>>(world,"_inventories")[p.Id]; inventory["water"]=10000;
         await Assert.ThrowsAsync<InvalidOperationException>(()=>world.CollectDirtyWaterAsync(p.Id));
         inventory.Clear(); ScubaPlayer(world,p with{Position=p.Position with{X=p.Position.X+300}});
         await Assert.ThrowsAsync<InvalidOperationException>(()=>world.CollectDirtyWaterAsync(p.Id));

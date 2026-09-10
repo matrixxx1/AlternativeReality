@@ -39,6 +39,7 @@ public sealed partial class RealityWorld
 
     private double CraftChance(string playerId, CraftingRecipe recipe, RecipeStudy study)
     {
+        if(NutritionCatalog.IsBasicCook(recipe))return 1;
         var bonuses=CraftBonuses(playerId,recipe);
         return ProgressionRules.CraftSuccess(StatsFor(playerId),study.BaseChance+bonuses.Success+bonuses.IngredientQuality);
     }

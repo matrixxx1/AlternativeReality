@@ -118,7 +118,7 @@ public sealed partial class RealityWorld
                 destination = waypoint;
             }
             var remaining = actor.Position.Distance2D(destination);
-            var step = Math.Min(Math.Max(0, distance - 1), Math.Min(remaining, 3.5 * elapsed.TotalSeconds));
+            var step = Math.Min(Math.Max(0, distance - 1), Math.Min(remaining, 3.5 * elapsed.TotalSeconds*SyrupSlow(actor.Position,actor.LocationId)));
             if (remaining < .01) continue;
             var dx = (destination.X - actor.Position.X) / remaining; var dy = (destination.Y - actor.Position.Y) / remaining;
             var position = actor.Position with { X = actor.Position.X + dx * step, Y = actor.Position.Y + dy * step };

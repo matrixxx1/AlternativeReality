@@ -641,6 +641,13 @@ public sealed partial class SqliteRealityStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task CollectPersistentLootAsync(string lootId,InventoryState inventory,CancellationToken token=default)
+    {
+        await using var connection=await OpenAsync(token);await using var transaction=(SqliteTransaction)await connection.BeginTransactionAsync(token);
+        var command=connection.CreateCommand();command.Transaction=transaction;command.CommandText="DELETE FROM PersistentWorldLoot WHERE Id=$id";command.Parameters.AddWithValue("$id",lootId);
+        if(await command.ExecuteNonQueryAsync(token)!=1)throw new InvalidOperationException("That syrup has already been collected.");
+        await WriteInventoryAsync(connection,transaction,inventory,token);await transaction.CommitAsync(token);
+    }
     public async Task RemovePersistentLootAsync(string lootId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken); var command = connection.CreateCommand();

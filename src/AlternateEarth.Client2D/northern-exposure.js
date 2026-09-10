@@ -43,11 +43,11 @@
   ctx.restore();const top=moose?-s*2.65:-s*2;ctx.textAlign='center';ctx.font='bold 10px monospace';ctx.strokeStyle='#18211b';ctx.lineWidth=3;ctx.strokeText(a.name,0,top);ctx.fillStyle='#ffe5ad';ctx.fillText(a.name,0,top);ctx.fillStyle='#3d2e2b';ctx.fillRect(-s*.55,top+5,s*1.1,3);ctx.fillStyle='#f75e49';ctx.fillRect(-s*.55,top+5,s*1.1*Math.max(0,a.healthHearts/a.maximumHealthHearts),3);ctx.restore();return true;
  }
  function drawSyrup(ctx,loot,toScreen,state){
-  if(loot.dropKind!=='mapleSyrupPuddle')return false;
+  if(!['mapleSyrupPuddle','mooseFluSyrup'].includes(loot.dropKind))return false;
   const p=toScreen(loot.position),r=state.scale*2.5;
   ctx.save();ctx.fillStyle='rgba(185,104,19,.7)';ctx.strokeStyle='#e5ad47';ctx.lineWidth=2;
-  ctx.beginPath();ctx.ellipse(p.x,p.y,r,r*state.pitch,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-  ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.fillStyle='#ffe8a2';ctx.fillText('Maple syrup · ½ speed · collect',p.x,p.y-r*state.pitch-5);ctx.restore();return true;
+  ctx.beginPath();ctx.ellipse(p.x,p.y,r,r*state.pitch,0,0,Math.PI*2);ctx.fill();ctx.stroke();if(loot.dropKind==='mooseFluSyrup'){ctx.fillStyle='#784622';ctx.beginPath();ctx.ellipse(p.x,p.y-r*.15,r*.65,r*.4,0,0,Math.PI*2);ctx.fill();}
+  ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.fillStyle='#ffe8a2';ctx.fillText(loot.dropKind==='mooseFluSyrup'?'Maple syrup · ½ speed · empty jar/bottle required':'Maple syrup · ½ speed · collect',p.x,p.y-r*state.pitch-5);ctx.restore();return true;
  }
  function drawTruck(ctx,e,toScreen,state){
   if(e.properties?.subtype!=='haneyPickup')return false;

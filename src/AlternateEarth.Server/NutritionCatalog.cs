@@ -11,10 +11,11 @@ internal static class NutritionCatalog
     public static string? Meat(string subtype) => subtype switch
     {
         "fish" => "fish", "largeShark" => "rawShark", "largeOctopus" => "rawOctopus",
-        "eventBear" => "rawBear",
+        "eventBear" => "rawBear", "angryMoose"=>"rawMoose", "helmetBeaver"=>"rawBeaver", "tacticalGoose"=>"rawGoose",
+        "farmCow"=>"rawCow", "farmChicken"=>"rawChicken",
         _ => Animals.Contains(subtype) ? "raw" + char.ToUpperInvariant(subtype[0]) + subtype[1..] : null
     };
-    private static readonly string[] Animals = [.. Livestock, .. Shellfish, "shark", "octopus", "barracuda", "morayEel", "rabbit", "deer", "bear", "cougar", "bird", "dog", "cat"];
+    private static readonly string[] Animals = [.. Livestock, .. Shellfish, "shark", "octopus", "barracuda", "morayEel", "rabbit", "deer", "bear", "cougar", "bird", "dog", "cat", "crow", "seagull", "goose", "moose", "beaver", "tRex", "brontosaurus", "stegosaurus", "raptor", "fish"];
     public static readonly CraftingRecipe[] Recipes =
     [
         new("fishStew", "Fish stew", "fishStew", 1, [new("fish",2),new("water",1),new("salt",1)]),
@@ -29,8 +30,10 @@ internal static class NutritionCatalog
         new("cranberryRelish", "Cranberry relish", "cranberryRelish", 1, [new("cranberry",2),new("orange",1),new("sugar",1)]),
         new("fruitSalad", "Fruit salad", "fruitSalad", 1, [new("watermelon",1),new("apple",1),new("banana",1)]),
         new("antibiotics", "Antibiotics", "antibiotics", 1, [new("medicinalCulture",1),new("medicalBinder",1),new("water",1),new("emptyGlassBottle",1)]),
-        .. Animals.Select(a => new CraftingRecipe("cook" + a, "Cooked " + a, "cooked" + a, 1, [new(Meat(a)!,1),new("salt",1)]))
+        .. Animals.Select(a => new CraftingRecipe("cook" + a, "Cooked " + a, "cooked" + a, 1, [new(Meat(a)!,1)]))
     ];
+    public static bool IsBasicCook(CraftingRecipe recipe)=>recipe.Id.StartsWith("cook",StringComparison.Ordinal)&&recipe.OutputItemType.StartsWith("cooked",StringComparison.Ordinal);
+    public static string? MeatDisease(string item)=>item switch {"rawMoose"=>"Mad Moose Flu","rawCow"=>"Mad cow disease","rawPig"=>"Swine flu","rawChicken" or "rawBird" or "rawCrow" or "rawSeagull" or "rawGoose"=>"Avian flu",_=>null};
     public static readonly IReadOnlyDictionary<string, Nutrition> Foods = BuildFoods();
     private static Dictionary<string, Nutrition> BuildFoods()
     {
@@ -49,17 +52,18 @@ internal static class NutritionCatalog
             var id=Produce[i];var hunger=id=="carrot"?7:id=="watermelon"?25:5+i%7*2;
             foods[id]=new(hunger,.1+i*.025,.4+i%6*.2,id=="watermelon"?5:id.EndsWith("berry")?1.2:.2+i%4*.2);
         }
-        for(var i=0;i<Animals.Length;i++) foods[Meat(Animals[i])!]=new(10+i%6*2,.2+i*.02,.6+i*.07,Raw:true);
+        foreach(var animal in Animals){foods[Meat(animal)!]=new(10,.25,.75,Raw:true);foods["cooked"+animal]=new(10,.25,.75);}
         string[] stats=["endurance","perception","strength","agility","intelligence","luck","nutUp","opportunistic","timing","charisma"];
-        foreach(var (recipe,index) in Recipes.Where(r=>r.Id!="antibiotics").Select((r,i)=>(r,i)))
+        foreach(var (recipe,index) in Recipes.Where(r=>r.Id!="antibiotics"&&!IsBasicCook(r)).Select((r,i)=>(r,i)))
         {
             var benefits=recipe.Ingredients.Select(i=>(Food:foods.GetValueOrDefault(i.ItemType),i.Quantity)).Where(i=>i.Food is not null).ToArray();
             var bonuses=new Dictionary<string,int>();
             foreach(var i in benefits)foreach(var b in i.Food!.Bonuses??new Dictionary<string,int>())bonuses[b.Key]=bonuses.GetValueOrDefault(b.Key)+b.Value*i.Quantity;
             bonuses[stats[index%stats.Length]]=bonuses.GetValueOrDefault(stats[index%stats.Length])+1;
-            foods[recipe.OutputItemType]=new(recipe.Id=="cheeseburger"?100:benefits.Sum(i=>i.Food!.Hunger*i.Quantity)+5,
-                benefits.Sum(i=>i.Food!.Health*i.Quantity)+.5,benefits.Sum(i=>i.Food!.Stamina*i.Quantity)+1,
-                benefits.Sum(i=>i.Food!.Water*i.Quantity),Bonuses:bonuses);
+            var meatMeal=recipe.Ingredients.Any(i=>i.ItemType=="fish"||i.ItemType.StartsWith("raw")||i.ItemType.StartsWith("cooked"));var multiplier=meatMeal?2:1;
+            foods[recipe.OutputItemType]=new(recipe.Id=="cheeseburger"?100:benefits.Sum(i=>i.Food!.Hunger*i.Quantity)*multiplier+5,
+                benefits.Sum(i=>i.Food!.Health*i.Quantity)*multiplier+.5,benefits.Sum(i=>i.Food!.Stamina*i.Quantity)*multiplier+1,
+                benefits.Sum(i=>i.Food!.Water*i.Quantity)*multiplier,Bonuses:bonuses);
         }
         return foods;
     }
@@ -67,8 +71,9 @@ internal static class NutritionCatalog
         (n.ParasiteChance is { } risk?$" Parasite risk: {risk:P0}.":n.Raw?" Raw: 25% parasite risk (1 minute–3 hours).":"") +
         (n.ParasiteCureChance>0?$" {n.ParasiteCureChance:P0} chance to remove parasites.":"") +
         (n.Bonuses is null?"":" " + string.Join(", ",n.Bonuses.Select(b=>$"+{b.Value} {b.Key} for 5 minutes")));
+    public static string ItemDescription(string item,Nutrition nutrition)=>Description(nutrition)+(item=="rawMoose"?" 30% chance of Mad Moose Flu for 15 minutes: 300-foot charges every minute; syrup every 3 minutes. Antibiotics cure it.":(MeatDisease(item) is {} disease?$" 30% chance of {disease} for 15 minutes; calls attract enemies every minute. Antibiotics cure it.":""));
     public static IEnumerable<ItemConfiguration> Items => Foods.Where(f=>f.Key is not ("food" or "fish" or "water" or "flour" or "cookingOil" or "sugar" or "salt" or "pepper")).Select(f=>new ItemConfiguration(f.Key,
-        f.Key=="rawCow"?"Raw beef":f.Key=="rawPig"?"Raw pork":System.Text.RegularExpressions.Regex.Replace(f.Key,"([a-z])([A-Z])","$1 $2"),Description(f.Value),0,0,50,800,ForSale:f.Key is not ("dirtyWater" or "purifiedWater" or "bottledWater" or "jarOfWater" or "bottleOfMilk" or "jarOfMilk"),WeightPounds:f.Key is "jarOfWater" or "jarOfMilk"?6:f.Key is "bottledWater" or "bottleOfMilk"?1.3:f.Key is "dirtyWater" or "purifiedWater"?1.1:.4,Nutrition:f.Value)).Concat([
+        f.Key=="rawCow"?"Raw beef":f.Key=="rawPig"?"Raw pork":System.Text.RegularExpressions.Regex.Replace(f.Key,"([a-z])([A-Z])","$1 $2"),ItemDescription(f.Key,f.Value),0,0,50,800,ForSale:f.Key is not ("dirtyWater" or "purifiedWater" or "bottledWater" or "jarOfWater" or "bottleOfMilk" or "jarOfMilk"),WeightPounds:f.Key is "jarOfWater" or "jarOfMilk"?6:f.Key is "bottledWater" or "bottleOfMilk"?1.3:f.Key is "dirtyWater" or "purifiedWater"?1.1:.4,Nutrition:f.Value)).Concat([
         new("antibiotics","Antibiotics","Cures all game diseases and illnesses, including parasites",0,0,1200,2400,WeightPounds:.05),
         new("medicinalCulture","Medicinal culture","Fictional antibiotic crafting ingredient",0,0,250,500,WeightPounds:.1),
         new("medicalBinder","Medical binder","Fictional antibiotic crafting ingredient",0,0,150,350,WeightPounds:.1),

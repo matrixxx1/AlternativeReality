@@ -70,7 +70,7 @@ public sealed partial class RealityWorld
             {
                 var ingredients = recipe.Ingredients.Select(item => new CraftingIngredientState(item.ItemType,
                     InventoryDefinition(item.ItemType).DisplayName, item.Quantity, supplies.GetValueOrDefault(item.ItemType), CraftingIngredientQuality(playerId,access.AccountId,item))).ToArray();
-                var learned = _learnedRecipes.ContainsKey((playerId, recipe.Id));
+                var learned = NutritionCatalog.IsBasicCook(recipe)||_learnedRecipes.ContainsKey((playerId, recipe.Id));
                 var study = GetRecipeStudy(playerId, recipe.Id) ?? new RecipeStudy(recipe.Id, 1, .01);
                 return new CraftingRecipeState(recipe.Id, recipe.Name, recipe.OutputItemType, recipe.OutputQuantity, ingredients,
                     CraftableBatches(playerId, recipe, supplies), recipe.RequiredLevel, recipe.Difficulty, learned ? CraftChance(playerId, recipe, study) : 0, learned ? study.Count : 0, study.BaseChance, study.NextBonus, CraftBonuses(playerId, recipe), Learned: learned);
@@ -95,7 +95,7 @@ public sealed partial class RealityWorld
                     access = ValidateCraftingAccess(playerId, request.FurnitureId);
                     var recipe = CraftingCatalog.Recipes.FirstOrDefault(item => item.Id == request.RecipeId && item.StationType == access.Table.Properties.GetValueOrDefault("objectType"))
                         ?? throw new InvalidOperationException("This recipe requires a different crafting station: food and water use the stove, vehicles use the garage workbench, weapons and ammo use the weapons bench, and other items use the crafting table.");
-                    if (!_learnedRecipes.ContainsKey((playerId, recipe.Id))) throw new InvalidOperationException("Find and collect this recipe in a dungeon treasure chest first.");
+                    if (!NutritionCatalog.IsBasicCook(recipe)&&!_learnedRecipes.ContainsKey((playerId, recipe.Id))) throw new InvalidOperationException("Find and collect this recipe in a dungeon treasure chest first.");
                     if (GetCraftingSkill(playerId).Level < recipe.RequiredLevel)
                         throw new InvalidOperationException($"{recipe.Name} requires crafting level {recipe.RequiredLevel}.");
                     var backpack = GetInventoryState(playerId);
@@ -116,7 +116,7 @@ public sealed partial class RealityWorld
                     var failed = false;
                     for (var batch = 0; batch < request.Quantity; batch++)
                     {
-                        var chance=ProgressionRules.CraftSuccess(StatsFor(playerId),study.BaseChance+bonuses.Success+IngredientQualityBonus(playerId,recipe,next,nextBackpack));
+                        var chance=NutritionCatalog.IsBasicCook(recipe)?1:ProgressionRules.CraftSuccess(StatsFor(playerId),study.BaseChance+bonuses.Success+IngredientQualityBonus(playerId,recipe,next,nextBackpack));
                         var usedHome=new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
                         foreach (var ingredient in recipe.Ingredients)
                         {
@@ -125,7 +125,7 @@ public sealed partial class RealityWorld
                             next[ingredient.ItemType]=next.GetValueOrDefault(ingredient.ItemType)-fromHome;
                             nextBackpack[ingredient.ItemType]=nextBackpack.GetValueOrDefault(ingredient.ItemType)-(ingredient.Quantity-fromHome);
                         }
-                        if (ProgressionRoll() >= chance) { failed = true; break; }
+                        if (!NutritionCatalog.IsBasicCook(recipe)&&ProgressionRoll() >= chance) { failed = true; break; }
                         succeeded++;
                         if (bonuses.Quantity > 0 && ProgressionRoll() < bonuses.Quantity) bonusOutput++;
                         if (bonuses.Materials > 0 && ProgressionRoll() < bonuses.Materials)

@@ -85,7 +85,7 @@ public sealed partial class RealityWorld
             var destination = chase ? player.Position : chest?.Position ?? actor.Position with
             { X = actor.Position.X + Math.Cos(now.ToUnixTimeMilliseconds() / 2500d + StableInt(actor.Id)), Y = actor.Position.Y + Math.Sin(now.ToUnixTimeMilliseconds() / 3300d + StableInt(actor.Id)) };
             var distance = actor.Position.Distance2D(destination);
-            var speed = fish ? .7 : 1.3 + dungeon.Difficulty * .018;
+            var speed = (fish ? .7 : 1.3 + dungeon.Difficulty * .018)*SyrupSlow(actor.Position,actor.LocationId);
             var step = Math.Min(distance, speed * Math.Clamp(elapsed.TotalSeconds, 0, 1));
             var next = distance < .01 ? actor.Position : actor.Position with
             { X = Math.Clamp(actor.Position.X + (destination.X - actor.Position.X) / distance * step, 1, dungeon.Width - 1),

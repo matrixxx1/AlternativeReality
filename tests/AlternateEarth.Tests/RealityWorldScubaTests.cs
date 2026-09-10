@@ -253,7 +253,7 @@ public sealed partial class RealityWorldTests
         Assert.True(impact.TargetDied);
         var loot=Assert.Single(world.GetPrivateState(p.Id).Loot!,l=>l.Items.Any(i=>i.ItemType=="fish"));Assert.Single(loot.Items);
         await world.TakeLootItemsAsync(p.Id,new(loot.Id,[new("fish",1)]));
-        var fed=await world.ConsumeItemAsync(p.Id,"fish");Assert.Equal(5.35,fed.HealthHearts,5);Assert.Equal(3.4,fed.Stamina,5);
+        var fed=await world.ConsumeItemAsync(p.Id,"fish");Assert.Equal(5.25,fed.HealthHearts,5);Assert.Equal(2.75,fed.Stamina,5);
         Assert.Contains(CraftingCatalog.Recipes,r=>r.Id=="fishStew"&&r.Ingredients.Any(i=>i.ItemType=="fish"));
         Assert.Contains(CraftingCatalog.Recipes,r=>r.Id=="friedFish"&&r.Ingredients.Any(i=>i.ItemType=="fish"));
     }

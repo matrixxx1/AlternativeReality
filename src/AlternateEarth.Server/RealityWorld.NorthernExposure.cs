@@ -62,7 +62,7 @@ public sealed partial class RealityWorld
                 var distance = actor.Position.Distance2D(target.Position);
                 if (distance > range)
                 {
-                    var step = Math.Min(distance - range * .8, Math.Clamp(seconds, 0, 1) * (boss ? 2.5 : 2));
+                    var step = Math.Min(distance - range * .8, Math.Clamp(seconds, 0, 1) * (boss ? 2.5 : 2)*SyrupSlow(actor.Position,actor.LocationId));
                     var next = actor.Position with { X = actor.Position.X + (target.Position.X - actor.Position.X) / distance * step, Y = actor.Position.Y + (target.Position.Y - actor.Position.Y) / distance * step };
                     if (next.Distance2D(e.Center) <= e.Radius && Navigation.CanTraverse(actor.Position, next)) actor = actor with { Position = next, IsMoving = true, Version = actor.Version + 1 };
                 }

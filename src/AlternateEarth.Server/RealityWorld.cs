@@ -464,6 +464,7 @@ public sealed partial class RealityWorld
     private async Task<MovementOutcome?> MoveCoreAsync(string characterId, MoveRequest request, CancellationToken cancellationToken)
     {
         if (!_players.TryGetValue(characterId, out var player)) return null;
+        if(MooseCharging(player))return new(player,false,true,false,false,false,"Mad Moose Flu: charging!");
         if (player.TravelMode == TravelMode.Swim && !player.GodMode && (player.SwimExhausted || player.Stamina <= 0))
         {
             _swimAttempts[player.Id] = _probulatorClock.GetUtcNow();
@@ -973,7 +974,7 @@ public sealed partial class RealityWorld
                 var dy = waypoint.Y - actor.Position.Y;
                 var distance = Math.Sqrt((dx * dx) + (dy * dy));
                 if (distance < .35) { route.Dequeue(); continue; }
-                var step = Math.Min(distance, ActorSpeed(actor.Subtype) * elapsed.TotalSeconds);
+                var step = Math.Min(distance, ActorSpeed(actor.Subtype) * elapsed.TotalSeconds*SyrupSlow(actor.Position,actor.LocationId));
                 var position = actor.Position with { X = actor.Position.X + (dx / distance * step), Y = actor.Position.Y + (dy / distance * step) };
                 if (!Navigation.CanTraverse(actor.Position, position, true)) { route.Clear(); continue; }
                 position = position with { Z = Navigation.ElevationAt(position.X, position.Y) };
@@ -1009,7 +1010,7 @@ public sealed partial class RealityWorld
                     var dx = waypoint.X - actor.Position.X; var dy = waypoint.Y - actor.Position.Y;
                     var distance = Math.Sqrt(dx * dx + dy * dy);
                     if (distance < .35) { route.Dequeue(); continue; }
-                    var step = Math.Min(distance, ActorSpeed(actor.Subtype) * elapsed.TotalSeconds);
+                    var step = Math.Min(distance, ActorSpeed(actor.Subtype) * elapsed.TotalSeconds*SyrupSlow(actor.Position,actor.LocationId));
                     var position = actor.Position with { X = actor.Position.X + dx / distance * step, Y = actor.Position.Y + dy / distance * step };
                     if (dungeon.Walls.Any(wall => CrossesDungeonWall(actor.Position, position, wall))) { route.Clear(); continue; }
                     var facing = Math.Abs(dx) > Math.Abs(dy) ? (dx > 0 ? "east" : "west") : (dy > 0 ? "north" : "south");
@@ -1249,7 +1250,7 @@ public sealed partial class RealityWorld
             var id = $"chest:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}:{chestIndex}";
             _outdoorChests.TryAdd(id, new TreasureChestState(id, safe, "outdoor"));
         }
-        string[] looseItemTypes = ["spear", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas", "fertilizer", "wood", "gardeningBook", .. GardenRules.Crops.Select(GardenRules.Seed)];
+        string[] looseItemTypes = ["spear", "pencil", "pen", "marker", "sprayPaint", "book", "calculator", "cellPhone", "rock", "arrow", "gallonOfGas", "fertilizer", "wood", "gardeningBook", "antibiotics", .. GardenRules.Crops.Select(GardenRules.Seed)];
         var looseRandom = new Random(StableInt($"loose-items:{Configuration.Seed}:{generated.Area.Center.Latitude:F5}:{generated.Area.Center.Longitude:F5}"));
         for (var itemIndex = 0; itemIndex < 14; itemIndex++)
         {

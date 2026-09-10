@@ -5,7 +5,7 @@ namespace AlternateEarth.Shared;
 
 public static class Protocol
 {
-    public const int Version = 68;
+    public const int Version = 69;
 }
 
 public sealed record ClientEnvelope(string Type, JsonElement Payload);

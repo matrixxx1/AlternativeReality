@@ -7,7 +7,7 @@ public sealed partial class RealityWorld
     public LootDropState OpenLoot(string playerId, string lootId)
     {
         if (!_players.TryGetValue(playerId, out var player) || !_loot.TryGetValue(lootId, out var loot) ||
-            (loot.DropKind == "eventReward" ? loot.OwnerId != playerId : loot.LocationId != player.LocationId) || loot.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+            (loot.DropKind == "eventReward" ? loot.OwnerId != playerId : loot.LocationId != player.LocationId) || loot.ExpiresAtUtc <= _probulatorClock.GetUtcNow())
             throw new InvalidOperationException("Treasure is no longer available.");
         if (loot.DropKind != "eventReward" && player.Position.Distance2D(loot.Position) > 4)
             throw new InvalidOperationException("Move closer to the treasure.");
@@ -26,6 +26,7 @@ public sealed partial class RealityWorld
             var loot = OpenLoot(playerId, request.LootId);
             if (request.Items is null || request.Items.Any(line => string.IsNullOrWhiteSpace(line.ItemType) || line.Quantity is < 1 or > 100_000))
                 throw new InvalidOperationException("Choose a valid item and quantity.");
+            if(loot.DropKind=="mooseFluSyrup"&&request.Items.Any(i=>i.ItemType=="mapleSyrup"&&i.Quantity>0))return await BottleMooseSyrupAsync(playerId,loot,cancellationToken);
             var requested = request.Items.GroupBy(line => line.ItemType, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Sum(line => (long)line.Quantity), StringComparer.OrdinalIgnoreCase);
             foreach (var line in requested)

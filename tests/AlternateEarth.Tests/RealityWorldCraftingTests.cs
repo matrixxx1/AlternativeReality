@@ -203,7 +203,7 @@ public sealed partial class RealityWorldTests
     {
         var (world, pilot, _) = await CreateProbulatorTestWorld();
         var recipes = CraftingCatalog.Recipes.ToDictionary(item => item.Id);
-        Assert.Equal(84, recipes.Count);
+        Assert.Equal(96, recipes.Count);
         foreach (var (id, level) in new[] { ("molotovCocktail", 1), ("skateboard", 25), ("rocketLauncher", 50), ("motorcycle", 100), ("ufo", 5_000) })
             Assert.Equal(level, recipes[id].RequiredLevel);
         Assert.Contains(recipes["ufo"].Ingredients, item => item.ItemType == "kryptonite");

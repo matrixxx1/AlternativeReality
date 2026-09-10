@@ -7,6 +7,7 @@ const Gardens = (() => {
     if(!isAnimal(e))return false;
     const p=project(e.position),cow=e.properties.subtype==='farmCow',t=Date.now()/700;
     ctx.save();ctx.translate(p.x,p.y);ctx.scale(scale,scale);
+    if(e.properties.state==='dead'){ctx.rotate(Math.PI/2);ctx.globalAlpha=.6;}
     const ellipse=(x,y,rx,ry,color)=>{ctx.fillStyle=color;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill();};
     ellipse(0,.3,cow?1.1:.45,.2,'#0004');
     if(cow){
@@ -24,7 +25,7 @@ const Gardens = (() => {
     }
     const quantity=Number(e.properties.productQuantity)||0;
     for(let i=0;i<quantity;i++)ellipse(-.55+(i%3)*.2,.65+Math.floor(i/3)*.15,cow?.14:.075,cow?.08:.1,cow?'#785236':'#fff0c7');
-    ctx.restore();if(quantity&&scale>9){ctx.save();ctx.font='11px system-ui';ctx.textAlign='center';ctx.fillStyle='#fff3c8';ctx.fillText(`${quantity} ${cow?'fertilizer':'eggs'}`,p.x,p.y+scale+12);ctx.restore();}return true;
+    ctx.restore();if(quantity&&scale>9){ctx.save();ctx.font='11px system-ui';ctx.textAlign='center';ctx.fillStyle='#fff3c8';ctx.fillText(`${quantity} ${e.properties.state==='dead'?'raw meat':cow?'fertilizer':'eggs'}`,p.x,p.y+scale+12);ctx.restore();}return true;
   }
   function draw(ctx,e,project,scale){
     if(drawAnimal(ctx,e,project,scale))return true;
@@ -60,10 +61,11 @@ const Gardens = (() => {
       const animal=state.base.find(e=>isAnimal(e)&&Math.hypot(e.position.x-point.x,e.position.y-point.y)<(e.properties.subtype==='farmCow'?1.5:1));
       if(animal){
         stopTravel();const cow=animal.properties.subtype==='farmCow',d=open(cow?'Farm cow':'Farm chicken'),me=state.players.get(state.playerId),near=Math.hypot(me.position.x-animal.position.x,me.position.y-animal.position.y)<=4;
-        const quantity=Number(animal.properties.productQuantity)||0,text=document.createElement('p');text.textContent=`${quantity} ${cow?'fertilizer':'eggs'} waiting nearby. Animals may produce more while players stay within 50 meters.`;d.append(text);
+        const dead=animal.properties.state==='dead',product=dead?'raw meat':cow?'fertilizer':'eggs',quantity=Number(animal.properties.productQuantity)||0,text=document.createElement('p');text.textContent=dead?`${quantity} raw meat remaining. This animal is dead.`:`${quantity} ${cow?'fertilizer':'eggs'} waiting nearby. Animals may produce more while players stay within 50 meters.`;d.append(text);
         if(!near)button(d,'Walk to animal',()=>{d.close();navigateTo(animal.position);});
-        button(d,`Collect ${cow?'fertilizer':'eggs'} (${quantity})`,()=>{d.close();send({type:'useFarmAnimal',entityId:animal.id,action:'collect'});},!near||!quantity);
-        if(cow){const q=type=>(state.privateState?.inventory?.items||[]).find(i=>i.itemType===type)?.quantity||0,jar=q('emptyGlassJar')>0,has=jar||q('emptyGlassBottle')>0,ready=!(Date.parse(animal.properties.milkReadyUtc)>Date.now());const note=document.createElement('p');note.textContent='Milking: 80% success. Jars are used first; otherwise a bottle. Failure breaks the container. On success, 15% chance of fertilizer or urine instead of milk. Cow rests five minutes after each attempt.';d.append(note);
+        button(d,`Collect ${product} (${quantity})`,()=>{d.close();send({type:'useFarmAnimal',entityId:animal.id,action:'collect'});},!near||!quantity);
+        if(!dead)button(d,'Attack animal',()=>{d.close();beginFollowCommand('attack',animal,true);});
+        if(cow&&!dead){const q=type=>(state.privateState?.inventory?.items||[]).find(i=>i.itemType===type)?.quantity||0,jar=q('emptyGlassJar')>0,has=jar||q('emptyGlassBottle')>0,ready=!(Date.parse(animal.properties.milkReadyUtc)>Date.now());const note=document.createElement('p');note.textContent='Milking: 80% success. Jars are used first; otherwise a bottle. Failure breaks the container. On success, 15% chance of fertilizer or urine instead of milk. Cow rests five minutes after each attempt.';d.append(note);
           button(d,!ready?'Cow resting':has?`Milk into ${jar?'jar':'bottle'}`:'Milk — empty jar or bottle required',()=>{d.close();send({type:'useFarmAnimal',entityId:animal.id,action:'milk'});},!near||!has||!ready);
         }return true;
       }

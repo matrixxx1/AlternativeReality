@@ -66,17 +66,24 @@ public sealed partial class RealityWorld
 
     private async Task<PlayerState> ConsumeNutritionAsync(PlayerState player,string itemType,CancellationToken token)
     {
-        EnsureNotProbulatorAbducted(player.Id);
-        if(IsGasAsleep(player.Id))throw new InvalidOperationException("You cannot eat or take medicine while asleep.");
-        if(!RemoveInventory(player.Id,itemType,1))throw new InvalidOperationException($"You do not have any {DisplayItem(itemType)}.");
-        var now=_probulatorClock.GetUtcNow();
-        var updated=itemType.Equals("antibiotics",StringComparison.OrdinalIgnoreCase)
-            ? player with{Survival=(player.Survival??new()) with{Illnesses=[]},Version=player.Version+1}
-            : EatNutrition(player,NutritionCatalog.Foods[itemType],now,ProgressionRoll(),ProgressionRoll(),ProgressionRoll());
-        if(itemType.Equals("water",StringComparison.OrdinalIgnoreCase))updated=updated with{Water=player.MaximumWater,WaterProtectedUntilUtc=now.AddMinutes(5)};
-        if(itemType.Equals("beans",StringComparison.OrdinalIgnoreCase)||itemType.Equals("porkAndBeans",StringComparison.OrdinalIgnoreCase))
-            updated=updated with{Survival=(updated.Survival??new()) with{MusicalFruit=new(now.AddMinutes(5),now.AddSeconds(MusicalFruitInterval()))}};
-        await SaveInventoryAsync(player.Id,token);await SavePlayerAsync(updated,token);return updated;
+        await _treasureInteractionLock.WaitAsync(token);
+        try
+        {
+            EnsureNotProbulatorAbducted(player.Id);
+            if(IsGasAsleep(player.Id))throw new InvalidOperationException("You cannot eat or take medicine while asleep.");
+            var inventory=GetInventoryState(player.Id);var item=inventory.Items.FirstOrDefault(i=>i.ItemType==itemType&&i.Quantity>0)??throw new InvalidOperationException($"You do not have any {DisplayItem(itemType)}.");
+            var next=inventory with{Items=inventory.Items.Select(i=>i.ItemType==itemType?i with{Quantity=i.Quantity-1}:i).Where(i=>i.Quantity>0).ToArray()};
+            var now=_probulatorClock.GetUtcNow();
+            return await SaveFixturePlayerAsync(player.Id,current=>{
+                var updated=itemType.Equals("antibiotics",StringComparison.OrdinalIgnoreCase)
+                    ? current with{Survival=(current.Survival??new()) with{Illnesses=[]}}
+                    : ApplyMeatDisease(EatNutrition(current,NutritionCatalog.Foods[itemType],now,ProgressionRoll(),ProgressionRoll(),ProgressionRoll()),itemType,now,ProgressionRoll());
+                if(itemType.Equals("water",StringComparison.OrdinalIgnoreCase))updated=updated with{Water=current.MaximumWater,WaterProtectedUntilUtc=now.AddMinutes(5)};
+                if(itemType.Equals("beans",StringComparison.OrdinalIgnoreCase)||itemType.Equals("porkAndBeans",StringComparison.OrdinalIgnoreCase))updated=updated with{Survival=(updated.Survival??new()) with{MusicalFruit=new(now.AddMinutes(5),now.AddSeconds(MusicalFruitInterval()))}};
+                return updated;
+            },next,token);
+        }
+        finally{_treasureInteractionLock.Release();}
     }
 
     private CharacterStats FoodStats(string playerId,CharacterStats stats)

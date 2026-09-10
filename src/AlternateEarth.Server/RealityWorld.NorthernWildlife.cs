@@ -17,7 +17,7 @@ public sealed partial class RealityWorld
     }
 
     private bool StandingInMapleSyrup(PlayerState player) => player.TravelMode != TravelMode.Ufo &&
-        _loot.Values.Any(drop => drop.DropKind == "mapleSyrupPuddle" && drop.ExpiresAtUtc > _probulatorClock.GetUtcNow() &&
+        _loot.Values.Any(drop => drop.DropKind is "mapleSyrupPuddle" or "mooseFluSyrup" && drop.ExpiresAtUtc > _probulatorClock.GetUtcNow() &&
             drop.LocationId == player.LocationId && drop.Position.Distance2D(player.Position) <= 2.5);
 
     private void SpawnNorthernWildlife(InversionState e)
@@ -51,7 +51,7 @@ public sealed partial class RealityWorld
             if (target is null) { if (original.IsMoving) { actor = actor with { Version = actor.Version + 1 }; _actors[actor.Id] = actor; _inversionActorUpdates.Enqueue(actor); } continue; }
             var moose = actor.Subtype == "angryMoose";
             var beaver = actor.Subtype == "helmetBeaver";
-            var speed = moose ? 6 : beaver ? 4.5 : 5.5;
+            var speed = (moose ? 6 : beaver ? 4.5 : 5.5)*SyrupSlow(actor.Position,actor.LocationId);
             var range = moose ? 2.4 : beaver ? 1.3 : 1.5;
             var distance = actor.Position.Distance2D(target.Position);
             if (distance > range)

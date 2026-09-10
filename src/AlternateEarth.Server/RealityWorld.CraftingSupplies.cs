@@ -13,7 +13,7 @@ public sealed partial class RealityWorld
     }
 
     private int CraftableBatches(string playerId, CraftingRecipe recipe, IReadOnlyDictionary<string,int> supplies) =>
-        !_learnedRecipes.ContainsKey((playerId,recipe.Id)) || GetCraftingSkill(playerId).Level<recipe.RequiredLevel ? 0 :
+        (!NutritionCatalog.IsBasicCook(recipe)&&!_learnedRecipes.ContainsKey((playerId,recipe.Id))) || GetCraftingSkill(playerId).Level<recipe.RequiredLevel ? 0 :
         recipe.Ingredients.Min(i=>supplies.GetValueOrDefault(i.ItemType)/i.Quantity);
 
     private string? CraftingIngredientQuality(string playerId, string account, RecipeIngredient ingredient)

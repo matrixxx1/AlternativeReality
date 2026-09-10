@@ -100,7 +100,7 @@ public sealed partial class RealityWorld
         ,new("metal","Scrap metal","Reusable metal recovered from litter or a mailbox",0,0,50,500,WeightPounds:1)
         ,new("lockPickSet","Lock pick set","Reusable tool with a 15% chance to open a locked door",0,0,2_500,9_000,true,true,WeightPounds:.4)
     };
-    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.Concat(GardenCatalog.Items).Concat(FarmCatalog.Items).Concat(GloveCatalog.Items).Concat(CraftingCatalog.Materials).Concat(CraftingCatalog.RecipeItems).Concat(HazardCatalog.Materials).Concat(HazardCatalog.Items).Concat(NutritionCatalog.Items).Select(item => NutritionCatalog.Foods.TryGetValue(item.ItemType, out var nutrition) ? item with { Nutrition = nutrition, Effect = NutritionCatalog.Description(nutrition) } : item).Select(item => item with { StorageSection = InventorySections.Section(item) }).ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ItemConfiguration> _itemConfigurations = new(DefaultItemConfigurations.Concat(GardenCatalog.Items).Concat(FarmCatalog.Items).Concat(GloveCatalog.Items).Concat(CraftingCatalog.Materials).Concat(CraftingCatalog.RecipeItems).Concat(HazardCatalog.Materials).Concat(HazardCatalog.Items).Concat(NutritionCatalog.Items).Select(item => NutritionCatalog.Foods.TryGetValue(item.ItemType, out var nutrition) ? item with { Nutrition = nutrition, Effect = NutritionCatalog.ItemDescription(item.ItemType,nutrition) } : item).Select(item => item with { StorageSection = InventorySections.Section(item) }).ToDictionary(item => item.ItemType, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     private static readonly MovementConfiguration DefaultMovementConfiguration = new(
         3.5,
         100,
@@ -1742,6 +1742,10 @@ public sealed partial class RealityWorld
         var now = _probulatorClock.GetUtcNow();
         await AdvanceProbulatorAbductionsAsync(now, changedActors, changedPlayers, combat, cancellationToken);
         await AdvanceMusicalFruitAsync(now, changedPlayers, cancellationToken);
+        await AdvanceAnimalIllnessesAsync(now,changedPlayers,cancellationToken);
+        await AdvanceMadMooseAsync(now,elapsed,changedPlayers,combat,cancellationToken);
+        AttractAnimalDiseaseEnemies(now,elapsed,changedActors);
+        AttractSyrupEnemies(now,elapsed,changedActors);
         await AdvanceAreaHazardsAsync(now, changedActors, changedPlayers, combat, cancellationToken);
         foreach (var hit in _probulatorHits.Where(hit => hit.Value <= now).ToArray()) _probulatorHits.TryRemove(hit.Key, out _);
         foreach (var rubble in _baseEntities.Values.Where(entity => entity.Kind == EntityKind.Building && entity.Properties.GetValueOrDefault("state") == "rubble" && DateTimeOffset.TryParse(entity.Properties.GetValueOrDefault("destroyedUntilUtc"), out var until) && until <= now).ToArray())
@@ -1901,7 +1905,7 @@ public sealed partial class RealityWorld
             var maximumAttackRange = EventPredatorMaximumAttackRange(predator.Subtype);
             if (nearest > maximumAttackRange)
             {
-                var step = Math.Min(Math.Max(0, nearest - maximumAttackRange * .82), ActorSpeed(predator.Subtype) * elapsed.TotalSeconds); var dx = (targetPosition.Value.X - predator.Position.X) / nearest; var dy = (targetPosition.Value.Y - predator.Position.Y) / nearest;
+                var step = Math.Min(Math.Max(0, nearest - maximumAttackRange * .82), ActorSpeed(predator.Subtype) * elapsed.TotalSeconds*SyrupSlow(predator.Position,predator.LocationId)); var dx = (targetPosition.Value.X - predator.Position.X) / nearest; var dy = (targetPosition.Value.Y - predator.Position.Y) / nearest;
                 var next = predator.Position with { X = predator.Position.X + dx * step, Y = predator.Position.Y + dy * step };
                 if (Navigation.CanTraverse(predator.Position, next, true)) { predator = predator with { Position = next, Facing = Math.Abs(dx) > Math.Abs(dy) ? dx > 0 ? "east" : "west" : dy > 0 ? "north" : "south", IsMoving = true, Version = predator.Version + 1 }; _actors[predator.Id] = predator; changedActors[predator.Id] = predator; }
                 continue;
@@ -1977,7 +1981,7 @@ public sealed partial class RealityWorld
                 var terrain = player.LocationId == "outdoor" ? Navigation.TerrainAt(actor.Position.X, actor.Position.Y) : TerrainType.Pavement;
                 var travel = actor.Kind == EntityKind.Animal ? (hostility >= 2 ? TravelMode.Run : TravelMode.Walk) : actor.TravelMode;
                 if (!WorldNavigation.SupportsTravelMode(terrain, travel)) travel = TravelMode.Walk;
-                var speed = Navigation.SpeedFor(terrain, travel) * Math.Clamp(1 + hostility * .12, 1, 2.4);
+                var speed = Navigation.SpeedFor(terrain, travel) * Math.Clamp(1 + hostility * .12, 1, 2.4)*SyrupSlow(actor.Position,actor.LocationId);
                 var next = actor.Position with { X = actor.Position.X + dx * speed * elapsed.TotalSeconds, Y = actor.Position.Y + dy * speed * elapsed.TotalSeconds };
                 var blocked = player.LocationId == "outdoor" ? !Navigation.CanTraverse(actor.Position, next, true) : currentDungeon!.Walls.Any(wall => CrossesDungeonWall(actor.Position, next, wall));
                 if (!blocked)
@@ -2118,7 +2122,9 @@ public sealed partial class RealityWorld
         var condition = Weather.Condition ?? string.Empty;
         if (condition.Contains("snow", StringComparison.OrdinalIgnoreCase)) sight *= .55;
         else if (condition.Contains("rain", StringComparison.OrdinalIgnoreCase) || Weather.PrecipitationMillimeters > 0) sight *= Math.Clamp(.82 - Weather.PrecipitationMillimeters * .025, .45, .82);
-        return Math.Max(8, sight) * (playerId is null ? 1 : ProgressionRules.NpcSight(StatsFor(playerId)));
+        var range=Math.Max(8, sight) * (playerId is null ? 1 : ProgressionRules.NpcSight(StatsFor(playerId)));
+        if(playerId is not null&&_players.TryGetValue(playerId,out var caller)&&HasRecentAnimalCall(caller,_probulatorClock.GetUtcNow())&&(Relationship(playerId,observer.Id)<0||IsEventPredator(observer.Subtype)))range=Math.Max(range,150);
+        return range;
     }
 
     private int NextActorRandom(int maximum)

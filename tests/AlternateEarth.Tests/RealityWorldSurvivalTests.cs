@@ -39,7 +39,7 @@ public sealed partial class RealityWorldTests
     [Fact]
     public void EveryFoodRecipeRetainsIngredientsAndAddsAnExpiringNotSpecialBonus()
     {
-        foreach(var recipe in NutritionCatalog.Recipes.Where(r=>r.Id!="antibiotics"))
+        foreach(var recipe in NutritionCatalog.Recipes.Where(r=>r.Id!="antibiotics"&&!NutritionCatalog.IsBasicCook(r)))
         {
             var food=NutritionCatalog.Foods[recipe.OutputItemType];Assert.False(food.Raw);Assert.NotEmpty(food.Bonuses!);
             Assert.True(food.Health>=recipe.Ingredients.Sum(i=>NutritionCatalog.Foods.GetValueOrDefault(i.ItemType)?.Health*i.Quantity??0));
@@ -61,8 +61,8 @@ public sealed partial class RealityWorldTests
         var inventory=PhotoField<ConcurrentDictionary<string,Dictionary<string,int>>>(world,"_inventories")[p.Id];
         inventory["antibiotics"]=1;inventory["rawPig"]=1;inventory["cheeseburger"]=1;world.ProgressionRoll=()=>0;
         ScubaPlayer(world,p with{Survival=new(81,[new("Fever",clock.GetUtcNow().AddHours(2))])});
-        var infected=await world.ConsumeItemAsync(p.Id,"rawPig");Assert.Equal(2,infected.Survival!.Illnesses!.Count);
-        var joined=await world.JoinAsync(p.Id,p.Name);Assert.Equal(infected.Survival.Hunger,joined.Survival!.Hunger);Assert.Equal(2,joined.Survival.Illnesses!.Count);
+        var infected=await world.ConsumeItemAsync(p.Id,"rawPig");Assert.Equal(3,infected.Survival!.Illnesses!.Count);Assert.Contains(infected.Survival.Illnesses!,i=>i.Name=="Swine flu");
+        var joined=await world.JoinAsync(p.Id,p.Name);Assert.Equal(infected.Survival.Hunger,joined.Survival!.Hunger);Assert.Equal(3,joined.Survival.Illnesses!.Count);
         var fed=await world.ConsumeItemAsync(p.Id,"cheeseburger");Assert.Equal(0,fed.Survival!.Hunger);Assert.NotEmpty(fed.Survival.Buffs!);
         var cured=await world.ConsumeItemAsync(p.Id,"antibiotics");Assert.Empty(cured.Survival!.Illnesses!);Assert.NotEmpty(cured.Survival.Buffs!);
         joined=await world.JoinAsync(p.Id,p.Name);Assert.Empty(joined.Survival!.Illnesses!);Assert.NotEmpty(joined.Survival.Buffs!);
@@ -115,7 +115,7 @@ public sealed partial class RealityWorldTests
         var(world,p,_)=await ScubaFixture();var actors=PhotoField<ConcurrentDictionary<string,ActorState>>(world,"_actors");
         var definitions=PhotoField<ConcurrentDictionary<string,ItemConfiguration>>(world,"_itemConfigurations");definitions["sword"]=definitions["sword"] with{Accuracy=1};
         ScubaPlayer(world,p with{GodMode=true,EquippedWeapon="sword"});
-        foreach(var type in NutritionCatalog.Livestock.Concat(NutritionCatalog.Shellfish))
+        foreach(var type in NutritionCatalog.Livestock.Concat(NutritionCatalog.Shellfish).Concat(new[]{"crow","seagull","goose","moose","angryMoose","helmetBeaver","tacticalGoose"}))
         {
             var id="meat-test:"+type;actors[id]=new(id,EntityKind.Animal,type,type,p.Position,HealthHearts:.01);
             PhotoField<ConcurrentDictionary<(string Player,string Weapon),DateTimeOffset>>(world,"_lastPlayerAttack").Clear();

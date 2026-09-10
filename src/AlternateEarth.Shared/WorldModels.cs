@@ -123,7 +123,7 @@ public sealed record PlayerState(
     public double GloveShootingIntervalMultiplier => GloveCatalog.ShootingInterval(this);
 }
 
-public sealed record IllnessState(string Name, DateTimeOffset EndsAtUtc);
+public sealed record IllnessState(string Name, DateTimeOffset EndsAtUtc, DateTimeOffset? NextCallAtUtc = null, DateTimeOffset? LastCallAtUtc = null, DateTimeOffset? NextSyrupAtUtc = null, double ChargeAngle = 0, double ChargeRemainingMeters = 0);
 public sealed record FoodBuff(string Stat, int Amount, DateTimeOffset EndsAtUtc);
 public sealed record MusicalFruitState(DateTimeOffset EndsAtUtc, DateTimeOffset NextEmissionAtUtc, bool FinaleEmitted = false);
 public sealed record SurvivalState(double Hunger = 0, IReadOnlyList<IllnessState>? Illnesses = null, IReadOnlyList<FoodBuff>? Buffs = null, MusicalFruitState? MusicalFruit = null, bool GardeningBookRead = false);

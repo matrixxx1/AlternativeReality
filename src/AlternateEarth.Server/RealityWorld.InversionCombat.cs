@@ -38,7 +38,7 @@ public sealed partial class RealityWorld
             { var escape=actor.Position with {X=actor.Position.X+(actor.Position.X-target.Position.X)/distance*seconds*3,Y=actor.Position.Y+(actor.Position.Y-target.Position.Y)/distance*seconds*3};if(escape.Distance2D(e.Center)<e.Radius-2&&Navigation.CanTraverse(actor.Position,escape))_actors[actor.Id]=actor with {Position=escape,IsMoving=true,Version=actor.Version+1};continue; }
             if (distance > range)
             {
-                var step = Math.Min(distance - range * .7, seconds * (boss ? 3 : 2));
+                var step = Math.Min(distance - range * .7, seconds * (boss ? 3 : 2)*SyrupSlow(actor.Position,actor.LocationId));
                 var next = actor.Position with { X = actor.Position.X + (target.Position.X - actor.Position.X) / distance * step, Y = actor.Position.Y + (target.Position.Y - actor.Position.Y) / distance * step };
                 if (next.Distance2D(e.Center) <= e.Radius - 2 && Navigation.CanTraverse(actor.Position, next))
                 { actor = actor with { Position = next, IsMoving = true, Version = actor.Version + 1 }; _actors[actor.Id] = actor; }
