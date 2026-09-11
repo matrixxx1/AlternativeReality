@@ -201,6 +201,7 @@
   </section>
   <button id="cancelGodPlacement" type="button" hidden style="position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:1500">Cancel placement</button>
   <section id="actionMenu" class="panel action-menu" data-collapsible="Actions" hidden>
+    <button id="teleportButton" type="button" hidden>Teleport here</button>
     <strong>Actions</strong>
     <button id="openHomeUpgradesButton" type="button" hidden>Home upgrades</button>
     <button id="collectDirtyWaterButton" type="button" hidden>Collect dirty water</button>
@@ -286,7 +287,6 @@
     <button data-test-character="player" type="button">Place fake player</button>
     <button data-test-character="animal" type="button">Place animal</button>
     <button id="clearTestCharactersButton" type="button">Clear my test characters</button>
-    <button id="teleportButton" type="button">Teleport to location</button>
       </div>
       <fieldset id="godWorldTools"><legend>World administration</legend>
         <div class="server-event-row"><strong>Server Vote</strong><span>Hourly votes choose from Random and three inversions. Each vote lasts one minute.</span><button type="button" data-world-event="vote">Trigger Server Vote · 1 minute</button><button id="cancelServerVoteButton" type="button" disabled>Cancel active Server Vote</button></div>
@@ -308,6 +308,7 @@
       <h3>Player Testing</h3>
       <p>Checked is normal gameplay. Clear one rule to bypass only that system for this character. Changes are saved on the server and restored when you reconnect.</p>
       <div id="playerTestingSettings" class="player-testing-settings">
+        <label><input type="checkbox" data-player-testing="cantTeleport"><span><strong>Player can't teleport</strong><small>Clear to show Teleport here in Actions and allow Home and flag teleports.</small></span></label>
         <label><input type="checkbox" data-player-testing="canDie" checked><span><strong>Player can die</strong><small>Clear to stop damage from reducing health below 1.</small></span></label>
         <label><input type="checkbox" data-player-testing="consumesAmmo" checked><span><strong>Player consumes ammo</strong><small>Clear for unlimited firearm, bow, and spear-gun ammunition.</small></span></label>
         <label><input type="checkbox" data-player-testing="consumesCraftingMaterials" checked><span><strong>Player consumes materials when crafting</strong><small>Clear to keep ingredients after each attempt.</small></span></label>
@@ -481,6 +482,6 @@
   <script src="casino.js?v=2"></script>
   <script src="inventory-sections.js?v=2"></script>
   <script src="gardens.js?v=3"></script>
-  <script src="app.js?v=187"></script>
+  <script src="app.js?v=189"></script>
 </body>
 </html>

@@ -315,7 +315,8 @@ public sealed record PlayerTestingSettings(
     bool DoesNormalDamage = true,
     bool GetsNormalMovementSpeed = true,
     bool ConsumesVehicleFuel = true,
-    bool ObeysBackpackWeightLimit = true);
+    bool ObeysBackpackWeightLimit = true,
+    bool CantTeleport = false);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
     WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null, bool FleeInFear = false);
 

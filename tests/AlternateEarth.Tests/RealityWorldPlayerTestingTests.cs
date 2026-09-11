@@ -6,6 +6,26 @@ namespace AlternateEarth.Tests;
 
 public sealed partial class RealityWorldTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TeleportRestrictionBlocksDirectAndHomeTravelEvenInGodMode(bool godMode)
+    {
+        var (world, _, _) = await CreateCraftingTestWorld();
+        await world.ExitDungeonAsync("crafter");
+        await world.SetGodModeAsync("crafter", godMode);
+        var home = world.GetPrivateState("crafter").Base!;
+        var before = world.CreateSnapshot().Players.Single(player => player.Id == "crafter");
+        await world.UpdatePlayerTestingAsync("crafter", new PlayerTestingSettings(CantTeleport: true));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => world.TeleportAsync("crafter", new(20, 20, true)));
+        Assert.Contains("can't teleport", error.Message);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.MapFastTravelAsync("crafter", new("home", home.BuildingId)));
+        Assert.Equal(before.Position, world.CreateSnapshot().Players.Single(player => player.Id == "crafter").Position);
+        await world.UpdatePlayerTestingAsync("crafter", new PlayerTestingSettings(CantTeleport: false));
+        await world.TeleportAsync("crafter", new(20, 20, false));
+        await world.MapFastTravelAsync("crafter", new("home", home.BuildingId));
+    }
+
     [Fact]
     public async Task CombatTestingRulesProvideUnlimitedAmmoMassiveDamageAndDeathProtection()
     {
@@ -38,6 +58,7 @@ public sealed partial class RealityWorldTests
         var (world, store, building) = await CreateCraftingTestWorld();
         await world.SetGodModeAsync("crafter", false);
         var defaults = world.GetPrivateState("crafter").PlayerTesting!;
+        Assert.False(defaults.CantTeleport);
         Assert.True(defaults.CanDie);
         Assert.True(defaults.ConsumesAmmo);
         Assert.True(defaults.ConsumesCraftingMaterials);
@@ -52,6 +73,7 @@ public sealed partial class RealityWorldTests
 
         var testing = defaults with
         {
+            CantTeleport = true,
             CanDie = false,
             ConsumesAmmo = false,
             ConsumesCraftingMaterials = false,

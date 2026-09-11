@@ -709,6 +709,7 @@ public sealed partial class RealityWorld
     private async Task<(PlayerState Player, bool Expanded)> TeleportToOutdoorPositionAsync(string characterId, PlayerState player,
         double x, double y, bool normalizeTravelMode, CancellationToken cancellationToken)
     {
+        if (TestingSettings(characterId).CantTeleport) throw new InvalidOperationException("Player can't teleport is enabled in Player Testing.");
         EnsureNotProbulatorAbducted(characterId);
         if (IsGasAsleep(characterId)) throw new InvalidOperationException("You are asleep until the gas effect wears off.");
         var expanded = await EnsureAreaLoadedAsync(x, y, cancellationToken);

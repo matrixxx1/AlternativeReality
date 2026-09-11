@@ -111,9 +111,9 @@ test('World and Player Testing replace the God Mode switch in server configurati
  const player=html.slice(html.indexOf('data-server-config-page="player"'),html.indexOf('data-server-config-page="vehicles"'));
  const actions=html.slice(html.indexOf('<section id="actionMenu"'),html.indexOf('<section id="serverConfigWindow"'));
  assert.doesNotMatch(stats,/id="godMode"|id="serverConfigButton"/);
- assert.doesNotMatch(html,/id="godMode"|God Mode: Off|God Mode: On/);assert.match(world,/data-test-character="npc"/);assert.match(world,/id="clearTestCharactersButton"/);assert.match(world,/id="teleportButton"/);
- for(const key of ['canDie','consumesAmmo','consumesCraftingMaterials','consumesAirWhenSwimming','consumesStaminaWhenMoving','mustMeetCraftingMaterialRequirements','canFailWhenCrafting','doesNormalDamage','getsNormalMovementSpeed','consumesVehicleFuel','obeysBackpackWeightLimit'])assert.match(player,new RegExp(`data-player-testing="${key}"`));
- assert.doesNotMatch(actions,/data-test-character|id="teleportButton"|id="clearTestCharactersButton"/);
+ assert.doesNotMatch(html,/id="godMode"|God Mode: Off|God Mode: On/);assert.match(world,/data-test-character="npc"/);assert.match(world,/id="clearTestCharactersButton"/);assert.match(actions,/id="teleportButton"/);
+ for(const key of ['cantTeleport','canDie','consumesAmmo','consumesCraftingMaterials','consumesAirWhenSwimming','consumesStaminaWhenMoving','mustMeetCraftingMaterialRequirements','canFailWhenCrafting','doesNormalDamage','getsNormalMovementSpeed','consumesVehicleFuel','obeysBackpackWeightLimit'])assert.match(player,new RegExp(`data-player-testing="${key}"`));
+ assert.doesNotMatch(actions,/data-test-character|id="clearTestCharactersButton"/);
  assert.ok(html.indexOf('id="openProgression"')<html.indexOf('id="serverConfigButton"'));assert.ok(html.indexOf('id="serverConfigButton"')<html.indexOf('id="openInventoryButton"'));
 });
 
@@ -134,11 +134,13 @@ test('server configuration gear matches the surrounding stats buttons',()=>{
  assert.match(css,/#serverConfigButton \{ width:38px;height:38px;padding:6px/);
 });
 
-test('Player Testing checkboxes send the complete server-persisted rule set',()=>{
+test('Player Testing saves and renders server-confirmed rules after moving into a popup document',()=>{
  const inputs=[{dataset:{playerTesting:'canDie'},checked:true},{dataset:{playerTesting:'consumesAmmo'},checked:false}],status={},sent=[];
- const c=require('node:vm').createContext({ui:{serverConfigWindow:{querySelectorAll:()=>inputs}},$ :()=>status,send:m=>sent.push(m),Object});
- require('node:vm').runInContext(implementation('savePlayerTesting'),c);
+ const c=require('node:vm').createContext({ui:{serverConfigWindow:{querySelectorAll:()=>inputs,querySelector:selector=>selector==='#playerTestingStatus'?status:null}},$ :()=>null,send:m=>sent.push(m),Object});
+ require('node:vm').runInContext(implementation('savePlayerTesting')+implementation('renderPlayerTesting'),c);
  c.savePlayerTesting();assert.deepEqual(JSON.parse(JSON.stringify(sent[0])),{type:'updatePlayerTesting',settings:{canDie:true,consumesAmmo:false}});assert.match(status.textContent,/Saving/);
+ c.renderPlayerTesting(sent[0].settings);assert.equal(inputs[0].checked,true);assert.equal(inputs[1].checked,false);assert.match(status.textContent,/1 testing bypass is active/);
+ c.renderPlayerTesting({canDie:true,consumesAmmo:true});assert.ok(inputs.every(input=>input.checked));assert.equal(status.textContent,'Normal gameplay is active.');
 });
 test('Effects combines active meal bonuses with other effects and removes expired meals',()=>{
  const vm=require('node:vm'),nodes=new Map(),node=()=>({style:{}}),get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};let now=1000;
