@@ -195,6 +195,13 @@ kbd { color: #fff1a8; font: 700 10px monospace; }
 .chat-meta { display: flex; justify-content: space-between; gap: 8px; color: #e5c66d; font-size: 10px; }
 .chat-text { margin-top: 3px; color: #f4eed5; font-size: 12px; text-shadow: none; }
 .empty-chat { color: #aeb9ab; font-size: 12px; }
+.npc-dialogue-window { width:min(520px,calc(100vw - 20px)); }
+.npc-dialogue-messages { min-height:140px; max-height:min(380px,55vh); overflow:auto; display:flex; flex-direction:column; gap:8px; padding:10px 2px; }
+.npc-dialogue-bubble { max-width:82%; padding:9px 12px; border-radius:15px; color:#fff8dc; background:#27382f; border:1px solid rgba(235,212,137,.3); overflow-wrap:anywhere; }
+.npc-dialogue-bubble.player { align-self:flex-end; background:#6f5427; border-bottom-right-radius:4px; }
+.npc-dialogue-bubble.npc { align-self:flex-start; border-bottom-left-radius:4px; }
+.npc-dialogue-bubble.system { align-self:center; max-width:94%; color:#c5cabe; background:rgba(10,20,15,.55); font-size:11px; }
+.npc-dialogue-status { min-height:18px; color:#d7c37e; font-size:11px; }
 #toast { position: fixed; left: 50%; bottom: 145px; z-index: 5; transform: translate(-50%, 20px); color: #fff6d1; background: rgba(49,31,22,.96); border: 2px solid #d8a44a; border-radius: 4px; padding: 10px 16px; opacity: 0; pointer-events: none; transition: .18s; box-shadow: 3px 4px 0 rgba(0,0,0,.35); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 @media (max-width: 760px) {

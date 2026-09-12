@@ -121,6 +121,7 @@ public sealed partial class RealityWorld
         await _store.InitializeCasinoAsync(cancellationToken);
         RestoreBuriedChests();
         ApplyGeneratedWorld(await _generator.GenerateAsync(Configuration, cancellationToken));
+        await RestoreHomeAiNpcStateAsync(cancellationToken);
         RestoreGardens();
         _loadedAreas["0:0"] = Configuration.Area.Bounds;
         await AdvanceTransitAsync(TimeSpan.Zero, cancellationToken);
@@ -334,6 +335,7 @@ public sealed partial class RealityWorld
             var homeId = $"home:{accountId}:{baseBuilding}";
             var home = _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, baseEntity));
             SetBaseReturnPosition(playerId, baseBuilding);
+            await EnsureHomeAiNpcsAsync(cancellationToken);
             return home;
         }
         finally { _basePurchaseLock.Release(); }
@@ -967,7 +969,7 @@ public sealed partial class RealityWorld
                         _actors[actor.Id] = actor; changed.Add(actor);
                     }
                     if (!_actorRouteRetry.ContainsKey(actor.Id))
-                        _routePlanner.TrySchedule(actor, Navigation, _actorRandom.Next(), Timings);
+                        _routePlanner.TrySchedule(actor, Navigation, _actorRandom.Next(), Timings, HomeAiNpcAnchor(actor.HomeBuildingId), 18);
                     continue;
                 }
                 if (route.Count == 0) { _actors[actor.Id] = actor with { IsMoving = false }; continue; }

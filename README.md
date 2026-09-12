@@ -15,7 +15,7 @@ The playable vertical slice imports OpenStreetMap geography around downtown Vanc
 - **Persistence:** SQLite in WAL mode. Only characters and reality deltas are saved; untouched geographic features regenerate from cache and seed.
 - **Geography:** OpenStreetMap/Overpass plus a rough SRTM90m elevation grid through OpenTopoData, converted once into a final canonical world-block cache behind provider interfaces.
 
-See [Architecture](docs/ARCHITECTURE.md), [Protocol](docs/PROTOCOL.md), and [database schema](docs/DATABASE.md) for the concrete design.
+See [Architecture](docs/ARCHITECTURE.md), [Protocol](docs/PROTOCOL.md), and [database schema](docs/DATABASE.md) for the concrete design. Windows testing and LocalAI configuration for AI NPC conversations are documented in [AI server notes](AIServerNotes.md).
 
 ## Run locally
 

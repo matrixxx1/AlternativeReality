@@ -46,6 +46,15 @@ builder.Services.AddHttpClient("weather", client =>
     client.Timeout = TimeSpan.FromSeconds(15);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("AlternateEarth/0.2 (+https://github.com/matrixxx1/AlternativeReality)");
 });
+var localAi = builder.Configuration.GetSection("LocalAI").Get<LocalAiSettings>() ?? new LocalAiSettings();
+builder.Services.AddSingleton(localAi);
+builder.Services.AddHttpClient("localai", client =>
+{
+    client.BaseAddress = new Uri(localAi.BaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(localAi.RequestTimeoutSeconds, 5, 180));
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("AlternativeReality/0.1 LocalAI-NPC-Client");
+});
+builder.Services.AddSingleton<LocalAiNpcDialogueService>();
 builder.Services.AddSingleton<IGeographicProvider>(services =>
 {
     var factory = services.GetRequiredService<IHttpClientFactory>();
@@ -119,7 +128,8 @@ app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
     players = state.PlayerCount,
     baseEntities = state.BaseEntityCount,
     realityEntities = state.RealityEntityCount,
-    geographicProvider = state.GeographicProvider
+    geographicProvider = state.GeographicProvider,
+    localAiNpcDialogue = localAi.Enabled ? "configured" : "disabled"
 }));
 app.MapGet("/api/diagnostics", async (HttpContext context, AccountService accounts, RealityWorld state) =>
 {

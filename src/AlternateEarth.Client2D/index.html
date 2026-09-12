@@ -216,6 +216,7 @@
     <button id="placeFlagButton" type="button" hidden>Place flag</button>
     <button id="tradeButton" type="button" hidden>Trade</button>
     <button id="questButton" type="button" hidden>Quest</button>
+    <button id="talkButton" type="button" hidden>Talk</button>
     <button id="capturePetButton" type="button" hidden>Capture pet</button>
     <button id="tauntButton" type="button" hidden>Taunt</button>
     <button id="stalkButton" type="button" hidden>Stalk</button>
@@ -417,6 +418,15 @@
     <form id="chatForm" class="chat-form">
       <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Say something…" aria-label="Chat message">
       <button type="submit">Say</button>
+    </form>
+  </section>
+  <section id="npcDialogueWindow" class="panel trade-window npc-dialogue-window" role="dialog" aria-labelledby="npcDialogueTitle" hidden>
+    <div class="window-header"><strong id="npcDialogueTitle">NPC conversation</strong><button id="npcDialogueClose" class="popup-close" type="button" aria-label="Close NPC conversation" title="Close">×</button></div>
+    <div id="npcDialogueMessages" class="npc-dialogue-messages" aria-live="polite"></div>
+    <div id="npcDialogueStatus" class="npc-dialogue-status">LocalAI dialogue</div>
+    <form id="npcDialogueForm" class="chat-form">
+      <input id="npcDialogueInput" type="text" maxlength="180" autocomplete="off" placeholder="Talk to this character…" aria-label="Message to NPC">
+      <button id="npcDialogueSend" type="submit">Send</button>
     </form>
   </section>
   <section id="performancePanel" class="panel performance-panel panel-popup" data-popup="Performance" data-collapsible="Performance" role="dialog" aria-labelledby="performanceTitle" hidden>

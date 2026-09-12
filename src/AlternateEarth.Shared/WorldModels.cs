@@ -157,7 +157,8 @@ public sealed record ActorState(
     ProbulatorAbductionState? Abduction = null,
     DateTimeOffset? AsleepUntilUtc = null,
     bool OffersFoodDelivery = false,
-    DateTimeOffset? FartUntilUtc = null, string? FartPose = null)
+    DateTimeOffset? FartUntilUtc = null, string? FartPose = null,
+    bool AiDialogueEnabled = false, string? AiDialogueId = null, string? HomeBuildingId = null)
 {
     public const int PortalSeconds = 6;
     public int EventPortalDurationSeconds => EventStartedAtUtc is null ? 0 : PortalSeconds;

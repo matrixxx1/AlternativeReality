@@ -14,7 +14,7 @@ public sealed class ActorRoutePlanner
     public int Capacity { get; } = Math.Clamp(Environment.ProcessorCount - 1, 1, 2);
     public int PendingCount => _pending.Count;
 
-    public bool TrySchedule(ActorState actor, WorldNavigation navigation, int seed, PerformanceTimings timings)
+    public bool TrySchedule(ActorState actor, WorldNavigation navigation, int seed, PerformanceTimings timings, WorldPosition? anchor = null, double anchorRadius = 30)
     {
         if (_pending.Count >= Capacity || _pending.ContainsKey(actor.Id)) return false;
         _pending.Add(actor.Id, Task.Run(() =>
@@ -27,10 +27,11 @@ public sealed class ActorRoutePlanner
                 for (var attempt = 0; attempt < 3; attempt++)
                 {
                     timeout.Token.ThrowIfCancellationRequested();
-                    var distance = 6 + random.NextDouble() * 24;
+                    var distance = 3 + random.NextDouble() * (anchor is null ? 27 : Math.Max(1, anchorRadius - 3));
                     var angle = random.NextDouble() * Math.PI * 2;
-                    var path = navigation.FindPath(actor.Position, actor.Position.X + Math.Cos(angle) * distance,
-                        actor.Position.Y + Math.Sin(angle) * distance, cancellationToken: timeout.Token);
+                    var center = anchor ?? actor.Position;
+                    var path = navigation.FindPath(actor.Position, center.X + Math.Cos(angle) * distance,
+                        center.Y + Math.Sin(angle) * distance, cancellationToken: timeout.Token);
                     if (path.Success) return new Result(actor, navigation, path.Waypoints);
                 }
             }

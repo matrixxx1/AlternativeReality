@@ -677,6 +677,7 @@ public sealed partial class RealityWorld
             var homeId = $"home:{accountId}:{buildingId}";
             _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
             foreach (var linkedPlayer in _playerAccounts.Where(pair => pair.Value == accountId).Select(pair => pair.Key)) SetBaseReturnPosition(linkedPlayer, buildingId);
+            await EnsureHomeAiNpcsAsync(cancellationToken);
             var updated = player with { WalletCents = player.GodMode ? player.WalletCents : player.WalletCents - price, Version = player.Version + 1 };
             await SavePlayerAsync(updated, cancellationToken);
             return (updated, price);
@@ -1211,6 +1212,7 @@ public sealed partial class RealityWorld
             player = player with { FlamethrowerGasGallons = Math.Max(0, player.FlamethrowerGasGallons - .2), Version = player.Version + 1 };
         }
         _lastPlayerAttack[(playerId, weapon)] = now;
+        if (actorTarget?.AiDialogueEnabled == true) EndAiNpcDialogue(playerId, actorTarget.Id);
         if (weapon == "spearGun") return await LaunchSpearAsync(player, request.TargetId, targetPosition, baseDamage, range, cancellationToken);
         if (playerTarget?.TravelMode == TravelMode.Ufo && !ranged) throw new InvalidOperationException("Melee attacks cannot reach an occupied UFO. Use a ranged weapon.");
         var configuredAccuracy = Math.Clamp(_itemConfigurations.GetValueOrDefault(weapon)?.Accuracy ?? 1, 0, 1);
@@ -1575,6 +1577,7 @@ public sealed partial class RealityWorld
             _dungeons[player.LocationId] = dungeon with { Actors = died ? dungeon.Actors.Where(a => a.Id != actor.Id).ToArray() : dungeon.Actors.Select(a => a.Id == actor.Id ? a with { HealthHearts = health, Version = a.Version + 1 } : a).ToArray() };
         }
         else return;
+        if (died) await RecordHomeAiNpcDeathAsync(actor, cancellationToken);
         if (died && !actor.IsTestCharacter)
         {
             var random = new Random(); var items = new List<ItemStack>();

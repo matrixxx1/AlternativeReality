@@ -148,6 +148,11 @@ public sealed partial class SqliteRealityStore
             CREATE TABLE IF NOT EXISTS PersistentWorldLoot (
                 Id TEXT PRIMARY KEY, RealityId TEXT NOT NULL, LootJson TEXT NOT NULL, CreatedUtc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS HomeAiNpcs (
+                RealityId TEXT NOT NULL, BuildingId TEXT NOT NULL, ActorId TEXT NOT NULL, ActorName TEXT NOT NULL,
+                Generation INTEGER NOT NULL DEFAULT 0, SpawnedUtc TEXT NOT NULL, VacantSinceUtc TEXT,
+                PRIMARY KEY (RealityId, BuildingId)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "HomeShopListings", "PhotographJson", "TEXT", cancellationToken);
@@ -426,7 +431,8 @@ public sealed partial class SqliteRealityStore
                      "DELETE FROM PlayerRelationships WHERE RealityId=$reality",
                      "DELETE FROM DungeonDiscovery WHERE RealityId=$reality",
                      "DELETE FROM OpenedChests WHERE RealityId=$reality",
-                     "DELETE FROM PersistentWorldLoot WHERE RealityId=$reality"
+                     "DELETE FROM PersistentWorldLoot WHERE RealityId=$reality",
+                     "DELETE FROM HomeAiNpcs WHERE RealityId=$reality"
                  })
         {
             var command = connection.CreateCommand();

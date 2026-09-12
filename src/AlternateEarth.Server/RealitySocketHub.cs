@@ -10,9 +10,10 @@ public sealed class RealitySocketHub
 {
     private readonly RealityWorld _world;
     private readonly AccountService _accounts;
+    private readonly LocalAiNpcDialogueService _localAi;
     private readonly ConcurrentDictionary<string, ClientConnection> _clients = new();
 
-    public RealitySocketHub(RealityWorld world, AccountService accounts) { _world = world; _accounts = accounts; }
+    public RealitySocketHub(RealityWorld world, AccountService accounts, LocalAiNpcDialogueService localAi) { _world = world; _accounts = accounts; _localAi = localAi; }
 
     public async Task AcceptAsync(HttpContext context)
     {
@@ -346,7 +347,14 @@ public sealed class RealitySocketHub
                         await connection.SendAsync(new { type = "basePurchased", player = basePurchase.Player, priceCents = basePurchase.PriceCents, privateState = _world.GetPrivateState(characterId) }, cancellationToken);
                         break;
                     case "conversationStatus":
-                        _world.UpdateConversation(characterId, root.GetProperty("actorId").GetString() ?? string.Empty, root.GetProperty("active").GetBoolean());
+                        var conversationActorId = root.GetProperty("actorId").GetString() ?? string.Empty;
+                        var conversationActive = root.GetProperty("active").GetBoolean();
+                        _world.UpdateConversation(characterId, conversationActorId, conversationActive);
+                        if (!conversationActive) _world.EndAiNpcDialogue(characterId, conversationActorId);
+                        break;
+                    case "npcDialogue":
+                        var npcDialogue = root.Deserialize<NpcDialogueRequest>(SharedJson.Options)!;
+                        _ = HandleNpcDialogueAsync(characterId, connection, npcDialogue, cancellationToken);
                         break;
                     case "requestTrade":
                         var tradeRequest = root.Deserialize<RequestTradeRequest>(SharedJson.Options)!;
@@ -683,6 +691,30 @@ public sealed class RealitySocketHub
             {
                 await connection.SendAsync(new { type = "error", commandSequence = root.TryGetProperty("commandSequence", out var commandSequence) && commandSequence.TryGetInt64(out var commandNumber) ? (long?)commandNumber : null, message = exception.Message }, cancellationToken);
             }
+        }
+    }
+
+    private async Task HandleNpcDialogueAsync(string characterId, ClientConnection connection, NpcDialogueRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var prepared = _world.BeginAiNpcDialogue(characterId, request);
+            await connection.SendAsync(new { type = "npcDialoguePending", actorId = prepared.ActorId, interactionId = prepared.InteractionId }, cancellationToken);
+            var proposed = prepared.ImmediateResult ?? await _localAi.CompleteAsync(prepared.Turn!, cancellationToken);
+            var applied = await _world.ApplyAiNpcDialogueAsync(characterId, prepared.ActorId, prepared.InteractionId, proposed, cancellationToken);
+            await connection.SendAsync(new
+            {
+                type = "npcDialogueResult", actorId = prepared.ActorId, interactionId = prepared.InteractionId,
+                dialogue = applied.Result.Dialogue, playerIntent = applied.Result.PlayerIntent, npcIntent = applied.Result.NpcIntent,
+                relationshipDelta = applied.Result.RelationshipDelta, endConversation = applied.Result.EndConversation,
+                reasonCode = applied.Result.ReasonCode, usedAi = applied.Result.UsedAi, relationship = applied.Relationship
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or WebSocketException)
+        {
+            try { await connection.SendAsync(new { type = "npcDialogueError", actorId = request.ActorId, interactionId = request.InteractionId, message = exception.Message }, cancellationToken); }
+            catch (Exception sendException) when (sendException is OperationCanceledException or WebSocketException) { }
         }
     }
 

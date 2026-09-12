@@ -31,6 +31,7 @@ public sealed class ActorSimulationService : BackgroundService
             await _hub.SendQuestNoticesAsync(_world.TakeQuestNotices(), stoppingToken);
             await _hub.BroadcastChatAsync(_world.TakeQuestDialogue(), stoppingToken);
             await _hub.BroadcastActorsAsync(_world.AdvanceDeliveryDogs(Tick), stoppingToken);
+            await _hub.BroadcastActorsAsync(await _world.AdvanceHomeAiNpcsAsync(stoppingToken), stoppingToken);
             await _hub.SendRelationshipsAsync(_world.TakeDeliveryDogRelationships(), stoppingToken);
             await _hub.BroadcastRemovedActorsAsync(_world.TakeDeliveryActorRemovals(), stoppingToken);
             await _hub.BroadcastGardensAsync(await _world.AdvanceFarmsAsync(stoppingToken),stoppingToken);
