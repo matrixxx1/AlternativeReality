@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -11,7 +10,7 @@ public sealed class LocalAiSettings
     public string BaseUrl { get; set; } = "http://mmac.local:80";
     public string ProjectGuid { get; set; } = "";
     public string ProjectName { get; set; } = "AlternativeReality";
-    public int RequestTimeoutSeconds { get; set; } = 60;
+    public int RequestTimeoutSeconds { get; set; } = 300;
 }
 
 public sealed record NpcDialogueModelResult(
@@ -22,7 +21,14 @@ public sealed record NpcDialogueModelResult(
     bool EndConversation,
     string ReasonCode,
     IReadOnlyList<string> MemoryFacts,
-    bool UsedAi = true);
+    bool UsedAi = true,
+    string? Farewell = null, AiNpcQuestRequest? QuestRequest = null);
+
+public sealed record AiNpcQuestRequest(
+    [property: JsonPropertyName("requested")] bool Requested,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("action")] string? Action,
+    [property: JsonPropertyName("subject")] string? Subject = null);
 
 public sealed record NpcDialogueTurn(
     string ChatExternalKey,
@@ -37,25 +43,33 @@ public sealed class LocalAiNpcDialogueService
 {
     public const string OfflineMessage = "Sorry, I can't talk now";
     private readonly IHttpClientFactory _clients;
-    private readonly LocalAiSettings _settings;
+    private readonly LocalAiConfiguration _configuration;
     private readonly ILogger<LocalAiNpcDialogueService> _logger;
-    private readonly SemaphoreSlim _projectLock = new(1, 1);
-    private string? _resolvedProjectGuid;
 
-    public LocalAiNpcDialogueService(IHttpClientFactory clients, LocalAiSettings settings, ILogger<LocalAiNpcDialogueService> logger)
+    public LocalAiNpcDialogueService(IHttpClientFactory clients, LocalAiConfiguration configuration, ILogger<LocalAiNpcDialogueService> logger)
     {
         _clients = clients;
-        _settings = settings;
+        _configuration = configuration;
         _logger = logger;
     }
 
-    public async Task<NpcDialogueModelResult> CompleteAsync(NpcDialogueTurn turn, CancellationToken cancellationToken)
+    public int RequestTimeoutSeconds => _configuration.Current.RequestTimeoutSeconds;
+
+    public async Task<NpcDialogueModelResult> CompleteAsync(NpcDialogueTurn turn, CancellationToken cancellationToken, LocalAiSettings? settingsOverride = null)
     {
-        if (!_settings.Enabled) return Offline();
+        var settings = settingsOverride ?? _configuration.Current;
+        var callerCancellation = cancellationToken;
+        string? requestGuid = null;
+        if (!settings.Enabled) return Offline();
         try
         {
-            var client = _clients.CreateClient("localai");
-            var projectGuid = await ResolveProjectGuidAsync(client, cancellationToken);
+            using var client = _clients.CreateClient("localai");
+            client.BaseAddress = new Uri(settings.BaseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(settings.RequestTimeoutSeconds);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(client.Timeout);
+            cancellationToken = timeout.Token;
+            var projectGuid = await ResolveProjectGuidAsync(client, settings, cancellationToken);
             if (projectGuid is null) return Offline();
             using var upsert = await client.PostAsJsonAsync($"api/v1/projects/{projectGuid}/chats/upsert", new
             {
@@ -80,6 +94,7 @@ public sealed class LocalAiNpcDialogueService
             if (!queuedResponse.IsSuccessStatusCode) return await FailedAsync("request queue", queuedResponse, cancellationToken);
             var request = await queuedResponse.Content.ReadFromJsonAsync<RequestResponse>(cancellationToken: cancellationToken);
             if (string.IsNullOrWhiteSpace(request?.Guid)) return Offline();
+            requestGuid = request.Guid;
 
             while (request.Status is "queued" or "running")
             {
@@ -87,51 +102,83 @@ public sealed class LocalAiNpcDialogueService
                 request = await client.GetFromJsonAsync<RequestResponse>($"api/v1/requests/{request.Guid}", cancellationToken);
                 if (request is null) return Offline();
             }
-            if (request.Status != "complete" || request.NpcResult is null) return Offline();
+            if (request.Status != "complete" || request.NpcResult is null)
+            {
+                _logger.LogWarning("LocalAI request {RequestGuid} ended with status {Status} or no NPC result.", requestGuid, request.Status);
+                return Offline("localai_failed");
+            }
             var result = request.NpcResult;
             if (string.IsNullOrWhiteSpace(result.Dialogue)) return Offline();
             return new NpcDialogueModelResult(
                 result.Dialogue.Trim()[..Math.Min(500, result.Dialogue.Trim().Length)],
                 result.PlayerIntent ?? "unknown", result.NpcIntent ?? "unknown",
                 Math.Clamp(result.RelationshipDelta, -.05, .05), result.EndConversation,
-                result.ReasonCode ?? "unknown", result.MemoryFacts?.Take(4).ToArray() ?? []);
+                result.ReasonCode ?? "unknown", result.MemoryFacts?.Take(4).ToArray() ?? [], QuestRequest: result.QuestRequest);
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (OperationCanceledException) when (!callerCancellation.IsCancellationRequested)
         {
-            if (!cancellationToken.IsCancellationRequested)
+            _logger.LogWarning("LocalAI request {RequestGuid} at {BaseUrl} timed out after {TimeoutSeconds} seconds.", requestGuid, settings.BaseUrl, settings.RequestTimeoutSeconds);
+            return Offline("localai_timeout");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException)
+        {
+            if (!callerCancellation.IsCancellationRequested)
                 _logger.LogWarning(exception, "LocalAI NPC dialogue was unavailable.");
             return Offline();
         }
     }
 
-    private async Task<string?> ResolveProjectGuidAsync(HttpClient client, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ImportedNpcMessage>> ReadHistoryAsync(string externalKey, CancellationToken token)
     {
-        if (Guid.TryParse(_settings.ProjectGuid, out var configured)) return configured.ToString();
-        if (_resolvedProjectGuid is not null) return _resolvedProjectGuid;
-        await _projectLock.WaitAsync(cancellationToken);
-        try
+        var settings = _configuration.Current;
+        if (!settings.Enabled) return [];
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        using var client = _clients.CreateClient("LocalAI");
+        client.BaseAddress = new Uri(settings.BaseUrl.TrimEnd('/') + "/");
+        var project = await ResolveProjectGuidAsync(client, settings, deadline.Token);
+        if (project is null) return [];
+        using var chats = await client.GetFromJsonAsync<JsonDocument>($"api/v1/projects/{project}/chats", deadline.Token);
+        if (chats is null || !chats.RootElement.TryGetProperty("chats", out var list)) return [];
+        var chat = list.EnumerateArray().FirstOrDefault(c => c.TryGetProperty("external_key", out var key) && key.GetString() == externalKey);
+        if (chat.ValueKind == JsonValueKind.Undefined) return [];
+        var id = chat.GetProperty("guid").GetString();
+        using var document = await client.GetFromJsonAsync<JsonDocument>($"api/v1/chats/{Uri.EscapeDataString(id!)}/messages", deadline.Token);
+        if (document is null || !document.RootElement.TryGetProperty("messages", out var messages)) return [];
+        var imported = new List<ImportedNpcMessage>();
+        foreach (var message in messages.EnumerateArray())
         {
-            if (_resolvedProjectGuid is not null) return _resolvedProjectGuid;
-            var response = await client.GetFromJsonAsync<ProjectsResponse>("api/v1/projects", cancellationToken);
-            _resolvedProjectGuid = response?.Projects.FirstOrDefault(project =>
-                project.Type == "npc_chats" && project.Name.Equals(_settings.ProjectName, StringComparison.OrdinalIgnoreCase))?.Guid;
-            if (_resolvedProjectGuid is null)
-                _logger.LogWarning("LocalAI has no NPC Chats project named {ProjectName}. Create it or set LocalAI:ProjectGuid.", _settings.ProjectName);
-            return _resolvedProjectGuid;
+            var role = message.GetProperty("role").GetString();
+            if (role is not ("user" or "assistant")) continue;
+            var text = message.TryGetProperty("npc_result", out var result) && result.ValueKind == JsonValueKind.Object && result.TryGetProperty("dialogue", out var dialogue)
+                ? dialogue.GetString() : message.GetProperty("content").GetString();
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            imported.Add(new(message.GetProperty("guid").GetString()!, role == "user" ? "player" : "npc", text,
+                message.GetProperty("created_at").GetString()!));
         }
-        finally { _projectLock.Release(); }
+        return imported.OrderBy(m => m.SaidAtUtc, StringComparer.Ordinal).ToArray();
+    }
+
+    private async Task<string?> ResolveProjectGuidAsync(HttpClient client, LocalAiSettings settings, CancellationToken cancellationToken)
+    {
+        if (Guid.TryParse(settings.ProjectGuid, out var configured)) return configured.ToString();
+        var response = await client.GetFromJsonAsync<ProjectsResponse>("api/v1/projects", cancellationToken);
+        var projectGuid = response?.Projects.FirstOrDefault(project =>
+            project.Type == "npc_chats" && project.Name.Equals(settings.ProjectName, StringComparison.OrdinalIgnoreCase))?.Guid;
+        if (projectGuid is null)
+            _logger.LogWarning("LocalAI has no NPC Chats project named {ProjectName}. Create it or set LocalAI:ProjectGuid.", settings.ProjectName);
+        return projectGuid;
     }
 
     private async Task<NpcDialogueModelResult> FailedAsync(string operation, HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         _logger.LogWarning("LocalAI NPC {Operation} failed with {StatusCode}: {Body}", operation, (int)response.StatusCode, body[..Math.Min(300, body.Length)]);
-        if (response.StatusCode == HttpStatusCode.NotFound) _resolvedProjectGuid = null;
         return Offline();
     }
 
-    private static NpcDialogueModelResult Offline() =>
-        new(OfflineMessage, "unknown", "refuse", 0, true, "localai_unavailable", [], false);
+    private static NpcDialogueModelResult Offline(string reason = "localai_unavailable") =>
+        new(OfflineMessage, "unknown", "refuse", 0, true, reason, [], false);
 
     private sealed record ProjectsResponse([property: JsonPropertyName("projects")] ProjectResponse[] Projects);
     private sealed record ProjectResponse(
@@ -150,5 +197,8 @@ public sealed class LocalAiNpcDialogueService
         [property: JsonPropertyName("relationship_delta")] double RelationshipDelta,
         [property: JsonPropertyName("end_conversation")] bool EndConversation,
         [property: JsonPropertyName("reason_code")] string? ReasonCode,
-        [property: JsonPropertyName("memory_facts")] string[]? MemoryFacts);
+        [property: JsonPropertyName("memory_facts")] string[]? MemoryFacts,
+        [property: JsonPropertyName("quest_request")] AiNpcQuestRequest? QuestRequest = null);
 }
+
+public sealed record ImportedNpcMessage(string Id, string Role, string Text, string SaidAtUtc);

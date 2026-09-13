@@ -8,6 +8,40 @@ public sealed partial class RealityWorld
     public const double AiNpcRefusalRating = -5;
     private readonly ConcurrentDictionary<(string Player, string Actor), string> _aiDialogueSessions = new();
 
+    public void OpenAiNpcDialogue(string playerId, string actorId)
+    {
+        var actor = FindActor(playerId, actorId);
+        if (!_players.TryGetValue(playerId, out var player) || actor is null || actor.HealthHearts <= 0 || !actor.AiDialogueEnabled ||
+            actor.LocationId != player.LocationId || actor.Position.Distance2D(player.Position) > 6)
+            throw new InvalidOperationException("Move closer to an AI character to talk.");
+        BeginConversation(playerId, actorId);
+    }
+
+    public Task<NpcDialogueHistoryPage> LoadAiNpcHistoryAsync(string playerId, string actorId, long? before = null, CancellationToken token = default)
+    {
+        var actor = FindActor(playerId, actorId);
+        if (!_players.TryGetValue(playerId, out var player) || actor is null || !actor.AiDialogueEnabled || actor.HealthHearts <= 0 ||
+            actor.LocationId != player.LocationId || actor.Position.Distance2D(player.Position) > 6)
+            throw new InvalidOperationException("Move closer to that AI character to read your conversation.");
+        return _store.LoadNpcDialogueHistoryAsync(Configuration.Id, playerId, actor.AiDialogueId ?? actor.Id, before, token);
+    }
+
+    public async Task ImportAiNpcHistoryAsync(string playerId, string actorId, LocalAiNpcDialogueService service, CancellationToken token)
+    {
+        var actor = FindActor(playerId, actorId) ?? throw new InvalidOperationException("That character is no longer here.");
+        var npcId = actor.AiDialogueId ?? actor.Id;
+        if ((await _store.LoadNpcDialogueHistoryAsync(Configuration.Id, playerId, npcId, token: token)).Messages.Count > 0) return;
+        var messages = await service.ReadHistoryAsync($"{Configuration.Id}:npc:{npcId}:player:{playerId}", token);
+        foreach (var message in messages)
+            await _store.SaveNpcDialogueMessageAsync(Configuration.Id, playerId, npcId, "import:" + message.Id, message.Role, message.Text, token, message.SaidAtUtc);
+    }
+
+    public Task SaveAiNpcPlayerMessageAsync(string playerId, string actorId, string interactionId, string message, CancellationToken token = default)
+    {
+        var actor = FindActor(playerId, actorId) ?? throw new InvalidOperationException("That character is no longer here.");
+        return _store.SaveNpcDialogueMessageAsync(Configuration.Id, playerId, actor.AiDialogueId ?? actor.Id, interactionId, "player", message.Trim(), token);
+    }
+
     public AiNpcDialoguePreparation BeginAiNpcDialogue(string playerId, NpcDialogueRequest request)
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
@@ -57,16 +91,28 @@ public sealed partial class RealityWorld
             throw new InvalidOperationException("That character is no longer available to talk.");
         }
 
+        if (!((ICollection<KeyValuePair<(string Player, string Actor), string>>)_aiDialogueSessions).Remove(new(key, interactionId)))
+            throw new InvalidOperationException("That NPC dialogue turn was already applied.");
+        (string Dialogue, QuestInteraction? Offer) questReply;
+        await _deliveryLock.WaitAsync(cancellationToken);
+        try { questReply = CreateAiQuest(playerId, actor, interactionId, proposed); }
+        finally { _deliveryLock.Release(); }
         var delta = proposed.UsedAi ? Math.Clamp(proposed.RelationshipDelta, -.05, .05) : 0;
         var effective = Math.Clamp(Relationship(playerId, actorId) + delta, -10, 10);
         var raw = effective - FirstImpressionAdjustment(playerId, actorId);
         _relationships[(playerId, actorId)] = raw;
         await _store.SaveRelationshipAsync(Configuration.Id, new RelationshipState(playerId, actorId, raw), cancellationToken);
         var end = proposed.EndConversation || effective <= AiNpcRefusalRating || !proposed.UsedAi;
-        var dialogue = effective <= AiNpcRefusalRating && proposed.UsedAi ? "Buzz off." : proposed.Dialogue.Trim();
+        var farewell = end && (proposed.UsedAi || proposed.ReasonCode == "relationship_refusal")
+            ? NpcDialogueFarewells.Choose(effective) : null;
+        var dialogue = questReply.Dialogue.Trim();
+        // Refusal has no model response: use the farewell as its sole spoken line.
+        if (proposed.ReasonCode == "relationship_refusal") { dialogue = farewell!; farewell = null; }
+        await _store.SaveNpcDialogueMessageAsync(Configuration.Id, playerId, actor.AiDialogueId ?? actor.Id, interactionId, "npc", dialogue, cancellationToken);
+        if (farewell is not null) await _store.SaveNpcDialogueMessageAsync(Configuration.Id, playerId, actor.AiDialogueId ?? actor.Id, interactionId, "farewell", farewell, cancellationToken);
         if (end) EndAiNpcDialogue(playerId, actorId); else BeginConversation(playerId, actorId);
-        return new(new NpcDialogueModelResult(dialogue, proposed.PlayerIntent, proposed.NpcIntent, delta, end, proposed.ReasonCode, proposed.MemoryFacts, proposed.UsedAi),
-            new RelationshipState(playerId, actorId, Relationship(playerId, actorId)));
+        return new(new NpcDialogueModelResult(dialogue, proposed.PlayerIntent, proposed.NpcIntent, delta, end, proposed.ReasonCode, proposed.MemoryFacts, proposed.UsedAi, farewell),
+            new RelationshipState(playerId, actorId, Relationship(playerId, actorId)), questReply.Offer);
     }
 
     public void EndAiNpcDialogue(string playerId, string actorId)
@@ -96,7 +142,13 @@ public sealed partial class RealityWorld
             : Array.Empty<object>();
         return new
         {
-            schema_version = 1,
+            schema_version = 2,
+            quest_contract = new {
+                version = 1, single_response = true, supported_actions = AiQuestActions,
+                instructions = "Detect requests for quests or jobs. Include npc_result.quest_request: {requested:true,title:short title,action:one supported action,subject:optional hint}. Otherwise omit it or set requested:false. The game chooses targets, items, locations, rewards, and a 10 minute deadline from acceptance. Never invent their values. Use only the listed placeholders in dialogue. Unsupported or unavailable requests may be declined by the game.",
+                placeholders = new[] { "{quest_title}", "{target_name}", "{item_name}", "{quantity}", "{location}", "{reward}", "{time_limit}", "{objective}", "{giver_name}" },
+                active_quests = (privateState.Quests ?? []).Where(q => q.Status is "active" or "ready").Select(q => new { q.Title, q.Description, q.Status, q.DeadlineUtc }).ToArray()
+            },
             game = new { id = "AlternativeReality", reality_id = Configuration.Id, reality_name = Configuration.Name },
             world = new
             {
@@ -128,4 +180,4 @@ public sealed partial class RealityWorld
 }
 
 public sealed record AiNpcDialoguePreparation(string ActorId, string InteractionId, NpcDialogueTurn? Turn, NpcDialogueModelResult? ImmediateResult);
-public sealed record AiNpcDialogueApplied(NpcDialogueModelResult Result, RelationshipState Relationship);
+public sealed record AiNpcDialogueApplied(NpcDialogueModelResult Result, RelationshipState Relationship, QuestInteraction? QuestInteraction = null);

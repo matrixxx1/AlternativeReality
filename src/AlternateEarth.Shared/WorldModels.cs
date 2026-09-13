@@ -177,7 +177,7 @@ public sealed record ItemStack(
     bool CarriedInBackpack = true,
     string? Quality = null,
     PhotographState? Photograph = null);
-public sealed record PhotographState(string Evidence, string Subject, string Kind, string Subtype, string LocationId, DateTimeOffset TakenAtUtc, string? ThumbnailUrl = null);
+public sealed record PhotographState(string Evidence, string Subject, string Kind, string Subtype, string LocationId, DateTimeOffset TakenAtUtc, string? ThumbnailUrl = null, string? TakenByPlayerId = null);
 public sealed record InventoryState(
     string PlayerId,
     IReadOnlyList<ItemStack> Items,
@@ -254,7 +254,9 @@ public sealed record QuestState(
     int? DeliveryMinutes = null, DateTimeOffset? DeadlineUtc = null, DateTimeOffset? FailedAtUtc = null,
     ActorState? DeliveryRecipient = null, bool FoodDamaged = false, string? FoodDamageReason = null, bool DeliveryRefused = false,
     IReadOnlyList<ItemStack>? RewardItems = null, WorldPosition? NextStagePosition = null, string? NextStageName = null,
-    string? NextStageLocationId = null, IReadOnlyList<string>? ObjectiveActorIds = null);
+    string? NextStageLocationId = null, IReadOnlyList<string>? ObjectiveActorIds = null, AiQuestDetails? AiQuest = null);
+
+public sealed record AiQuestDetails(string Action, DateTimeOffset OfferedAtUtc, WorldPosition Position, DateTimeOffset? AcceptedAtUtc = null);
 public sealed record QuestInteraction(QuestState Quest, bool IsOffer, bool CanComplete, string InteractionActorId);
 public sealed record RelationshipState(string PlayerId, string ActorId, double FriendRating);
 public sealed record DungeonRoom(double X, double Y, double Width, double Height);
@@ -317,7 +319,8 @@ public sealed record PlayerTestingSettings(
     bool GetsNormalMovementSpeed = true,
     bool ConsumesVehicleFuel = true,
     bool ObeysBackpackWeightLimit = true,
-    bool CantTeleport = false);
+    bool CantTeleport = false,
+    bool CantSpendMoreThanTheyHave = true);
 public sealed record CombatEvent(string AttackerId, string TargetId, string Weapon, WorldPosition Start, WorldPosition End, bool Hit, double Damage, bool TargetDied, string Message, double? TargetHealth = null,
     WorldPosition? RelocatedTo = null, string? StatusEffect = null, DateTimeOffset? StatusEffectUntilUtc = null, string? Dialogue = null, bool FleeInFear = false);
 

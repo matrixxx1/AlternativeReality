@@ -47,11 +47,10 @@ builder.Services.AddHttpClient("weather", client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("AlternateEarth/0.2 (+https://github.com/matrixxx1/AlternativeReality)");
 });
 var localAi = builder.Configuration.GetSection("LocalAI").Get<LocalAiSettings>() ?? new LocalAiSettings();
-builder.Services.AddSingleton(localAi);
+var localAiConfiguration = new LocalAiConfiguration(Path.Combine(dataDirectory, "local-ai.json"), localAi);
+builder.Services.AddSingleton(localAiConfiguration);
 builder.Services.AddHttpClient("localai", client =>
 {
-    client.BaseAddress = new Uri(localAi.BaseUrl.TrimEnd('/') + "/");
-    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(localAi.RequestTimeoutSeconds, 5, 180));
     client.DefaultRequestHeaders.UserAgent.ParseAdd("AlternativeReality/0.1 LocalAI-NPC-Client");
 });
 builder.Services.AddSingleton<LocalAiNpcDialogueService>();
@@ -129,8 +128,46 @@ app.MapGet("/api/status", (RealityWorld state) => Results.Ok(new
     baseEntities = state.BaseEntityCount,
     realityEntities = state.RealityEntityCount,
     geographicProvider = state.GeographicProvider,
-    localAiNpcDialogue = localAi.Enabled ? "configured" : "disabled"
+    localAiNpcDialogue = localAiConfiguration.Current.Enabled ? "configured" : "disabled"
 }));
+app.MapGet("/api/local-ai/config", async (HttpContext context, AccountService accounts, RealityWorld state) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    if (!state.CanUseWorldTesting(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    return Results.Ok(localAiConfiguration.Current);
+});
+app.MapPut("/api/local-ai/config", async (LocalAiSettings settings, HttpContext context, AccountService accounts, RealityWorld state) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    if (!state.CanUseWorldTesting(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    try { localAiConfiguration.Save(settings); return Results.Ok(localAiConfiguration.Current); }
+    catch (ArgumentException exception) { return Results.BadRequest(new { message = exception.Message }); }
+});
+app.MapPost("/api/local-ai/test", async (LocalAiSettings settings, HttpContext context, AccountService accounts, RealityWorld state, LocalAiNpcDialogueService dialogue) =>
+{
+    var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);
+    if (login is null) return Results.Unauthorized();
+    if (!state.CanUseWorldTesting(login.CharacterId)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    try
+    {
+        LocalAiConfiguration.Validate(settings);
+        // A diagnostic chat exercises the same queue and model as gameplay, without touching an NPC/player history.
+        settings.Enabled = true;
+        var turn = new NpcDialogueTurn("AlternativeReality:connection-test", "AlternativeReality connection test",
+            "You are a friendly NPC running a connection test. Give a brief greeting.",
+            new Dictionary<string, object?> { ["diagnostic"] = true }, "Hello! Please give a short greeting.", Guid.NewGuid().ToString(),
+            new { schema_version = 1, game = new { id = "AlternativeReality" }, npc = new { name = "Connection Test", relationship = 0 }, player = new { name = "Tester" } });
+        var result = await dialogue.CompleteAsync(turn, context.RequestAborted, settings);
+        return result.UsedAi
+            ? Results.Ok(new { message = $"AI reply received: {result.Dialogue}" })
+            : Results.BadRequest(new { message = result.ReasonCode == "localai_timeout"
+                ? $"AI did not finish within {settings.RequestTimeoutSeconds} seconds. Increase the timeout or check the model server."
+                : "AI reply failed. Check the server address, NPC Chats project, and model server logs." });
+    }
+    catch (ArgumentException exception) { return Results.BadRequest(new { message = exception.Message }); }
+});
 app.MapGet("/api/diagnostics", async (HttpContext context, AccountService accounts, RealityWorld state) =>
 {
     var login = await accounts.AuthenticateAsync(context.Request.Cookies[AccountService.CookieName], context.RequestAborted);

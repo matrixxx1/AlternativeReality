@@ -662,7 +662,7 @@ public sealed partial class RealityWorld
         if (StoreProfileForBuilding(building) is not null) throw new InvalidOperationException("Stores are commercial properties and cannot be purchased as a Home.");
         if (_baseBuildings.GetValueOrDefault(accountId) == buildingId) throw new InvalidOperationException("This building is already your base.");
         var price = CalculateBuildingPriceCents(building);
-        if (!player.GodMode && player.WalletCents < price) throw new InvalidOperationException($"This base costs ${price / 100m:N2}; you do not have enough money.");
+        if (PlayerPaysForPurchases(player) && player.WalletCents < price) throw new InvalidOperationException($"This base costs ${price / 100m:N2}; you do not have enough money.");
 
         await _basePurchaseLock.WaitAsync(cancellationToken);
         try
@@ -678,7 +678,7 @@ public sealed partial class RealityWorld
             _dungeons.GetOrAdd(homeId, _ => GenerateHome(homeId, building));
             foreach (var linkedPlayer in _playerAccounts.Where(pair => pair.Value == accountId).Select(pair => pair.Key)) SetBaseReturnPosition(linkedPlayer, buildingId);
             await EnsureHomeAiNpcsAsync(cancellationToken);
-            var updated = player with { WalletCents = player.GodMode ? player.WalletCents : player.WalletCents - price, Version = player.Version + 1 };
+            var updated = player with { WalletCents = PlayerPaysForPurchases(player) ? player.WalletCents - price : player.WalletCents, Version = player.Version + 1 };
             await SavePlayerAsync(updated, cancellationToken);
             return (updated, price);
         }
@@ -983,7 +983,7 @@ public sealed partial class RealityWorld
         if (requested.Length > 0 && sales.Length > 0) throw new InvalidOperationException("Complete purchases and sales as separate transactions.");
         long total = 0; foreach (var line in requested) { var offer = quote.Offers.FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("Item not offered."); if (line.Quantity > offer.Quantity) throw new InvalidOperationException("Not enough stock."); checked { total += offer.UnitPriceCents * line.Quantity; } }
         long proceeds = 0; foreach (var line in sales) { if (line.ItemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Personal flags cannot be sold."); var offer = (quote.BuyOffers ?? Array.Empty<MerchantOffer>()).FirstOrDefault(o => o.ItemType.Equals(line.ItemType, StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException("The merchant will not buy that item."); if (line.Quantity > offer.Quantity || InventoryQuantity(playerId, line.ItemType) < line.Quantity) throw new InvalidOperationException("You do not have that many to sell."); checked { proceeds += offer.UnitPriceCents * line.Quantity; } }
-        if (!player.GodMode && total > player.WalletCents) throw new InvalidOperationException("You cannot spend more than you have.");
+        if (PlayerPaysForPurchases(player) && total > player.WalletCents) throw new InvalidOperationException("You cannot spend more than you have.");
         var backpackPurchases = requested.Where(line => !line.ItemType.Equals("areaMap", StringComparison.OrdinalIgnoreCase) && !FurnitureCatalog.TryParse(line.ItemType, out _, out _, out _))
             .Select(line => InventoryStack(line.ItemType, line.Quantity)).ToArray();
         if (!CanAddToBackpack(playerId, backpackPurchases, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
@@ -1016,7 +1016,7 @@ public sealed partial class RealityWorld
             }
             removedSales.Add(line);
         }
-        var wallet = player.GodMode ? Math.Max(50_000, player.WalletCents + proceeds) : player.WalletCents - total + proceeds;
+        var wallet = player.GodMode ? Math.Max(50_000, player.WalletCents + proceeds) : player.WalletCents - (PlayerPaysForPurchases(player) ? total : 0) + proceeds;
         var updated = NormalizeEquipmentAfterInventoryChange(player with { WalletCents = wallet, Version = player.Version + 1 });
         var friend = _relationships.GetValueOrDefault((playerId, request.MerchantId)) + .5; _relationships[(playerId, request.MerchantId)] = friend; await _store.SaveRelationshipAsync(Configuration.Id, new(playerId, request.MerchantId, friend), cancellationToken);
         foreach (var key in _tradeQuotes.Keys.Where(key => key.Player == playerId).ToArray()) _tradeQuotes.TryRemove(key, out _);
@@ -1107,6 +1107,7 @@ public sealed partial class RealityWorld
 
     private static string DisplayItem(string itemType) => itemType switch
     {
+        _ when itemType.StartsWith("quest:ai:", StringComparison.Ordinal) => "lost keepsake",
         _ when itemType.StartsWith("quest:food:", StringComparison.Ordinal) => "sealed food delivery order",
         "magicHikingShoes" => "magic hiking shoes",
         "magicRunningShoes" => "magic running shoes",

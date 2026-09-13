@@ -124,6 +124,7 @@ public sealed partial class RealityWorld
     {
         if (request.Quantity is < 1 or > 100_000) throw new InvalidOperationException("Choose a quantity between 1 and 100,000.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:ai:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Return this keepsake to its quest giver or abandon the quest; it cannot be transferred or dropped.");
         if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("That item cannot be transferred.");
         var access = ValidateHomeStorageAccess(playerId, request.ChestId);
@@ -208,6 +209,7 @@ public sealed partial class RealityWorld
         if (player.Position.Distance2D(box.Position) > 4) throw new InvalidOperationException("Move within 4 meters of the postal drop box.");
         if (!_playerAccounts.TryGetValue(playerId, out var accountId) || !_baseBuildings.ContainsKey(accountId)) throw new InvalidOperationException("You need a Home before mailing items to it.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:ai:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Return this keepsake to its quest giver or abandon the quest; it cannot be transferred or dropped.");
         if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase) || !InventoryDefinition(itemType).CarriedInBackpack)
             throw new InvalidOperationException("That item cannot be sent through a postal drop box.");
@@ -232,6 +234,7 @@ public sealed partial class RealityWorld
         if (!CanUseWorldTesting(playerId)) throw new InvalidOperationException("Join the server before adjusting testing inventory.");
         if (!_players.ContainsKey(playerId)) throw new InvalidOperationException("Unknown player.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:ai:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Return this keepsake to its quest giver or abandon the quest; it cannot be transferred or dropped.");
         if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (!_itemConfigurations.TryGetValue(itemType, out var definition)) throw new InvalidOperationException("Unknown inventory item.");
         if (!_playerAccounts.TryGetValue(playerId, out var accountId)) throw new InvalidOperationException("An account is required to use Home inventory.");
@@ -298,6 +301,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var currentPlayer)) throw new InvalidOperationException("Unknown player.");
         var itemType = (request.ItemType ?? string.Empty).Trim();
+        if (itemType.StartsWith("quest:ai:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Return this keepsake to its quest giver or abandon the quest; it cannot be transferred or dropped.");
         if (itemType.StartsWith("quest:food:", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Deliver, eat, or abandon this food order; it cannot be transferred or dropped.");
         if (itemType.Length == 0 || itemType.Equals("fist", StringComparison.OrdinalIgnoreCase) || itemType.Equals("personalFlag", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("That item cannot be dropped.");

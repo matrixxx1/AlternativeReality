@@ -148,6 +148,12 @@ public sealed partial class SqliteRealityStore
             CREATE TABLE IF NOT EXISTS PersistentWorldLoot (
                 Id TEXT PRIMARY KEY, RealityId TEXT NOT NULL, LootJson TEXT NOT NULL, CreatedUtc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS NpcDialogueMessages (
+                Sequence INTEGER PRIMARY KEY AUTOINCREMENT, RealityId TEXT NOT NULL, PlayerId TEXT NOT NULL,
+                NpcId TEXT NOT NULL, InteractionId TEXT NOT NULL, Role TEXT NOT NULL, Text TEXT NOT NULL, SaidAtUtc TEXT NOT NULL,
+                UNIQUE(RealityId,PlayerId,NpcId,InteractionId,Role)
+            );
+            CREATE INDEX IF NOT EXISTS IX_NpcDialoguePair ON NpcDialogueMessages(RealityId,PlayerId,NpcId,Sequence);
             CREATE TABLE IF NOT EXISTS HomeAiNpcs (
                 RealityId TEXT NOT NULL, BuildingId TEXT NOT NULL, ActorId TEXT NOT NULL, ActorName TEXT NOT NULL,
                 Generation INTEGER NOT NULL DEFAULT 0, SpawnedUtc TEXT NOT NULL, VacantSinceUtc TEXT,

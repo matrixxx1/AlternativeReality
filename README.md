@@ -17,6 +17,8 @@ The playable vertical slice imports OpenStreetMap geography around downtown Vanc
 
 See [Architecture](docs/ARCHITECTURE.md), [Protocol](docs/PROTOCOL.md), and [database schema](docs/DATABASE.md) for the concrete design. Windows testing and LocalAI configuration for AI NPC conversations are documented in [AI server notes](AIServerNotes.md).
 
+In **Server Config → Player Testing**, **Player can't spend more than they have** is checked by default. Clear it to buy from merchants and Home shops, purchase a base or Home upgrades, and pay for adventure choices without needing or deducting money. The setting is saved per character; check it again to restore normal purchase costs.
+
 ## Run locally
 
 Requires the .NET 8 SDK. The first run needs internet access to populate the geographic cache; subsequent runs use the cache.

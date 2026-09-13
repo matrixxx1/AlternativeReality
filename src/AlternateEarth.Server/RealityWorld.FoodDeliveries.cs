@@ -188,7 +188,7 @@ public sealed partial class RealityWorld
         await _deliveryLock.WaitAsync(token);
         try
         {
-            foreach (var quest in _quests.Values.Where(q => q.PlayerId == playerId && q.Kind == "tauntEx" && q.Status == "active" && q.TargetActorId == targetId).ToArray())
+            foreach (var quest in _quests.Values.Where(q => q.PlayerId == playerId && q.Kind == "tauntEx" && q.Status == "active" && q.DeadlineUtc > _probulatorClock.GetUtcNow() && q.TargetActorId == targetId).ToArray())
             {
                 var ready = quest with { Status = "ready", Progress = 1, Description = $"You taunted {quest.TargetName}. Return to {quest.GiverName} for your reward." };
                 _quests[(playerId, quest.Id)] = ready;

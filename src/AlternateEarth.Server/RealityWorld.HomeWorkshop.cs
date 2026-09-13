@@ -55,7 +55,7 @@ public sealed partial class RealityWorld
                 var account=ValidateWorkshopAccess(playerId);var current=WorkshopFor(account);
                 var upgrade=HomeUpgradeCatalog.All.SingleOrDefault(u=>u.Id==upgradeId) ?? throw new InvalidOperationException("Unknown Home upgrade.");
                 if(current.Installed.Contains(upgradeId))throw new InvalidOperationException("This permanent upgrade is already installed.");
-                var player=_players[playerId];var cost=player.GodMode?0:upgrade.PriceCents;
+                var player=_players[playerId];var cost=PlayerPaysForPurchases(player)?upgrade.PriceCents:0;
                 if(player.WalletCents<cost)throw new InvalidOperationException("You do not have enough money for this Home upgrade.");
                 var next=current with{Installed=[..current.Installed,upgradeId],FilterUsesRemaining=upgradeId=="waterPurifier"?50:current.FilterUsesRemaining};
                 var paid=player with{WalletCents=player.WalletCents-cost,Version=player.Version+1};

@@ -81,13 +81,13 @@ public sealed partial class RealityWorld
             if (listing.Quantity < request.Quantity) throw new InvalidOperationException("The shop no longer has that many available.");
             var total = checked(listing.UnitPriceCents * request.Quantity);
             var buyer = _players[playerId];
-            if (!buyer.GodMode && buyer.WalletCents < total) throw new InvalidOperationException("You do not have enough money.");
+            if (PlayerPaysForPurchases(buyer) && buyer.WalletCents < total) throw new InvalidOperationException("You do not have enough money.");
             if (!CanAddToBackpack(playerId, new[] { InventoryStack(listing.ItemType, request.Quantity, quality: listing.Quality) }, out var capacityMessage)) throw new InvalidOperationException(capacityMessage);
 
             var remaining = listing.Quantity - request.Quantity;
             await _store.SaveHomeShopListingAsync(access.OwnerAccountId, Configuration.Id, listing with { Quantity = remaining }, cancellationToken);
             AddInventory(playerId, listing.ItemType, request.Quantity, listing.Quality);
-            buyer = buyer with { WalletCents = buyer.GodMode ? buyer.WalletCents : buyer.WalletCents - total, Version = buyer.Version + 1 };
+            buyer = buyer with { WalletCents = PlayerPaysForPurchases(buyer) ? buyer.WalletCents - total : buyer.WalletCents, Version = buyer.Version + 1 };
             await SaveInventoryAsync(playerId, cancellationToken);
             await SavePlayerAsync(buyer, cancellationToken);
 

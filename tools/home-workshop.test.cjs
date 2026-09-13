@@ -45,3 +45,13 @@ test('recipe book reports output quantities and batch counts from combined suppl
  assert.match(recipes.summary({level:1,successChance:.5,maximumCraftable:3,outputQuantity:12},1),/Can make 36.*3 batches/);
  assert.match(recipes.summary({level:1,successChance:.5,maximumCraftable:0,outputQuantity:1},1),/Can make 0/);
 });
+
+test('free purchases enable Home upgrades with an empty wallet while preserving installed and ownership rules',()=>{
+ const {api,element}=harness('home-workshop.js'),container=element();
+ const model={catalog:[{id:'spiceRack',name:'Spice rack',stationType:'stove',priceCents:7500}],progress:{installed:[]}};
+ const button=()=>container.children[1].children[1];
+ api.render(container,model,{walletCents:0},true,()=>{},()=>{});assert.equal(button().disabled,true);
+ api.render(container,model,{walletCents:0,freePurchases:true},true,()=>{},()=>{});assert.equal(button().disabled,false);
+ api.render(container,model,{walletCents:0,freePurchases:true},false,()=>{},()=>{});assert.equal(button().disabled,true);
+ model.progress.installed=['spiceRack'];api.render(container,model,{walletCents:0,freePurchases:true},true,()=>{},()=>{});assert.equal(button().disabled,true);
+});

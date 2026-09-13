@@ -20,7 +20,7 @@
       for(const upgrade of workshop.catalog.filter(u=>u.stationType===station)){
         const row=document.createElement('div'),label=document.createElement('div'),name=document.createElement('strong'),detail=document.createElement('small'),button=document.createElement('button');
         const installed=workshop.progress.installed.includes(upgrade.id);row.className='home-upgrade-row';name.textContent=upgrade.name;detail.textContent=effects(upgrade);label.append(name,detail);
-        button.type='button';button.textContent=installed?'Installed':`Buy · $${(upgrade.priceCents/100).toLocaleString()}`;button.disabled=installed||!canEdit||(!player?.godMode&&(player?.walletCents||0)<upgrade.priceCents);
+        button.type='button';button.textContent=installed?'Installed':`Buy · $${(upgrade.priceCents/100).toLocaleString()}`;button.disabled=installed||!canEdit||(!player?.godMode&&!player?.freePurchases&&(player?.walletCents||0)<upgrade.priceCents);
         button.addEventListener('click',()=>{button.disabled=true;buy(upgrade.id);});row.append(label,button);container.append(row);
         if(upgrade.id==='waterPurifier'&&installed){
           const controls=document.createElement('div'),count=document.createElement('span'),dispense=document.createElement('button'),replace=document.createElement('button');controls.className='purifier-controls';count.textContent=`Filter: ${workshop.progress.filterUsesRemaining} / 50 uses remaining · ${workshop.storedFilters} spare(s) in Home storage`;

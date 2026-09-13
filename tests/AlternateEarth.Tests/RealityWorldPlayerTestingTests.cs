@@ -6,6 +6,22 @@ namespace AlternateEarth.Tests;
 
 public sealed partial class RealityWorldTests
 {
+    [Fact]
+    public async Task FreePurchasesAllowHomeUpgradeWithEmptyWalletAndCanBeTurnedOff()
+    {
+        var (world, _, _) = await CreateCraftingTestWorld();
+        var player=world.CreateSnapshot().Players.Single(p=>p.Id=="crafter") with { GodMode=false, WalletCents=0 };
+        ScubaPlayer(world,player);
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>world.BuyHomeUpgradeAsync(player.Id,"spiceRack"));
+        await world.UpdatePlayerTestingAsync(player.Id,new PlayerTestingSettings(CantSpendMoreThanTheyHave:false));
+        var purchased=await world.BuyHomeUpgradeAsync(player.Id,"spiceRack");
+        Assert.Equal(0,purchased.WalletCents);
+        Assert.Contains("spiceRack",world.GetPrivateState(player.Id).HomeWorkshop!.Progress.Installed);
+        await world.UpdatePlayerTestingAsync(player.Id,new PlayerTestingSettings());
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>world.BuyHomeUpgradeAsync(player.Id,"waterPurifier"));
+        Assert.Equal(0,world.CreateSnapshot().Players.Single(p=>p.Id==player.Id).WalletCents);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -60,6 +76,8 @@ public sealed partial class RealityWorldTests
         var defaults = world.GetPrivateState("crafter").PlayerTesting!;
         Assert.False(defaults.CantTeleport);
         Assert.True(defaults.CanDie);
+        Assert.True(defaults.CantSpendMoreThanTheyHave);
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<PlayerTestingSettings>("{}")!.CantSpendMoreThanTheyHave);
         Assert.True(defaults.ConsumesAmmo);
         Assert.True(defaults.ConsumesCraftingMaterials);
         Assert.True(defaults.ConsumesAirWhenSwimming);
@@ -73,6 +91,7 @@ public sealed partial class RealityWorldTests
 
         var testing = defaults with
         {
+            CantSpendMoreThanTheyHave = false,
             CantTeleport = true,
             CanDie = false,
             ConsumesAmmo = false,

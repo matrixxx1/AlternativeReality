@@ -29,7 +29,7 @@ public sealed partial class RealityWorld
             var actor = FindActor(key.Player, key.Actor);
             if (expires <= now || !_players.TryGetValue(key.Player, out var player) || actor is null || actor.HealthHearts <= 0 ||
                 player.LocationId != actor.LocationId || player.Position.Distance2D(actor.Position) > 6)
-                _conversations.TryRemove(key, out _);
+                EndAiNpcDialogue(key.Player, key.Actor);
             else actors.Add(key.Actor);
         }
         return actors;

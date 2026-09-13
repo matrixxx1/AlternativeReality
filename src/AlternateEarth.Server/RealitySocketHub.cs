@@ -352,6 +352,17 @@ public sealed class RealitySocketHub
                         _world.UpdateConversation(characterId, conversationActorId, conversationActive);
                         if (!conversationActive) _world.EndAiNpcDialogue(characterId, conversationActorId);
                         break;
+                    case "npcDialogueOpen":
+                    case "npcDialogueHistory":
+                        var historyActor = root.GetProperty("actorId").GetString() ?? string.Empty;
+                        var historyBefore = root.TryGetProperty("beforeSequence", out var beforeValue) && beforeValue.TryGetInt64(out var beforeNumber) ? (long?)beforeNumber : null;
+                        _world.OpenAiNpcDialogue(characterId, historyActor);
+                        _ = HandleNpcHistoryAsync(characterId, connection, historyActor, root.GetProperty("openId").GetString(), historyBefore, cancellationToken);
+                        break;
+                    case "searchAiQuest":
+                        var searched = await _world.SearchAiQuestAsync(characterId, root.GetProperty("questId").GetString() ?? "", cancellationToken);
+                        await connection.SendAsync(new { type = "questUpdated", quest = searched.Quest, privateState = searched.PrivateState, message = searched.Message }, cancellationToken);
+                        break;
                     case "npcDialogue":
                         var npcDialogue = root.Deserialize<NpcDialogueRequest>(SharedJson.Options)!;
                         _ = HandleNpcDialogueAsync(characterId, connection, npcDialogue, cancellationToken);
@@ -694,12 +705,35 @@ public sealed class RealitySocketHub
         }
     }
 
+    private async Task HandleNpcHistoryAsync(string characterId, ClientConnection connection, string actorId, string? openId, long? before, CancellationToken token)
+    {
+        try
+        {
+            string? warning = null;
+            if (before is null)
+            {
+                try { await _world.ImportAiNpcHistoryAsync(characterId, actorId, _localAi, token); }
+                catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException)
+                { if (token.IsCancellationRequested) return; warning = "Older AI-server history is unavailable. Saved game messages are shown."; }
+            }
+            var history = await _world.LoadAiNpcHistoryAsync(characterId, actorId, before, token);
+            await connection.SendAsync(new { type = "npcDialogueHistory", actorId, openId, older = before is not null, history, warning }, token);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or OperationCanceledException or WebSocketException)
+        {
+            if (token.IsCancellationRequested) return;
+            try { await connection.SendAsync(new { type = "npcDialogueHistoryError", actorId, openId, message = ex.Message }, token); }
+            catch (Exception sendError) when (sendError is OperationCanceledException or WebSocketException) { }
+        }
+    }
+
     private async Task HandleNpcDialogueAsync(string characterId, ClientConnection connection, NpcDialogueRequest request, CancellationToken cancellationToken)
     {
         try
         {
             var prepared = _world.BeginAiNpcDialogue(characterId, request);
-            await connection.SendAsync(new { type = "npcDialoguePending", actorId = prepared.ActorId, interactionId = prepared.InteractionId }, cancellationToken);
+            await connection.SendAsync(new { type = "npcDialoguePending", actorId = prepared.ActorId, interactionId = prepared.InteractionId, timeoutSeconds = _localAi.RequestTimeoutSeconds }, cancellationToken);
+            await _world.SaveAiNpcPlayerMessageAsync(characterId, prepared.ActorId, prepared.InteractionId, request.Message, cancellationToken);
             var proposed = prepared.ImmediateResult ?? await _localAi.CompleteAsync(prepared.Turn!, cancellationToken);
             var applied = await _world.ApplyAiNpcDialogueAsync(characterId, prepared.ActorId, prepared.InteractionId, proposed, cancellationToken);
             await connection.SendAsync(new
@@ -707,7 +741,7 @@ public sealed class RealitySocketHub
                 type = "npcDialogueResult", actorId = prepared.ActorId, interactionId = prepared.InteractionId,
                 dialogue = applied.Result.Dialogue, playerIntent = applied.Result.PlayerIntent, npcIntent = applied.Result.NpcIntent,
                 relationshipDelta = applied.Result.RelationshipDelta, endConversation = applied.Result.EndConversation,
-                reasonCode = applied.Result.ReasonCode, usedAi = applied.Result.UsedAi, relationship = applied.Relationship
+                reasonCode = applied.Result.ReasonCode, usedAi = applied.Result.UsedAi, farewell = applied.Result.Farewell, relationship = applied.Relationship, questInteraction = applied.QuestInteraction
             }, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }

@@ -10,6 +10,8 @@ public sealed partial class RealityWorld
     private PlayerTestingSettings TestingSettings(string playerId) =>
         _playerTesting.GetValueOrDefault(playerId) ?? new PlayerTestingSettings();
 
+    private bool PlayerPaysForPurchases(PlayerState player) => !player.GodMode && TestingSettings(player.Id).CantSpendMoreThanTheyHave;
+
     private bool LegacyGodMode(string playerId) => _players.GetValueOrDefault(playerId)?.GodMode == true;
     private bool PlayerCanDie(string playerId) => !LegacyGodMode(playerId) && TestingSettings(playerId).CanDie;
     private bool PlayerConsumesAmmo(string playerId) => !LegacyGodMode(playerId) && TestingSettings(playerId).ConsumesAmmo;

@@ -382,8 +382,10 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         Assert.Equal(3, world.LoadedAreaCount);
     }
 
-    [Fact]
-    public async Task GodModePurchasesBaseAtDisplayedPriceWithoutSpendingWalletFunds()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FreePurchasesBaseAtDisplayedPriceWithoutSpendingWalletFunds(bool godMode)
     {
         var configuration = new RealityConfiguration("base-purchase", "Base Purchase", 20, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var region = configuration.Area.Region;
@@ -394,6 +396,10 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         await store.CreateAccountAsync(new AccountRecord("buyer-account", "Buyer", "hash", "salt", "token", "buyer"), "Buyer");
         var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(firstBuilding, secondBuilding)), new FixedWeatherProvider(), store);
         await world.InitializeAsync();
+        // This fixture tests residential purchases, not generated commercial POIs.
+        var entities=(System.Collections.Concurrent.ConcurrentDictionary<string,CanonicalEntity>)typeof(RealityWorld).GetField("_baseEntities",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(world)!;
+        foreach(var poi in entities.Values.Where(e=>e.Kind==EntityKind.PointOfInterest).ToArray())entities.TryRemove(poi.Id,out _);
+        foreach(var house in entities.Values.Where(e=>e.Kind==EntityKind.Building).ToArray())entities[house.Id]=house with { Properties=new Dictionary<string,string>{["building"]="house"} };
         var player = await world.JoinAsync("buyer", "Buyer", "buyer-account");
         var originalBase = world.GetPrivateState(player.Id).Base!.BuildingId;
         var targetBuilding = world.CreateSnapshot().BaseEntities.Single(entity => entity.Kind == EntityKind.Building && entity.Id != originalBase);
@@ -405,7 +411,8 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         var insufficient = await Assert.ThrowsAsync<InvalidOperationException>(() => world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(targetDoor.Id)));
         var expectedPrice = RealityWorld.CalculateBuildingPriceCents(targetBuilding);
         Assert.Contains($"${expectedPrice / 100m:N2}", insufficient.Message);
-        var before = await world.SetGodModeAsync(player.Id, true);
+        var before = await world.SetGodModeAsync(player.Id, godMode);
+        if(!godMode)await world.UpdatePlayerTestingAsync(player.Id,new PlayerTestingSettings(CantSpendMoreThanTheyHave:false));
         var purchased = await world.PurchaseBaseAsync(player.Id, new PurchaseBaseRequest(targetDoor.Id));
 
         Assert.Equal(expectedPrice, purchased.PriceCents);
@@ -1137,8 +1144,10 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.UpdateServerEventConfigurationAsync(admin.Id, request with { ServerTimeMode = "frozen" }));
     }
 
-    [Fact]
-    public async Task PurchasedAreaMapRevealsCurrentBlockAndPersists()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PurchasedAreaMapRevealsCurrentBlockAndPersists(bool godMode)
     {
         var configuration = new RealityConfiguration("map-purchase", "Map Purchase", 44, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
         var store = new SqliteRealityStore(Path.Combine(_directory, "map-purchase.db"));
@@ -1158,7 +1167,8 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
 
         player = await world.SetGodModeAsync(player.Id, false);
         await Assert.ThrowsAsync<InvalidOperationException>(() => world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine("areaMap", 1) })));
-        player = await world.SetGodModeAsync(player.Id, true);
+        player = await world.SetGodModeAsync(player.Id, godMode);
+        if(!godMode)await world.UpdatePlayerTestingAsync(player.Id,new PlayerTestingSettings(CantSpendMoreThanTheyHave:false));
         var purchase = await world.ConfirmTradeAsync(player.Id, new ConfirmTradeRequest(merchant.Id, new[] { new PurchaseLine("areaMap", 1) }));
         Assert.Equal(player.WalletCents, purchase.Player.WalletCents);
         var expectedArea = world.AreaKeyFor(merchant.Position.X, merchant.Position.Y);

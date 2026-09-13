@@ -7,6 +7,9 @@ public sealed partial class RealityWorld
 {
     private QuestState WithQuestStage(QuestState quest)
     {
+        if (quest.Kind == "aiSearch" && quest.Status == "active" && quest.AiQuest is { } search)
+            return quest with { NextStagePosition = search.Position, NextStageName = "Search spot: " + quest.TargetName, NextStageLocationId = "outdoor" };
+        if (quest.Kind == "aiPhoto" && AiQuestPhotograph(quest.PlayerId, quest) is not null) quest = quest with { Status = "ready" };
         var id = quest.Status == "ready" ? quest.GiverId : quest.ObjectiveActorIds?.FirstOrDefault(_actors.ContainsKey) ?? quest.DestinationActorId ?? quest.TargetActorId ?? quest.GiverId;
         var actor = FindActor(quest.PlayerId, id);
         var entity = _baseEntities.GetValueOrDefault(id);
@@ -114,6 +117,7 @@ public sealed partial class RealityWorld
                 if (quest.Kind == "courier") RemoveInventory(playerId, QuestPackageItem(quest), 1);
                 if (quest.Kind == "drugDelivery") RemoveInventory(playerId, QuestDrugItem(quest), 1);
                 if (quest.Kind == "missingPet") RemoveInventory(playerId, QuestPetItem(quest), 1);
+                if (quest.AiQuest?.Action == "find_item") RemoveInventory(playerId, quest.RequiredItemType!, quest.RequiredQuantity);
                 var failed = quest with { Status = "failed", FailedAtUtc = now };
                 _quests[(playerId, quest.Id)] = failed;
                 await SaveInventoryAsync(playerId, token);

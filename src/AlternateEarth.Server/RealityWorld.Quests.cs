@@ -59,6 +59,12 @@ public sealed partial class RealityWorld
             throw new InvalidOperationException("Return to the quest giver to accept this quest.");
         if (_quests.Values.Any(q => q.PlayerId == playerId && q.GiverId == giver.Id && q.Status is "active" or "ready"))
             throw new InvalidOperationException("Finish or abandon this character's current quest first.");
+        if (offered.AiQuest is { } ai)
+        {
+            if (ai.OfferedAtUtc.AddMinutes(10) <= _probulatorClock.GetUtcNow()) throw new InvalidOperationException("That mini quest offer expired. Ask for a new quest.");
+            if (_quests.Values.Count(q => q.PlayerId == playerId && q.AiQuest is not null && q.Status is "active" or "ready") >= 3) throw new InvalidOperationException("Finish an active mini quest first (maximum three).");
+            offered = offered with { AiQuest = ai with { AcceptedAtUtc = _probulatorClock.GetUtcNow() }, DeliveryMinutes = 10 };
+        }
         if (offered.Kind == "foodDelivery") return await AcceptFoodDeliveryCoreAsync(playerId, offered, cancellationToken);
         if (offered.Kind is "courier" or "drugDelivery")
         {
@@ -68,7 +74,7 @@ public sealed partial class RealityWorld
             await SaveInventoryAsync(playerId, cancellationToken);
             if (offered.Kind == "drugDelivery") { EnsureDrugQuestPolice(playerId); await AlertPoliceToDrugHandoffAsync(playerId, _players[playerId].Position, cancellationToken); }
         }
-        var accepted = offered with { Status = "active", DeadlineUtc = _probulatorClock.GetUtcNow().AddMinutes(offered.DeliveryMinutes ?? 60) };
+        var accepted = offered with { Status = "active", DeadlineUtc = (offered.AiQuest?.AcceptedAtUtc ?? _probulatorClock.GetUtcNow()).AddMinutes(offered.DeliveryMinutes ?? 60) };
         _quests[(playerId, accepted.Id)] = accepted;
         if (accepted.Kind.StartsWith("adventure:")) { EnsureAdventureSubject(accepted); if(accepted.Kind is "adventure:roll" or "adventure:deliveries" or "adventure:ghost") {AddInventory(playerId,AdventureSupply(accepted),accepted.Kind=="adventure:deliveries"?3:1);await SaveInventoryAsync(playerId,cancellationToken);} }
         await _store.SaveQuestAsync(Configuration.Id, accepted, cancellationToken);
@@ -100,9 +106,14 @@ public sealed partial class RealityWorld
             _questDialogue.Enqueue(new($"delivery-rejected:{quest.Id}", actor.Id, actor.Name, complaint, _probulatorClock.GetUtcNow()));
             return await FailFoodDeliveryCoreAsync(quest with { DeliveryRefused = true }, _probulatorClock.GetUtcNow(), $"{actor.Name}: {complaint} Delivery failed because the food was damaged. {actor.Name} is now hostile!", cancellationToken);
         }
+        if (quest.Kind == "aiPhoto")
+        {
+            var photograph = AiQuestPhotograph(playerId, quest);
+            if (photograph is null || !RemoveInventory(playerId, photograph, 1)) throw new InvalidOperationException("Bring the new photograph of the requested target.");
+        }
         if (quest.Kind == "drugDelivery") player = await AlertPoliceToDrugHandoffAsync(playerId, player.Position, cancellationToken);
 
-        if (quest.Kind == "item" && !RemoveInventory(playerId, quest.RequiredItemType!, quest.RequiredQuantity)) throw new InvalidOperationException("The requested item is no longer in your backpack.");
+        if (quest.Kind is "item" or "aiSearch" && !RemoveInventory(playerId, quest.RequiredItemType!, quest.RequiredQuantity)) throw new InvalidOperationException("The requested item is no longer in your backpack.");
         if (quest.Kind is "courier" or "missingPet" or "drugDelivery")
         {
             var carried = quest.Kind == "courier" ? QuestPackageItem(quest) : quest.Kind == "drugDelivery" ? QuestDrugItem(quest) : QuestPetItem(quest);
@@ -140,6 +151,7 @@ public sealed partial class RealityWorld
         if (quest.Kind == "courier") RemoveInventory(playerId, QuestPackageItem(quest), 1);
         if (quest.Kind == "drugDelivery") RemoveInventory(playerId, QuestDrugItem(quest), 1);
         if (quest.Kind == "missingPet") RemoveInventory(playerId, QuestPetItem(quest), 1);
+        if (quest.AiQuest?.Action == "find_item") RemoveInventory(playerId, quest.RequiredItemType!, quest.RequiredQuantity);
         var abandoned = quest with { Status = "abandoned" };
         _quests[(playerId, quest.Id)] = abandoned;
         await SaveInventoryAsync(playerId, cancellationToken);
@@ -151,7 +163,7 @@ public sealed partial class RealityWorld
     {
         if (!_players.TryGetValue(playerId, out var player)) throw new InvalidOperationException("Unknown player.");
         var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
-            .FirstOrDefault(item => item.Kind == "missingPet" && item.Status == "active" && item.TargetActorId == actorId)
+            .FirstOrDefault(item => item.Kind == "missingPet" && (item.Status == "active" && (item.DeadlineUtc is null || item.DeadlineUtc > _probulatorClock.GetUtcNow())) && item.TargetActorId == actorId)
             ?? throw new InvalidOperationException("That animal is not a pet from one of your active quests.");
         var pet = FindActor(playerId, actorId) ?? throw new InvalidOperationException("The missing pet is no longer here.");
         if (player.Position.Distance2D(pet.Position) > 3) throw new InvalidOperationException("Move within 3 meters to safely capture the pet.");
@@ -177,7 +189,7 @@ public sealed partial class RealityWorld
         if (player.Position.Distance2D(vegetation.Position) > swordRange) throw new InvalidOperationException($"Move within {swordRange:0.#} meters to use the sword.");
 
         var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
-            .FirstOrDefault(item => item.Kind == "chop" && item.Status == "active" && item.TargetActorId == entityId);
+            .FirstOrDefault(item => item.Kind == "chop" && (item.Status == "active" && (item.DeadlineUtc is null || item.DeadlineUtc > _probulatorClock.GetUtcNow())) && item.TargetActorId == entityId);
         string message; ChatMessage? witnessMessage = null;
         if (quest is not null)
         {
@@ -251,7 +263,7 @@ public sealed partial class RealityWorld
         }
         _lastPlayerAttack[(playerId, weapon)] = now;
         var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
-            .FirstOrDefault(item => item.Kind == "vandalizeCar" && item.Status == "active" && item.TargetActorId == entityId);
+            .FirstOrDefault(item => item.Kind == "vandalizeCar" && (item.Status == "active" && (item.DeadlineUtc is null || item.DeadlineUtc > _probulatorClock.GetUtcNow())) && item.TargetActorId == entityId);
         if (quest is not null)
         {
             var ready = quest with { Status = "ready", Progress = 1, Description = $"The target car was vandalized. Return to {quest.GiverName}." };
@@ -342,7 +354,7 @@ public sealed partial class RealityWorld
         {
             _pickedLocks[$"{playerId}:{doorId}:{CurrentDoorLockCycle}"] = 0;
             var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
-                .FirstOrDefault(item => item.Kind == "lockpick" && item.Status == "active" && item.TargetActorId == doorId);
+                .FirstOrDefault(item => item.Kind == "lockpick" && (item.Status == "active" && (item.DeadlineUtc is null || item.DeadlineUtc > _probulatorClock.GetUtcNow())) && item.TargetActorId == doorId);
             if (quest is not null)
             {
                 var ready = quest with { Status = "ready", Progress = 1, Description = $"The target building was unlocked. Return to {quest.GiverName}." };
@@ -378,7 +390,7 @@ public sealed partial class RealityWorld
     private async Task<QuestState?> RecordQuestKillAsync(string playerId, ActorState actor, CancellationToken cancellationToken)
     {
         var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
-            .FirstOrDefault(item => item.Status == "active" && item.TargetActorId == actor.Id && item.Kind is "hunt" or "missingPet");
+            .FirstOrDefault(item => (item.Status == "active" && (item.DeadlineUtc is null || item.DeadlineUtc > _probulatorClock.GetUtcNow())) && item.TargetActorId == actor.Id && item.Kind is "hunt" or "missingPet");
         if (quest is null) return null;
         var updated = quest.Kind == "missingPet"
             ? quest with { Status = "failed", Description = $"You killed {quest.TargetName}. {quest.GiverName} is furious." }
@@ -490,6 +502,8 @@ public sealed partial class RealityWorld
             "foodDelivery" => actorId == quest.DestinationActorId && quest.DeadlineUtc > _probulatorClock.GetUtcNow() &&
                 InventoryQuantity(playerId, QuestFoodItem(quest)) > 0 && quest.DeliveryRecipient is { } recipient &&
                 FindActor(playerId, actorId) is { HealthHearts: > 0 } target && target.Position.Distance2D(recipient.Position) <= 3,
+            "aiSearch" => actorId == quest.GiverId && quest.Status == "ready" && InventoryQuantity(playerId, quest.RequiredItemType!) >= quest.RequiredQuantity,
+            "aiPhoto" => actorId == quest.GiverId && AiQuestPhotograph(playerId, quest) is not null,
             "tauntEx" => actorId == quest.GiverId && quest.Status == "ready",
             "item" => actorId == quest.GiverId && InventoryQuantity(playerId, quest.RequiredItemType!) >= quest.RequiredQuantity,
             "hunt" => actorId == quest.GiverId && quest.Status == "ready",
@@ -507,7 +521,7 @@ public sealed partial class RealityWorld
     private async Task RecordMailboxVandalismAsync(string playerId, CancellationToken cancellationToken)
     {
         var quest = _quests.Where(pair => pair.Key.Player == playerId).Select(pair => pair.Value)
-            .FirstOrDefault(item => item.Kind == "vandalizeMailboxes" && item.Status == "active");
+            .FirstOrDefault(item => item.Kind == "vandalizeMailboxes" && (item.Status == "active" && (item.DeadlineUtc is null || item.DeadlineUtc > _probulatorClock.GetUtcNow())));
         if (quest is null) return;
         var progress = Math.Min(quest.RequiredQuantity, quest.Progress + 1);
         var ready = progress >= quest.RequiredQuantity;

@@ -51,7 +51,7 @@ public sealed partial class RealityWorld
             if (choice == "Offer food")
             { if (!RemoveInventory(playerId, "food", 1)) throw new InvalidOperationException("Bring food for this approach."); _adventureCalm[quest.Id] = _probulatorClock.GetUtcNow().AddSeconds(30); await SaveInventoryAsync(playerId, token); }
             if (choice is "Offer coins" or "Buy replacement" or "Support gnome army")
-            { var cost = choice == "Buy replacement" ? 2500 : 500; if (player.WalletCents < cost) throw new InvalidOperationException($"This choice costs ${cost / 100}."); await SavePlayerAsync(player with { WalletCents = player.WalletCents - cost, Version = player.Version + 1 }, token); }
+            { var cost = TestingSettings(playerId).CantSpendMoreThanTheyHave ? (choice == "Buy replacement" ? 2500 : 500) : 0; if (player.WalletCents < cost) throw new InvalidOperationException($"This choice costs ${cost / 100}."); await SavePlayerAsync(player with { WalletCents = player.WalletCents - cost, Version = player.Version + 1 }, token); }
             if (definition.Id == "deliveries" && !InsideInversion(player)) throw new InvalidOperationException("Deliver during a Reality inversion, inside its ring.");
             if (definition.Id is "photo" or "inspection") quest = RedeemPhotographs(playerId, quest);
             if (definition.Id == "watch" && _probulatorClock.GetUtcNow().ToUnixTimeSeconds() % 8 < 3)
@@ -113,7 +113,7 @@ public sealed partial class RealityWorld
             var subject = visibleActor ? actor!.Name : evidence switch { "inspection:barrier" => "Dungeon barrier", "inspection:water" => "Water crossing", "inspection:exit" => "Dungeon exit", _ => "Scenery" };
             var itemType = "photograph:" + Guid.NewGuid().ToString("N");
             _photographs[itemType] = new(evidence, subject, kind, visibleActor ? actor!.Subtype : evidence, player.LocationId, now,
-                thumbnailDataUrl is null ? null : "/api/photographs/" + itemType[11..]);
+                thumbnailDataUrl is null ? null : "/api/photographs/" + itemType[11..], playerId);
             var inventory = _inventories[playerId];
             lock (inventory)
             {
