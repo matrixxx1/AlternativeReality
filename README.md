@@ -23,6 +23,18 @@ In **Server Config → Player Testing**, **Player can't spend more than they hav
 
 Requires the .NET 8 SDK. The first run needs internet access to populate the geographic cache; subsequent runs use the cache.
 
+### Linux server
+
+On a Linux host with systemd and the .NET 8 SDK, deploy the same server and browser client as a user service:
+
+```bash
+bash tools/deploy-linux.sh
+```
+
+The script publishes the Release build, enables `alternative-reality.service`, and listens on port 5080. Open `http://<linux-host-ip>:5080`. Game data persists under `~/.local/share/AlternativeReality/data` across builds and restarts. Run the script again after source changes. Use `DOTNET_BIN=/path/to/dotnet bash tools/deploy-linux.sh` if the SDK is outside `PATH`.
+
+Check it with `systemctl --user status alternative-reality.service` or `journalctl --user -u alternative-reality.service -f`. Stop it with `systemctl --user stop alternative-reality.service`. The service starts at login; enable systemd user lingering if it must also start at boot before login. The first run still requires choosing a geographic location in the browser.
+
 ```powershell
 dotnet run --project src/AlternateEarth.Server
 ```
