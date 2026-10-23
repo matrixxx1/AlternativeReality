@@ -68,7 +68,16 @@ if ! systemctl --user enable --now alternative-reality.service; then
     exit 1
 fi
 
+# Tailscale Serve keeps the TLS certificate and renewal outside the game process.
+# This adds port 8443 without changing any existing Serve listener, including 443.
+if command -v tailscale >/dev/null 2>&1; then
+    tailscale serve --bg --https=8443 http://127.0.0.1:5080
+fi
+
 echo "AlternativeReality is installed at $install_dir"
 echo "Persistent data: $data_dir"
 echo "Service: systemctl --user status alternative-reality.service"
 echo "Open: http://$(hostname -I | awk '{print $1}'):5080"
+if command -v tailscale >/dev/null 2>&1; then
+    echo "HTTPS: see tailscale serve status (tailnet only, port 8443)"
+fi

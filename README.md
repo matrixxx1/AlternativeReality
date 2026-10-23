@@ -31,7 +31,9 @@ On a Linux host with systemd and the .NET 8 SDK, deploy the same server and brow
 bash tools/deploy-linux.sh
 ```
 
-The script publishes the Release build, enables `alternative-reality.service`, and listens on port 5080. Open `http://<linux-host-ip>:5080`. Game data persists under `~/.local/share/AlternativeReality/data` across builds and restarts. Run the script again after source changes. Use `DOTNET_BIN=/path/to/dotnet bash tools/deploy-linux.sh` if the SDK is outside `PATH`.
+The script publishes the Release build, enables `alternative-reality.service`, and listens on port 5080. Open `http://<linux-host-ip>:5080`. On a host with Tailscale, it also configures Tailscale Serve to proxy that port over HTTPS on tailnet port 8443. Tailscale manages its Let's Encrypt certificate and renewal; the script does not store a certificate or private key. This leaves any existing Tailscale Serve port 443 route intact. On ai-server, the HTTPS address is `https://ai-server.tailcb528a.ts.net:8443/` for devices in the tailnet. Check routing with `tailscale serve status`.
+
+Game data persists under `~/.local/share/AlternativeReality/data` across builds and restarts. Run the script again after source changes. Use `DOTNET_BIN=/path/to/dotnet bash tools/deploy-linux.sh` if the SDK is outside `PATH`.
 
 Check it with `systemctl --user status alternative-reality.service` or `journalctl --user -u alternative-reality.service -f`. Stop it with `systemctl --user stop alternative-reality.service`. The service starts at login; enable systemd user lingering if it must also start at boot before login. The first run still requires choosing a geographic location in the browser.
 
