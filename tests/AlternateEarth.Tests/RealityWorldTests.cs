@@ -21,6 +21,49 @@ public sealed partial class RealityWorldTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NewPlayerStarterGearPersistsOnReconnect()
+    {
+        var configuration = new RealityConfiguration("starter-test", "Starter Test", 17, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));
+        var region = configuration.Area.Region;
+        var building = new CanonicalEntity("test-building", EntityKind.Building, new WorldPosition(region, 20, 20),
+            new GeometryPoint[] { new(15, 15), new(25, 15), new(25, 25), new(15, 25), new(15, 15) },
+            new Dictionary<string, string> { ["building"] = "yes" });
+        var store = new SqliteRealityStore(Path.Combine(_directory, "starter.db"));
+        await store.InitializeAsync(configuration);
+        await store.CreateAccountAsync(new AccountRecord("starter-account", "StarterPlayer", "hash", "salt", "token", "starter-character"), "StarterPlayer");
+        var world = new RealityWorld(configuration, new DeterministicWorldGenerator(new FixedGeographicProvider(building)), new FixedWeatherProvider(), store);
+        await world.InitializeAsync();
+
+        var first = await world.JoinAsync("starter-character", "StarterPlayer", "starter-account");
+        var privateState = world.GetPrivateState(first.Id);
+
+        Assert.Equal("baseballBat", first.EquippedWeapon);
+        Assert.NotEqual("none", first.EquippedHat);
+        Assert.NotEqual("none", first.EquippedPants);
+        Assert.True(first.EquippedShirt == "tShirt" || first.EquippedShirt == "longSleeveShirt");
+
+        var inventory = await store.LoadInventoryAsync(first.Id);
+        Assert.Equal(1, inventory.Items.First(i => i.ItemType == "baseballBat").Quantity);
+        Assert.Equal(1, inventory.Items.First(i => i.ItemType == first.EquippedHat).Quantity);
+        Assert.Equal(1, inventory.Items.First(i => i.ItemType == first.EquippedShirt).Quantity);
+        Assert.Equal(1, inventory.Items.First(i => i.ItemType == first.EquippedPants).Quantity);
+
+        world.Leave(first.Id);
+        var reconnected = await world.JoinAsync("starter-character", "StarterPlayer", "starter-account");
+
+        Assert.Equal(first.EquippedWeapon, reconnected.EquippedWeapon);
+        Assert.Equal(first.EquippedHat, reconnected.EquippedHat);
+        Assert.Equal(first.EquippedShirt, reconnected.EquippedShirt);
+        Assert.Equal(first.EquippedPants, reconnected.EquippedPants);
+
+        var inventory2 = await store.LoadInventoryAsync(reconnected.Id);
+        Assert.Equal(1, inventory2.Items.First(i => i.ItemType == "baseballBat").Quantity);
+        Assert.Equal(1, inventory2.Items.First(i => i.ItemType == reconnected.EquippedHat).Quantity);
+        Assert.Equal(1, inventory2.Items.First(i => i.ItemType == reconnected.EquippedShirt).Quantity);
+        Assert.Equal(1, inventory2.Items.First(i => i.ItemType == reconnected.EquippedPants).Quantity);
+    }
+
+    [Fact]
     public async Task NewAccountStartsOutdoorsAndReconnectsAtPersistedOutdoorPosition()
     {
         var configuration = new RealityConfiguration("home-test", "Home Test", 17, new GeographicArea(new GeoCoordinate(45.5, -122.5), 500));

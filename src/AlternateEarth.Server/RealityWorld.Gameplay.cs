@@ -32,6 +32,7 @@ public sealed partial class RealityWorld
         new("ballBearing","Ball bearing","Slingshot ammunition",0,0,5,200,WeightPounds:.02),
         new("knife","Knife","Short melee weapon",2,1.6,2_000,4_000,true,true,WeightPounds:.6,Category:InventoryCategory.Weapon,Accuracy:.95,AttackIntervalSeconds:.35),
         new("hockeyStick","Hockey stick","Melee: physical damage only; craft with 3 wood",1.5,2.2,1500,3500,true,true,WeightPounds:1.5,Category:InventoryCategory.Weapon,Accuracy:.96,AttackIntervalSeconds:.6),
+        new("baseballBat","Baseball bat","Melee: light damage, low weight",1.5,2.0,500,1500,true,true,WeightPounds:1.0,Category:InventoryCategory.Weapon,Accuracy:.90,AttackIntervalSeconds:.5),
         new("iceSkate","Ice skate","Melee: physical damage, 3 seconds of bleeding, and knockback",3,1.8,2500,5500,true,true,WeightPounds:2,Category:InventoryCategory.Weapon,Accuracy:.95,AttackIntervalSeconds:.65),
         new("mapleSyrup","Maple syrup","Food: restores stamina and 2 hearts; +25% speed and +5 perception for 5 minutes",0,0,500,1500,false,WeightPounds:.5),
         new("canadianMoney","Canadian money","Maple-leaf currency; vendors pay exactly one penny each",0,0,1,1,false,WeightPounds:.001),
@@ -112,13 +113,13 @@ public sealed partial class RealityWorld
         },
         new Dictionary<TravelMode, double>
         {
-            [TravelMode.Walk] = 0, [TravelMode.Run] = 3.5, [TravelMode.Skateboard] = 0,
+            [TravelMode.Walk] = 7.0, [TravelMode.Run] = 3.5, [TravelMode.Skateboard] = 0,
             [TravelMode.Bike] = 0, [TravelMode.Raft] = 0, [TravelMode.DirtBike] = 0, [TravelMode.Motorcycle] = 0, [TravelMode.EBike] = 0, [TravelMode.Ufo] = 0
         });
     private MovementConfiguration _movementConfiguration = DefaultMovementConfiguration;
     private static readonly ServerEventConfiguration DefaultEventConfiguration = new();
     private ServerEventConfiguration _eventConfiguration = DefaultEventConfiguration;
-    private static readonly string[] WeaponPowerOrder = ["camera", .. HazardCatalog.Weapons.Select(item => item.ItemType), "probulator", "rocketLauncher", "machineGun", "ar15", "flamethrower", "grenade", "molotovCocktail", "rifle", "spearGun", "sword", "iceSkate", "hockeyStick", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
+    private static readonly string[] WeaponPowerOrder = ["camera", .. HazardCatalog.Weapons.Select(item => item.ItemType), "probulator", "rocketLauncher", "machineGun", "ar15", "flamethrower", "grenade", "molotovCocktail", "rifle", "spearGun", "sword", "iceSkate", "hockeyStick", "baseballBat", "pistol", "crossbow", "knife", "slingshot", "rock", "fist"];
     private static readonly HashSet<string> HatItems = new(["hat", "coolingHat", "warmHat"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> GloveItems = GloveCatalog.All.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> ShirtItems = new(["tShirt", "coolingShirt", "longSleeveShirt", "sweater", "lightJacket", "winterJacket", "fireproofJacket"], StringComparer.OrdinalIgnoreCase);
@@ -1193,7 +1194,7 @@ public sealed partial class RealityWorld
         baseDamage = WeaponDamageFor(playerId, weapon, baseDamage) * PlayerDamageMultiplier(playerId);
         var distance = player.Position.Distance2D(targetPosition);
         if (distance > range) throw new InvalidOperationException($"{targetName} is beyond the {range:0.#}-meter range of your {DisplayItem(weapon)}.");
-        var ranged = weapon is not ("fist" or "knife" or "sword" or "hockeyStick" or "iceSkate" or "zombieBite");
+        var ranged = weapon is not ("fist" or "knife" or "sword" or "hockeyStick" or "iceSkate" or "zombieBite" or "baseballBat");
         if (ranged)
         {
             var blocked = player.LocationId == "outdoor"
@@ -1971,7 +1972,7 @@ public sealed partial class RealityWorld
             if (target.Actor is null) continue;
             var actor = target.Actor; var distance = actor.Position.Distance2D(player.Position); var hostility = Math.Abs(target.Rating);
             var weapon = actor.EquippedWeapon is null or "none" ? "fist" : actor.EquippedWeapon;
-            var ranged = weapon is not ("fist" or "knife" or "sword" or "hockeyStick" or "iceSkate" or "zombieBite");
+            var ranged = weapon is not ("fist" or "knife" or "sword" or "hockeyStick" or "iceSkate" or "zombieBite" or "baseballBat");
             var weaponConfiguration = _itemConfigurations.GetValueOrDefault(weapon);
             var weaponRange = Math.Max(1.35, weaponConfiguration?.RangeMeters ?? 1.35);
             var lineBlocked = ranged && (player.LocationId == "outdoor"
@@ -1999,7 +2000,7 @@ public sealed partial class RealityWorld
             }
             if (_lastActorAttack.TryGetValue((actor.Id, player.Id), out var last) && now - last < TimeSpan.FromSeconds(3)) continue;
             _lastActorAttack[(actor.Id, player.Id)] = now;
-            if (player.TravelMode == TravelMode.Ufo && weapon is "fist" or "knife" or "sword" or "hockeyStick" or "iceSkate") continue;
+            if (player.TravelMode == TravelMode.Ufo && weapon is "fist" or "knife" or "sword" or "hockeyStick" or "iceSkate" or "baseballBat") continue;
             if (ranged && lineBlocked) continue;
             var configuredAccuracy = Math.Clamp(weaponConfiguration?.Accuracy ?? 1, 0, 1);
             var hitChance = Math.Clamp(configuredAccuracy * (1 - Math.Clamp(distance / weaponRange, 0, 1) * .7), .01, 1);

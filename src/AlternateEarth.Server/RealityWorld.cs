@@ -277,6 +277,24 @@ public sealed partial class RealityWorld
         var inventory = await _store.LoadInventoryAsync(characterId, cancellationToken);
         RestorePhotographs(inventory.Items);
         _inventories[characterId] = inventory.Items.ToDictionary(item => item.ItemType, item => item.Quantity, StringComparer.OrdinalIgnoreCase);
+        if (existing is null)
+        {
+            // Add baseball bat
+            var bat = "baseballBat";
+            if (!_inventories[characterId].ContainsKey(bat)) _inventories[characterId][bat] = 1;
+            // Random hat, shirt, pants
+            var hat = HatItems.ElementAt(_actorRandom.Next(HatItems.Count));
+            var shirtCandidates = ShirtItems.Where(s => s == "tShirt" || s == "longSleeveShirt").ToList();
+            var shirt = shirtCandidates[_actorRandom.Next(shirtCandidates.Count)];
+            var pants = PantsItems.ElementAt(_actorRandom.Next(PantsItems.Count));
+            if (!_inventories[characterId].ContainsKey(hat)) _inventories[characterId][hat] = 1;
+            if (!_inventories[characterId].ContainsKey(shirt)) _inventories[characterId][shirt] = 1;
+            if (!_inventories[characterId].ContainsKey(pants)) _inventories[characterId][pants] = 1;
+            // Equip
+            player = player with { EquippedWeapon = bat, EquippedHat = hat, EquippedShirt = shirt, EquippedPants = pants, HatOn = hat == "hat" };
+            _players[characterId] = player;
+            await SaveInventoryAsync(characterId, cancellationToken);
+        }
         if (!string.IsNullOrWhiteSpace(accountId)) await ParkCarriedVehiclesAsync(characterId, accountId, cancellationToken);
         foreach (var item in inventory.Items.Where(item => !string.IsNullOrWhiteSpace(item.Quality)))
             _weaponQualities[(characterId, item.ItemType)] = item.Quality!;
