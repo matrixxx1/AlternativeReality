@@ -68,6 +68,34 @@ if ! systemctl --user enable --now alternative-reality.service; then
     exit 1
 fi
 
+# Wait for service readiness
+timeout=180
+elapsed=0
+while true; do
+    if ! systemctl --user is-active --quiet alternative-reality.service; then
+        echo "Service exited prematurely" >&2
+        break
+    fi
+    status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5080/api/reality/setup || echo "")
+    if [ "$status" = "200" ]; then
+        break
+    fi
+    sleep 1
+    elapsed=$((elapsed+1))
+    if [ "$elapsed" -ge "$timeout" ]; then
+        echo "Timeout waiting for service readiness" >&2
+        break
+    fi
+done
+
+if [ "$elapsed" -ge "$timeout" ] || ! systemctl --user is-active --quiet alternative-reality.service; then
+    systemctl --user stop alternative-reality.service || true
+    rm -rf "$install_dir"
+    if [[ -d "$backup_dir" ]]; then mv "$backup_dir" "$install_dir"; fi
+    if [[ "$was_running" == true ]]; then systemctl --user start alternative-reality.service; fi
+    exit 1
+fi
+
 # Tailscale Serve keeps the TLS certificate and renewal outside the game process.
 # This adds port 8443 without changing any existing Serve listener, including 443.
 if command -v tailscale >/dev/null 2>&1; then
